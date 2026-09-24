@@ -1,12 +1,15 @@
 # make.py: a synthetic VRChat avatar project, to test unity2hypr3d on what the robot sample lacks
 #   blender -b --factory-startup --python-exit-code 1 -P make.py -- PROJ
 # SynthAvatar.prefab: unpacked (every object written out); SynthVariant.prefab: a variant of the FBX
-import bpy, bmesh, sys, os, math, hashlib, random, shutil, struct, json
+import bpy, bmesh, sys, os, math, hashlib, shutil, struct, json
 import numpy as np
 from mathutils import Matrix, Vector, Quaternion
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import unity2hypr3d as u
+import unitygen
+from unitygen import F, R, V, Q, C, emit, HEAD, doc, base, native, write_psd
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 PROJ = os.path.abspath(argv[0] if argv else 'proj')
@@ -24,92 +27,7 @@ def G(key):
     return hashlib.md5(('synth/' + key).encode()).hexdigest()
 
 
-rnd = random.Random(7)
-
-
-def newid():
-    return rnd.getrandbits(63) - (1 << 62)  # like Unity's: big, of either sign
-
-
-# ---------------------------------------------------------------- Unity YAML out
-
-class F(dict):
-    """a flow map: {fileID: 0}"""
-
-
-def R(fid, g=None, t=None):
-    return F(fileID=fid) if g is None else F(fileID=fid, guid=g, type=t)
-
-
-def V(x, y, z):
-    return F(x=x, y=y, z=z)
-
-
-def Q(x, y, z, w):
-    return F(x=x, y=y, z=z, w=w)
-
-
-def C(r, g, b, a=1.0):
-    return F(r=r, g=g, b=b, a=a)
-
-
-def fmt(v):
-    if isinstance(v, bool):
-        return '1' if v else '0'
-    if isinstance(v, int):
-        return str(v)
-    if isinstance(v, float):
-        if v == int(v) and abs(v) < 1e15:
-            return str(int(v))
-        return '%.9g' % v
-    return str(v)
-
-
-def flow(d):
-    return '{' + ', '.join('%s: %s' % (k, flow(v) if isinstance(v, dict) else fmt(v)) for k, v in d.items()) + '}'
-
-
-def emit(d, ind=0):
-    out, pad = [], ' ' * ind
-    for k, v in d.items():
-        if isinstance(v, F):
-            out.append('%s%s: %s' % (pad, k, flow(v)))
-        elif isinstance(v, dict):
-            if not v:
-                out.append('%s%s: {}' % (pad, k))
-            else:
-                out.append('%s%s:' % (pad, k))
-                out += emit(v, ind + 2)
-        elif isinstance(v, list):
-            if not v:
-                out.append('%s%s: []' % (pad, k))
-                continue
-            out.append('%s%s:' % (pad, k))
-            for it in v:
-                if isinstance(it, F):
-                    out.append('%s- %s' % (pad, flow(it)))
-                elif isinstance(it, dict):
-                    sub = emit(it, ind + 2)
-                    sub[0] = pad + '- ' + sub[0][ind + 2:]
-                    out += sub
-                else:
-                    out.append('%s- %s' % (pad, fmt(it)))
-        else:
-            out.append('%s%s: %s' % (pad, k, fmt(v)))
-    return out
-
-
-HEAD = '%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n'
-
-
-def doc(cls, fid, kind, body, stripped=False):
-    return '--- !u!%d &%d%s\n%s:\n%s\n' % (cls, fid, ' stripped' if stripped else '', kind, '\n'.join(emit(body, 2)))
-
-
-def base(**kw):
-    d = {'m_ObjectHideFlags': 0, 'm_CorrespondingSourceObject': R(0), 'm_PrefabInstance': R(0), 'm_PrefabAsset': R(0)}
-    d.update(kw)
-    return d
+newid = unitygen.Ids(7)  # fileIDs like Unity's: big, of either sign
 
 
 def write(rel, data, guid, importer, imp=None):
@@ -122,11 +40,6 @@ def write(rel, data, guid, importer, imp=None):
     with open(path + '.meta', 'w') as f:
         f.write('\n'.join(emit(meta)) + '\n')
     return path
-
-
-def native(main):
-    return {'externalObjects': {}, 'mainObjectFileID': main, 'userData': '', 'assetBundleName': '',
-            'assetBundleVariant': ''}
 
 
 # ---------------------------------------------------------------- the model, in Blender
@@ -378,19 +291,6 @@ skin(hairm, ['Head', 'Hair_1', 'Hair_1.001', 'Hair_1.002'])
 # ---------------------------------------------------------------- textures
 
 TEX = {}
-
-
-def write_psd(path, arr):
-    """a flat Photoshop file, as Blender cannot write one: RGB, or RGBA when there is transparency"""
-    import struct
-    h, w = arr.shape[:2]
-    ch = 4 if (arr[..., 3] < 1).any() else 3
-    data = (np.clip(arr[::-1, :, :ch], 0, 1) * 255 + 0.5).astype(np.uint8)  # rows top down
-    with open(path, 'wb') as f:
-        f.write(b'8BPS' + struct.pack('>H6xHIIHH', 1, ch, h, w, 8, 3))
-        f.write(struct.pack('>IIIH', 0, 0, 0, 0))  # no palette, resources or layers; raw data
-        for c in range(ch):
-            f.write(np.ascontiguousarray(data[..., c]).tobytes())
 
 
 def png(name, w, h, fn, ext='png', **meta):
@@ -1121,16 +1021,11 @@ print('synth: wrote %s: SynthAvatar.prefab (unpacked), SynthVariant.prefab (a va
 # Outfit.prefab: the outfit with no MA setup, for --outfit.
 
 import copy as _copy
-MA_GUID = {'MergeArmature': '2df373bf91cf30b4bbd495e11cb1a2ec', 'BoneProxy': '42581d8044b64899834d3d515ab3a144',
-           'MoveTo': '4e6bb6a99e499d2489ccf296662fa3cd', 'MenuItem': '3b29d45007c5493d926d2cd45a489529',
-           'ObjectToggle': 'a162bb8ec7e24a5abcf457887f1df3fa', 'MergeAnimator': '1bb122659f724ebf85fe095ac02dc339',
-           'MenuInstaller': '7ef83cb0c23d4d7c9d41021e544a1978', 'Parameters': '71a96d4ea0c344f39e277d82035bf9bd',
-           'ShapeChanger': '2db441f589c3407bb6fb5f02ff8ab541', 'MenuGroup': '97e46a47dd8a425eb4ce9411defe313d'}
+MA_GUID = unitygen.MA_GUID
 
 
 def ma(kind, **kw):
-    return dict(m_Enabled=1, m_EditorHideFlags=0, m_Script=R(11500000, MA_GUID[kind], 3), m_Name='',
-                m_EditorClassIdentifier='', **kw)
+    return unitygen.ma(kind, **kw)
 
 
 for coll in (bpy.data.objects, bpy.data.meshes, bpy.data.armatures):
@@ -1235,82 +1130,8 @@ write('Scripts/OutfitNote.cs', 'public class OutfitNote : UnityEngine.MonoBehavi
                                              'assetBundleName': '', 'assetBundleVariant': ''})
 
 
-class Variant:
-    """a prefab kept as a variant of another prefab or a model: its PrefabInstance, what it changes, stubs of the
-    objects its own point at, and its own objects"""
-    KINDS = {1: 'GameObject', 4: 'Transform', 137: 'SkinnedMeshRenderer', 33: 'MeshFilter', 23: 'MeshRenderer',
-             114: 'MonoBehaviour'}
-
-    def __init__(self, src_guid, parent_tf=0):
-        self.guid, self.parent_tf = src_guid, parent_tf
-        self.pi = newid() & u.MASK63
-        self.docs, self.strip = [], {}
-        self.mods, self.added_go, self.added_c, self.removed_c = [], [], [], []
-
-    def src(self, fid):
-        return R(fid, self.guid, 3)
-
-    def own(self, fid):
-        """the fileID the source's object fid has in the file holding this instance"""
-        return (fid ^ self.pi) & u.MASK63
-
-    def stub(self, fid, cls):
-        if fid not in self.strip:
-            self.strip[fid] = self.own(fid)
-            self.docs.append(doc(cls, self.own(fid), self.KINDS[cls], {
-                'm_CorrespondingSourceObject': self.src(fid), 'm_PrefabInstance': R(self.pi), 'm_PrefabAsset': R(0)},
-                stripped=True))
-        return self.strip[fid]
-
-    def mod(self, fid, path, value=None, obj=None):
-        self.mods.append({'target': self.src(fid), 'propertyPath': path, 'value': '' if value is None else value,
-                          'objectReference': obj if obj is not None else R(0)})
-
-    def root(self, go, tf, name):
-        for k, v in (('m_LocalPosition.x', 0), ('m_LocalPosition.y', 0), ('m_LocalPosition.z', 0),
-                     ('m_LocalRotation.w', 1), ('m_LocalRotation.x', 0), ('m_LocalRotation.y', 0),
-                     ('m_LocalRotation.z', 0), ('m_LocalEulerAnglesHint.x', 0), ('m_LocalEulerAnglesHint.y', 0),
-                     ('m_LocalEulerAnglesHint.z', 0)):
-            self.mod(tf, k, v)
-        self.mod(go, 'm_Name', name)
-
-    def component(self, go, cls, kind, body):
-        fid = newid()
-        body = dict(body)
-        body['m_GameObject'] = R(self.stub(go, 1))
-        self.docs.append(doc(cls, fid, kind, base(**body)))
-        self.added_c.append({'targetCorrespondingSourceObject': self.src(go), 'insertIndex': -1, 'addedObject': R(fid)})
-        return fid
-
-    def gameobject(self, name, parent_tf, comps, active=1, own_parent=None):
-        """an added GameObject under the source's parent_tf, or under one of the variant's own (own_parent)"""
-        go, tf = newid(), newid()
-        cids = [newid() for _ in comps]
-        self.docs.append(doc(1, go, 'GameObject', base(
-            serializedVersion=6, m_Component=[{'component': R(c)} for c in [tf] + cids], m_Layer=0, m_Name=name,
-            m_TagString='Untagged', m_Icon=R(0), m_NavMeshLayer=0, m_StaticEditorFlags=0, m_IsActive=active)))
-        self.docs.append(doc(4, tf, 'Transform', base(
-            m_GameObject=R(go), serializedVersion=2, m_LocalRotation=Q(0, 0, 0, 1), m_LocalPosition=V(0, 0, 0),
-            m_LocalScale=V(1, 1, 1), m_ConstrainProportionsScale=0, m_Children=[],
-            m_Father=R(own_parent if own_parent else self.stub(parent_tf, 4)), m_LocalEulerAnglesHint=V(0, 0, 0))))
-        for c, (cls, kind, body) in zip(cids, comps):
-            body = dict(body)
-            body['m_GameObject'] = R(go)
-            self.docs.append(doc(cls, c, kind, base(**body)))
-        if not own_parent:
-            self.added_go.append({'targetCorrespondingSourceObject': self.src(parent_tf), 'insertIndex': -1,
-                                  'addedObject': R(tf)})
-        return go, tf, cids
-
-    def text(self):
-        pi = {'m_ObjectHideFlags': 0, 'serializedVersion': 2,
-              'm_Modification': {'serializedVersion': 3, 'm_TransformParent': R(self.parent_tf),
-                                 'm_Modifications': self.mods,
-                                 'm_RemovedComponents': [self.src(f) for f in self.removed_c],
-                                 'm_RemovedGameObjects': [], 'm_AddedGameObjects': self.added_go,
-                                 'm_AddedComponents': self.added_c},
-              'm_SourcePrefab': R(100100000, self.guid, 3)}
-        return doc(1001, self.pi, 'PrefabInstance', pi) + ''.join(self.docs)
+def Variant(src_guid, parent_tf=0):
+    return unitygen.Variant(newid, src_guid, parent_tf)
 
 
 def oid(name, cls=1):
@@ -1482,3 +1303,54 @@ v.root(ids_v[(0, 1)], ids_v[(0, 4)], 'OutfitVRM')
 v.component(ids_v[(VMID['Cape_1'], 1)], 114, 'MonoBehaviour', physbone(0, []))
 write('OutfitVRM.prefab', HEAD + v.text(), G('OutfitVRM.prefab'), 'PrefabImporter')
 print('synth: wrote OutfitVRM.fbx and OutfitVRM.prefab')
+
+# ---------------------------------------------------------------- VRCFury: an outfit linked the VRCFury way, and toggles
+# OutfitVF.prefab, a variant of Outfit.fbx: a VRCFury Armature Link (its Hips to the avatar's, recursive, snapped on),
+# a Toggle for the Dress (on at first; it sets the Shrink shape key), and Bow and Headband toggles sharing an exclusive
+# tag (Bow the tag's off state); a PhysBone on Frill.
+# SynthVF.prefab, a variant of SynthAvatar.prefab with OutfitVF inside (its Bow toggle renamed by an override of the
+# [SerializeReference] field): a Toggle saved the old way (Unity 2019's references, config.features, a version-0
+# Toggle whose Object Toggle flips the Badge), Apply During Upload setting the Smile shape key to 30, and Delete During
+# Upload on the Glasses.
+
+OVF = Variant(OUT_GUID)
+OVF.root(O_GO, O_TF, 'OutfitVF')
+refs = unitygen.Refs(newid)
+OVF.component(O_GO, 114, 'MonoBehaviour', unitygen.vrcfury(refs, refs.add(
+    'ArmatureLink', unitygen.vf_armature_link(OVF.stub(oid('Hips'), 1)))))
+refs = unitygen.Refs(newid)
+OVF.component(O_GO, 114, 'MonoBehaviour', unitygen.vrcfury(refs, refs.add('Toggle', unitygen.vf_toggle(
+    'Outfit/Dress', [refs.action('ObjectToggleAction', obj=R(OVF.stub(oid('Dress'), 1)), mode=0),
+                     refs.action('BlendShapeAction', blendShape='Shrink', blendShapeValue=100, renderer=R(0),
+                                 allRenderers=1)], on=1))))
+DECO = {}  # name -> (the component, its toggle's reference id), for SynthVF's override
+for name, off in (('Bow', 1), ('Headband', 0)):
+    refs = unitygen.Refs(newid)
+    t = refs.add('Toggle', unitygen.vf_toggle(
+        'Outfit/Deco/' + name, [refs.action('ObjectToggleAction', obj=R(OVF.stub(oid(name), 1)), mode=0)],
+        tag='deco', off_state=off))
+    DECO[name] = (OVF.component(O_GO, 114, 'MonoBehaviour', unitygen.vrcfury(refs, t)), t['rid'])
+OVF.component(oid('Frill'), 114, 'MonoBehaviour', physbone(0, []))
+write('OutfitVF.prefab', HEAD + OVF.text(), G('OutfitVF.prefab'), 'PrefabImporter')
+
+SV = Variant(SA_GUID)
+SV.root(ROOT.go, ROOT.tf, 'SynthVF')
+refs = unitygen.Refs(newid, version=1)
+old = dict(unitygen.vf_toggle('Extras/Badge', [refs.action('ObjectToggleAction', version=0, obj=R(SV.stub(
+    UOS[MESH_OF['Badge']].go, 1)), mode=0)]), version=0)
+SV.component(ROOT.go, 114, 'MonoBehaviour', unitygen.vrcfury(refs, None, [refs.add('Toggle', old)]))
+refs = unitygen.Refs(newid)
+SV.component(ROOT.go, 114, 'MonoBehaviour', unitygen.vrcfury(refs, refs.add('ApplyDuringUpload', {
+    'version': 0, 'action': unitygen.vf_state([refs.action('BlendShapeAction', blendShape='Smile', blendShapeValue=30,
+                                                           renderer=R(0), allRenderers=1)])})))
+refs = unitygen.Refs(newid)
+SV.component(UOS[MESH_OF['Glasses']].go, 114, 'MonoBehaviour', unitygen.vrcfury(refs, refs.add(
+    'DeleteDuringUpload', {'version': 0})))
+n = Variant(G('OutfitVF.prefab'), parent_tf=SV.stub(ROOT.tf, 4))
+n.root(OVF.own(O_GO), OVF.own(O_TF), 'OutfitVF')
+comp, rid = DECO['Bow']  # an override of a [SerializeReference] field: the Bow toggle renamed
+n.mod(comp, 'managedReferences[%d].name' % rid, 'Outfit/Deco/Ribbon Bow')
+SV.added_go.append({'targetCorrespondingSourceObject': SV.src(ROOT.tf), 'insertIndex': -1,
+                    'addedObject': R(n.stub(OVF.own(O_TF), 4))})
+write('SynthVF.prefab', HEAD + SV.text() + n.text(), G('SynthVF.prefab'), 'PrefabImporter')
+print('synth: wrote OutfitVF.prefab and SynthVF.prefab (VRCFury)')

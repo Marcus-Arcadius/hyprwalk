@@ -2,7 +2,8 @@
 # regress.sh: converts the test avatars with the working copy's tools/unity2hypr3d.py and with
 # another version of it (HEAD's by default), and compares what the two write.
 #
-#   tools/test/regress.sh [--base REV|FILE] [--robot PATH] [--proj DIR] [--out DIR] [--keep] [CASE...]
+#   tools/test/regress.sh [--base REV|FILE] [--robot PATH] [--proj DIR] [--booth DIR] [--out DIR] [--keep]
+#                         [--shots] [CASE...]
 #
 #   --base REV|FILE  the converter to compare against: a git revision (default HEAD) or a file
 #   --robot PATH     also convert the VRChat SDK's robot sample, "Avatar Dynamics Robot Avatar
@@ -10,9 +11,12 @@
 #                    It is VRChat's, so it isn't in this repo; it's in com.vrchat.avatars-*.zip
 #                    from https://github.com/vrchat/packages/releases
 #   --proj DIR       the synthetic Unity project to use; synth/make.py makes it there if it's missing
+#   --booth DIR      the Booth-style test packages to use; synth/booth.py makes them there if missing
 #   --out DIR        where everything goes (default: a new temporary directory, removed when
 #                    nothing differs)
 #   --keep           keep the outputs even when nothing differs
+#   --shots          render each new GLB (front, side, and walking with physics) into OUT/shots with
+#                    build/test/shot (tools/test/harness/build.sh builds it); implies --keep
 #   CASE...          only these cases (see "cases" below)
 #
 # Each case is converted twice, and check.py's report, the settings file (less its date) and the
@@ -25,14 +29,16 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 SYN="$REPO/tools/test/synth"
 BLENDER=(blender -b --factory-startup --python-exit-code 1)
-BASE=HEAD ROBOT="${HYPR3D_ROBOT:-}" PROJ="" OUT="" KEEP=0 ONLY=()
+BASE=HEAD ROBOT="${HYPR3D_ROBOT:-}" PROJ="" BOOTH="" OUT="" KEEP=0 SHOTS=0 ONLY=()
 while (($#)); do
     case "$1" in
         --base) BASE="$2"; shift 2 ;;
         --robot) ROBOT="$2"; shift 2 ;;
         --proj) PROJ="$2"; shift 2 ;;
+        --booth) BOOTH="$2"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         --keep) KEEP=1; shift ;;
+        --shots) SHOTS=1; KEEP=1; shift ;;
         -h|--help) sed -n '2,/^set /p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
         -*) echo "regress.sh: unknown option $1" >&2; exit 2 ;;
         *) ONLY+=("$1"); shift ;;
@@ -65,7 +71,16 @@ fi
 PROJ="$(cd "$PROJ" && pwd)"
 A="$PROJ/Assets/Synth"
 
-# cases: name, kind (strict = no MA or VRCFury: must stay byte-identical), converter arguments
+# the Booth-style packages
+BOOTH="${BOOTH:-$W/booth}"
+if [[ ! -f "$BOOTH/Hairpin_v1.0.unitypackage" ]]; then
+    echo "making the Booth-style packages in $BOOTH"
+    mkdir -p "$BOOTH"
+    "${BLENDER[@]}" -P "$SYN/booth.py" -- "$BOOTH" > "$W/booth.log" 2>&1 || { tail -n 30 "$W/booth.log"; die "booth.py failed"; }
+fi
+B="$(cd "$BOOTH" && pwd)"
+
+# cases: name, kind (strict = no MA or VRCFury: must stay byte-identical; MA; VRCF), converter arguments
 CASES=()
 add() { CASES+=("$(printf '%s\x1f' "$@")"); }
 add SynthAvatar strict "$A/SynthAvatar.prefab"
@@ -75,6 +90,20 @@ add SynthOutfit MA "$A/SynthAvatar.prefab" --outfit Outfit
 add SynthPlusMA MA "$A/SynthAvatar.prefab" --outfit "$A/OutfitMA.prefab"
 add SynthVRM MA "$A/SynthAvatar.prefab" --outfit OutfitVRM
 add VariantTwo MA "$A/SynthVariant.prefab" --outfit OutfitVRM --outfit Outfit
+add SynthVF VRCF "$A/SynthVF.prefab"
+add SynthPlusVF VRCF "$A/SynthAvatar.prefab" --outfit "$A/OutfitVF.prefab"
+add BoothChan strict "$B/SynthChan_v1.0.unitypackage"
+add BoothZip strict "$B/シンセちゃん_v1.0.zip"
+add BoothDress MA "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_OnePiece_v1.0.unitypackage"
+add BoothParka MA "$B/SynthChan_v1.0.unitypackage" --outfit "$B/Parka_v1.0.unitypackage"
+add BoothBoth MA "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_OnePiece_v1.0.unitypackage" \
+    --outfit "$B/Parka_v1.0.unitypackage"
+add BoothCardigan VRCF "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_Cardigan_VRCFury_v1.0.unitypackage"
+add BoothHairpin VRCF "$B/SynthChan_v1.0.unitypackage" --outfit "$B/Hairpin_v1.0.unitypackage"
+add BoothMix VRCF "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_OnePiece_v1.0.unitypackage" \
+    --outfit "$B/SynthChan_Cardigan_VRCFury_v1.0.unitypackage" --outfit "$B/Hairpin_v1.0.unitypackage"
+# pairs of cases whose GLBs must be the same (the zip holds the package)
+SAME=("BoothZip BoothChan")
 if [[ -n "$ROBOT" ]]; then
     [[ -f "$ROBOT" ]] || die "no robot sample at $ROBOT"
     add robot strict "$ROBOT"
@@ -177,6 +206,30 @@ PY
             grep -v ' 0 of ' | head -n 12 | sed 's/^/    skincmp: /'
     fi
 done
+
+for pair in "${SAME[@]}"; do
+    read -r a b <<< "$pair"
+    [[ -f "$W/new/$a.glb" && -f "$W/new/$b.glb" ]] || continue
+    if cmp -s "$W/new/$a.glb" "$W/new/$b.glb"; then
+        printf '%-14s %-6s same GLB as %s\n' "$a" "" "$b"
+    else
+        printf '%-14s %-6s DIFFERS from %s\n' "$a" "" "$b"
+        BAD=1
+    fi
+done
+
+if ((SHOTS)); then
+    SHOT="$REPO/build/test/shot"
+    [[ -x "$SHOT" ]] || die "no $SHOT: build it with tools/test/harness/build.sh"
+    mkdir -p "$W/shots"
+    for n in "${NAMES[@]}"; do
+        [[ -f "$W/new/$n.glb" ]] || continue
+        (cd "$W/shots" && "$SHOT" --size 640x800 --avatar "$W/new/$n.glb" --frames 30 --view 20 --out "$n-front.png" \
+            --view 110 --out "$n-side.png" --physics 1 --accel 40 --move 0 3 --frames 45 --view 70 \
+            --out "$n-walk.png" --swing > "$n.log" 2>&1) || echo "$n: shot failed, see $W/shots/$n.log"
+    done
+    echo "renders: $W/shots"
+fi
 
 if ((DIFF || KEEP)) || [[ -n "$OUT" ]]; then
     echo "outputs: $W (base/ and new/)"

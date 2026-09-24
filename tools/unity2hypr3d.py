@@ -30,10 +30,19 @@ Blocker, and its menus and toggles (Menu Item, Menu Installer and Group, Object 
 Changer, Merge Animator for FX, Parameters). --outfit puts on an outfit the avatar's prefab does
 not have yet, as MA's Setup Outfit does, whether or not the outfit is set up for MA.
 
+VRCFury setups are built after MA's, as VRCFury builds them: Armature Link (an outfit's bones
+linked to the avatar's, snapped on if it says so, its meshes following the avatar's bones),
+Toggles (menu toggles that turn objects on and off, set shape keys and play clips, with exclusive
+tags and the resting state they give the avatar), Full Controller (an FX controller, menus and
+parameters merged in), Blend Shape Link, Apply and Delete During Upload, and the older Modes,
+Object State and Bone Constraint features. An outfit linked with VRCFury is put on as it is.
+
 What it does not: shader effects beyond the above, animations other than faces and toggles,
 material swaps, MA's other components (Replace Object, Blendshape Sync, Material Setter and Swap,
-Visible Head Accessory, Mesh Settings), VRCFury setups, constraints, particles, audio, contacts.
-Blender imports only binary FBX files, so a model in any other format stops the conversion.
+Visible Head Accessory, Mesh Settings), VRCFury's other features (sliders, puppets, SPS, gesture
+drivers, blinking and visemes and the like; each is named in a warning), constraints, particles,
+audio, contacts. Blender imports only binary FBX files, so a model in any other format stops the
+conversion.
 """
 
 import sys, os, re, io, json, math, struct, zlib, tarfile, zipfile, tempfile, shutil, copy
@@ -527,6 +536,19 @@ def _ptoks(path):
 
 def set_prop(data, path, val):
     """apply one prefab override (propertyPath = value) to an object's body"""
+    m = re.match(r'managedReferences\[(-?\d+)\]\.(.+)$', path)
+    if m:  # a field of a [SerializeReference] object: in the references block
+        rid, refs = int(m.group(1)), dictof(data.get('references'))
+        e = next((x for x in listof(refs.get('RefIds')) if isinstance(x, dict) and inum(x.get('rid'), None) == rid),
+                 None)
+        if e is None:
+            e = next((x for k, x in refs.items() if k not in ('version', 'RefIds') and re.fullmatch(r'-?\d+', str(k))
+                      and int(k) == rid and isinstance(x, dict)), None)
+        if e is not None:
+            if not isinstance(e.get('data'), dict):
+                e['data'] = {}
+            set_prop(e['data'], m.group(2), val)
+        return
     toks = _ptoks(path)
     if not toks or toks[0] is _SIZE or isinstance(toks[0], int):
         return
@@ -1525,15 +1547,27 @@ class Avatar:
         self.desc = found.desc.data
         self.name = found.name
         self.gos, self.paths = [], {}
+        gone, todo = set(), [self.root]  # what VRCFury deletes during the upload
+        while todo:
+            g = todo.pop()
+            todo += g.children
+            for c in g.comps:
+                if is_vrcfury(c):
+                    for f in vrcf_features(c):
+                        if f['@class'] == 'DeleteDuringUpload':
+                            t = f.get('@target', c.go)
+                            gone.add(id(t if isinstance(t, Obj) and t.cls == 1 else getattr(t, 'go', None)))
 
         def walk(g, p):
-            if g is not self.root and g.data.get('m_TagString') == 'EditorOnly':
+            if g is not self.root and (g.data.get('m_TagString') == 'EditorOnly' or id(g) in gone):
                 return
             self.gos.append(g)
             self.paths.setdefault(p, g)
             for c in g.children:
                 walk(c, (p + '/' if p else '') + str(c.data.get('m_Name', '')))
         walk(self.root, '')
+        if gone:
+            log('VRCFury: Delete During Upload leaves out %d object(s)' % len(gone))
         self.inside = set(map(id, self.gos))
         self.renderers = [c for g in self.gos for c in g.comps if c.cls in RENDERERS]
         self._shapes = {}
@@ -1623,7 +1657,12 @@ class Clip:
                           for k in listof(dictof(c.get('curve')).get('m_Curve')) if isinstance(k, dict))
             if not keys:
                 continue
-            p = av.prop(join_path(base, str(c.get('path') or '')), inum(c.get('classID')), str(c.get('attribute') or ''))
+            path, cid, attr = str(c.get('path') or ''), inum(c.get('classID')), str(c.get('attribute') or '')
+            if isinstance(base, tuple):  # VRCFury's: the first of these places that has it ("/...": the root)
+                p = av.prop(path[1:], cid, attr) if path.startswith('/') else next(
+                    (x for x in (av.prop(join_path(b, path), cid, attr) for b in base) if x is not None), None)
+            else:
+                p = av.prop(join_path(base, path), cid, attr)
             if p is None:
                 self.other += 1
                 continue
@@ -1655,7 +1694,7 @@ class Clip:
 
 class Anim:
     """clips, blend trees and animator controllers, read when first used; base: where their paths start (an
-    animator MA merges with relative paths)"""
+    animator MA merges with relative paths), or a tuple of places to look in turn (VRCFury's)"""
 
     def __init__(self, db, av, base=''):
         self.db, self.av, self.base = db, av, base
@@ -2465,6 +2504,13 @@ class Analysis:
             self.merged = self.mat.merged
             if any(x[4] for x in self.merged):
                 self.fx = None
+        vcomps = [c for g in av.gos for c in g.comps if is_vrcfury(c)]
+        self.vrcf = VRCFury(self, vcomps) if vcomps else None  # after MA: VRCFury builds after it
+        if self.vrcf:
+            for k, v in self.vrcf.declared.items():
+                self.eparams.setdefault(k, v)
+            self.menu += self.vrcf.menu
+            self.merged = list(self.merged) + self.vrcf.merged
         self.params = {}
         if self.fx:
             self.params.update({k: v for k, (t, v) in self.fx.params.items()})
@@ -2473,15 +2519,15 @@ class Analysis:
                 self.params.setdefault(x[3].get(k, k), v)
         self.params.update({k: v for k, (t, v) in self.eparams.items()})
         self.params.update({k: float(v) for k, v in BUILTIN_PARAMS.items()})
-        self.skipped = []  # menu controls not converted: (name, why)
+        self.skipped = list(self.vrcf.skipped) if self.vrcf else []  # menu controls not converted: (name, why)
         self.ma = None  # the ModularAvatar once it has run
 
     def evaluate(self, params):
         runs = [(x[2], x[3]) for x in self.merged if x[0] < 0] + ([(self.fx, {})] if self.fx else []) + [
             (x[2], x[3]) for x in self.merged if x[0] >= 0]
-        if not runs and self.mat is None:
+        if not runs and self.mat is None and self.vrcf is None:
             return {}, {}, {}, params
-        if len(runs) == 1 and not runs[0][1] and self.mat is None:
+        if len(runs) == 1 and not runs[0][1] and self.mat is None and self.vrcf is None:
             return runs[0][0].evaluate(params)
         vals, names, track, out = {}, {}, {}, dict(params)
         for ctl, view in runs:  # the layers MA merges come after FX's (or before, at a priority below 0)
@@ -2497,6 +2543,8 @@ class Analysis:
                 out[view.get(k, k)] = x
         if self.mat:
             vals = self.mat.apply(out, vals)
+        if self.vrcf:  # VRCFury's toggle layers come after everything MA made
+            vals = self.vrcf.apply(out, vals)
         return vals, names, track, out
 
     def animator_param(self, pn):
@@ -2540,9 +2588,9 @@ class Analysis:
                 continue
             if not pn:
                 continue
-            ctrls.append((prefix, name or pn, pn, num(c.get('value'), 1.0), t))
+            ctrls.append((prefix, name or pn, pn, num(c.get('value'), 1.0), t, _str(c.get('group'))))
         values = {}
-        for _, _, pn, v, _ in ctrls:
+        for _, _, pn, v, _, _ in ctrls:
             values.setdefault(pn, set()).add(v)
         base_p = dict(self.params)
         for pn in values:
@@ -2550,7 +2598,7 @@ class Analysis:
         base = self.evaluate(base_p)[0]
         vis0 = {id(r): av.visible(r, base) for r in av.renderers}
         out, used = [], set()
-        for prefix, name, pn, v, t in ctrls:
+        for prefix, name, pn, v, t, grp in ctrls:
             p = dict(base_p)
             p[pn] = v
             vals = self.evaluate(p)[0]
@@ -2560,7 +2608,7 @@ class Analysis:
             ptype = self.eparams.get(pn, (None, 0))[0]
             if ptype is None and self.animator_param(pn):
                 ptype = {1: 1, 3: 0, 4: 2}.get(self.animator_param(pn)[0], 2)
-            group = pn if (len(values[pn]) > 1 or ptype in (0, 1)) else ''
+            group = grp or (pn if (len(values[pn]) > 1 or ptype in (0, 1)) else '')
             on = t == 102 and abs(self.params.get(pn, 0.0) - v) < 1e-4
             nm = name
             if norm_name(nm) in used and prefix:
@@ -3189,6 +3237,7 @@ class ModularAvatar:
         self.dead = set()  # ids of the PhysBone components MA removes as duplicates
         self.blocks = {}  # id(GameObject) -> the PhysBone Blocker tips under it
         self.vparent = {}  # id(GameObject a Bone Proxy moved) -> its new parent
+        self.bound = {}  # id(bone VRCFury linked) -> its world matrix when its meshes were given the avatar's bone
         self.db = {}  # MA's bone database: id(bone) -> merged (True) or kept (False), in the order added
         self.counts = {'merged': 0, 'removed': 0, 'proxies': 0, 'moves': 0, 'duplicates': 0}
         self._mangled = 0
@@ -3757,7 +3806,9 @@ class ModularAvatar:
                     continue
                 d = self.retarget[id(g)]
                 # where MA's retargeting left the bone: moving with the bone it merged into since then
-                V = self.U[id(d)] @ self.U0[id(d)].inverted_safe() @ self.U0[id(g)]
+                V = self.bound.get(id(g))
+                if V is None:
+                    V = self.U[id(d)] @ self.U0[id(d)].inverted_safe() @ self.U0[id(g)]
                 Lc = FLIP @ V @ self.U[id(g)].inverted_safe() @ FLIP
                 ibm[j] = W[m].inverted_safe() @ Lc @ W[n] @ ibm[j]
                 joints[j] = m
@@ -3808,6 +3859,803 @@ class ModularAvatar:
             f = struct.unpack_from('<16f', binc, off + j * stride)
             out[j] = Matrix([[f[c * 4 + r] for c in range(4)] for r in range(4)])
         return out
+
+
+# ---------------------------------------------------------------- VRCFury
+#
+# What VRCFury does when VRChat builds the avatar, as far as hypr3d carries it. VRCFury runs after Modular Avatar (NDMF's
+# build comes first), so it sees the hierarchy MA leaves. A VRCFury component holds one feature as a [SerializeReference]
+# ("content", or a list in the older "config.features") kept in the component's "references" block. This emulates what
+# VRCFury does with them. It was written after reading VRCFury's source for its serialized format and its behaviour,
+# and it contains none of VRCFury's code.
+#
+# - Armature Link: an outfit's bones ("Link From") are linked to an avatar bone ("Link To": a humanoid bone, falling back
+#   to the ones above it, an object or a path), and with "recursive" their children to the avatar's children of the
+#   same names, less a suffix. Each linked bone may be snapped onto the avatar's, goes under it, and the meshes weighted
+#   to it are weighted to the avatar's bone instead (not for bones a PhysBone moves); what nothing uses is removed.
+# - Toggle: a menu toggle (its name is a menu path) that turns objects on or off, sets shape keys and plays clips,
+#   exclusive with the toggles that share a tag. An object a toggle turns on rests off, and one it turns off rests on.
+# - Full Controller: an FX controller, menus (under a prefix) and parameters merged in, the parameters renamed apart
+#   unless global; animation paths are looked up from the component's object up to the avatar's root.
+# - Blend Shape Link: meshes whose shape keys follow a base mesh's (by name, loosely), at rest and when animated.
+# - Apply During Upload, Delete During Upload, and the older Modes, Object State and Bone Constraint features, as
+#   VRCFury upgrades them.
+
+VRCF_GUID = 'd9e94e501a2d4c95bff3d5601013d923'  # the VRCFury component (VF.Model.VRCFury)
+VRCF_DONE = {'ArmatureLink', 'Toggle', 'FullController', 'ApplyDuringUpload', 'DeleteDuringUpload', 'BlendShapeLink'}
+# features that change nothing hypr3d shows: left out without a word
+VRCF_QUIET = {'AnchorOverrideFix', 'AnchorOverrideFix2', 'BoundingBoxFix', 'BoundingBoxFix2', 'BlendshapeOptimizer',
+              'DirectTreeOptimizer', 'FixWriteDefaults', 'MakeWriteDefaultsOff', 'MakeWriteDefaultsOff2', 'Slot4Fix',
+              'UnlimitedParameters', 'DescriptorDebug', 'Gizmo', 'SetIcon', 'MoveMenuItem', 'ReorderMenuItem',
+              'OverrideMenuSettings', 'MmdCompatibility', 'CrossEyeFix', 'CrossEyeFix2', 'TpsScaleFix',
+              'ShowInFirstPerson', 'HeadChopHead', 'SpsOptions', 'SecurityLock'}
+# VRChat's own animator parameters, which a Full Controller never renames
+VRC_PARAMS = set(('IsLocal Viseme Voice GestureLeft GestureRight GestureLeftWeight GestureRightWeight AngularY VelocityX '
+                  'VelocityY VelocityZ VelocityMagnitude Upright Grounded Seated AFK TrackingType VRMode MuteSelf '
+                  'InStation Earmuffs IsOnFriendsList AvatarVersion IsAnimatorEnabled ScaleModified ScaleFactor '
+                  'ScaleFactorInverse EyeHeightAsMeters EyeHeightAsPercent PreviewMode').split())
+
+
+def is_vrcfury(c):
+    if c.cls != 114:
+        return False
+    if c.script()[1] == VRCF_GUID:
+        return True
+    d = c.data
+    return 'somethingIsBroken' in d and ('content' in d or 'config' in d)
+
+
+def vrcf_refs(d):
+    """{id: (class, data)} of a component's [SerializeReference] objects: newer Unity keeps them as
+    references: {version: 2, RefIds: [{rid, type: {class, ns, asm}, data}]}, Unity 2019 as {version: 1, <id>: ...}"""
+    refs = dictof(d.get('references'))
+    out = {}
+    for e in listof(refs.get('RefIds')):
+        e = dictof(e)
+        out[inum(e.get('rid'), -2)] = (_str(dictof(e.get('type')).get('class')), dictof(e.get('data')))
+    for k, e in refs.items():
+        if k not in ('version', 'RefIds') and re.fullmatch(r'-?\d+', str(k)):
+            e = dictof(e)
+            out[int(k)] = (_str(dictof(e.get('type')).get('class')), dictof(e.get('data')))
+    return out
+
+
+def vrcf_deref(x, refs, depth=0):
+    """a value with its references ({rid: n}, or {id: n} in the old layout) replaced by what they name, as
+    {'@class': class, field: value...}; a null or missing reference is None"""
+    if depth > 40:
+        return None
+    if isinstance(x, dict):
+        if x and set(x) <= {'rid', 'id'}:
+            e = refs.get(inum(x.get('rid', x.get('id')), -2))
+            if e is None:
+                return None
+            out = {'@class': e[0]}
+            for k, v in e[1].items():
+                out[k] = vrcf_deref(v, refs, depth + 1)
+            return out
+        return {k: vrcf_deref(v, refs, depth + 1) for k, v in x.items()}
+    if isinstance(x, list):
+        return [vrcf_deref(v, refs, depth + 1) for v in x]
+    return x
+
+
+_VRCF_FEATURES = {}
+
+
+def vrcf_features(c):
+    """a VRCFury component's features, as VRCFury's upgrades leave them: [{'@class': ..., field: value...}]"""
+    if id(c) not in _VRCF_FEATURES:
+        d = c.data
+        refs = vrcf_refs(d)
+        out = []
+        for r in [d.get('content')] + listof(dictof(d.get('config')).get('features')):
+            f = vrcf_deref(r, refs)
+            if isinstance(f, dict) and f.get('@class'):
+                out += vrcf_upgrade(f)
+        _VRCF_FEATURES[id(c)] = out
+    return _VRCF_FEATURES[id(c)]
+
+
+def vrcf_upgrade(f):
+    """what VRCFury's Upgrade and Migrate steps make of a feature saved by an older version: [features]"""
+    cls, v = f['@class'], inum(f.get('version'), -1)
+    if cls == 'Modes':  # every mode a toggle, the modes exclusive
+        name = _str(f.get('name'))
+        tag = 'mode_' + name.replace(' ', '').replace('/', '').strip()
+        out = []
+        for i, m in enumerate(listof(f.get('modes')), 1):
+            out += vrcf_upgrade({'@class': 'Toggle', 'version': 0, 'name': '%s/Mode %d' % (name, i),
+                                 'saved': f.get('saved'), 'state': dictof(m).get('state'), 'enableExclusiveTag': '1',
+                                 'exclusiveTag': tag})
+        return out
+    if cls == 'ObjectState':  # objects turned on or off, or deleted, during the upload
+        acts, out = [], []
+        for s in listof(f.get('states')):
+            s = dictof(s)
+            o, a = s.get('obj'), inum(s.get('action'))
+            if not isinstance(o, Obj):
+                continue
+            if a == 2:
+                out.append({'@class': 'DeleteDuringUpload', '@target': o})
+            else:
+                acts.append({'@class': 'ObjectToggleAction', 'version': 1, 'obj': o, 'mode': 0 if a == 1 else 1})
+        if acts:
+            out.append({'@class': 'ApplyDuringUpload', 'version': 0, 'action': {'actions': acts}})
+        return out
+    if cls == 'BoneConstraint':  # an object put on a bone
+        return [{'@class': 'ArmatureLink', 'version': 7, 'propBone': f.get('obj'), 'recursive': '0',
+                 'linkTo': [{'useBone': '1', 'bone': f.get('bone'), 'useObj': '0', 'obj': None, 'offset': ''}],
+                 'alignPosition': '1', 'alignRotation': '1', 'alignScale': '1'}]
+    if cls == 'ArmatureLink' and v < 7:
+        # the old link modes: 0 skin rewrite, 1 merge as children, 2 parent constraint, 3 reparent root, 4 auto;
+        # bone offsets kept: 0 auto, 1 yes, 2 no
+        mode = inum(f.get('linkMode'), 4)
+        if v < 1:
+            mode = 0 if truthy(f.get('useBoneMerging', '0')) else 1
+        scale = num(f.get('skinRewriteScalingFactor'), 1.0) if v >= 2 else 1.0
+        keep = inum(f.get('keepBoneOffsets2')) if v >= 3 else (1 if truthy(f.get('keepBoneOffsets', '0')) else 2)
+        if v < 4 and mode != 0:
+            scale = 0.0
+        if v < 5 and mode == 1:
+            f['scalingFactorPowersOf10Only'] = '0'
+        if v < 6:
+            path = _str(f.get('bonePathOnAvatar'))
+            if path.strip():
+                f['linkTo'] = [{'useBone': '0', 'useObj': '0', 'obj': None, 'offset': path}]
+            else:
+                f['linkTo'] = [{'useBone': '1', 'bone': b, 'useObj': '0', 'obj': None, 'offset': ''}
+                               for b in [f.get('boneOnAvatar', 0)] + listof(f.get('fallbackBones'))]
+        # None: decided when it is linked, from whether it is recursive
+        f['recursive'] = None if mode == 4 else ('0' if mode == 3 else '1')
+        f['@align'] = None if keep == 0 else keep == 2
+        f['autoScaleFactor'] = None if scale <= 0 else '0'
+        f['skinRewriteScalingFactor'] = 1.0 if scale <= 0 else scale
+    if cls == 'BlendShapeLink' and v < 1:  # objects, then their meshes
+        f['linkSkins'] = [{'renderer': next((x for x in o.comps if x.cls == 137), None)}
+                          for o in listof(f.get('objs')) if isinstance(o, Obj) and o.cls == 1]
+    if cls == 'Toggle' and v < 2:
+        if not truthy(f.get('defaultOn', '0')):
+            f['defaultSliderValue'] = 0
+        f['sliderInactiveAtZero'] = '1'
+    if cls == 'FullController':
+        if v < 1:
+            f['allNonsyncedAreGlobal'] = '1'
+        if v < 2:
+            for old, new in (('controller', 'controllers'), ('menu', 'menus'), ('parameters', 'prms')):
+                if vrcf_asset(f.get(old)):
+                    e = {old: f.get(old)}
+                    if old == 'menu':
+                        e['prefix'] = _str(f.get('submenu'))
+                    f[new] = listof(f.get(new)) + [e]
+        if v < 3:
+            rw = listof(f.get('rewriteBindings'))
+            rw += [{'from': s, 'to': ''} for s in listof(f.get('removePrefixes')) if _str(s).strip()]
+            if _str(f.get('addPrefix')).strip():
+                rw.append({'from': '', 'to': f.get('addPrefix')})
+            f['rewriteBindings'] = rw
+
+    def actions(x, depth=0):  # an Object Toggle action from before modes: it flips the object
+        if isinstance(x, dict):
+            if x.get('@class') == 'ObjectToggleAction' and inum(x.get('version'), -1) < 1:
+                x['mode'] = 2
+            for y in x.values():
+                if depth < 20:
+                    actions(y, depth + 1)
+        elif isinstance(x, list):
+            for y in x:
+                actions(y, depth + 1)
+    actions(f)
+    return [f]
+
+
+def vrcf_asset(w):
+    """what one of VRCFury's asset fields (GuidAnimationClip, GuidController, GuidMenu, GuidParams...) names:
+    (guid, fileID; 0 for the file's main object), or None: the reference itself, else its id (guid[:fileID]|path|name)"""
+    if isinstance(w, dict):
+        f, g = ref(w.get('objRef')) if isinstance(w.get('objRef'), dict) else (0, None)
+        if g:
+            return g, f
+        m = re.match(r'\s*([0-9a-fA-F]{32})(?::(-?\d+))?\s*(?:\||$)', _str(w.get('id')))
+        if m:
+            return m.group(1).lower(), int(m.group(2) or 0)
+        g = _str(w.get('guid'))
+        if re.fullmatch(r'[0-9a-fA-F]{32}', g):
+            return g.lower(), inum(w.get('fileID'))
+    return None
+
+
+def vrcf_path(s):
+    """a VRCFury menu path as menu names: "Clothes/Jacket"; "\\/" is a slash in a name"""
+    return [p.replace('\\/', '/').strip() for p in re.split(r'(?<!\\)/', s or '') if p.replace('\\/', '/').strip()]
+
+
+def human_fallbacks(b):
+    """the humanoid bones (HumanBodyBones numbers) an Armature Link falls back to when bone b is not in the avatar:
+    for a finger bone its lower segments, the same segments of the fingers nearest it, then the hand; for any other
+    bone the one above it, and so on up to the hips"""
+    up = {'Jaw': 'Head', 'LeftEye': 'Head', 'RightEye': 'Head', 'Head': 'Neck', 'Neck': 'UpperChest',
+          'UpperChest': 'Chest', 'Chest': 'Spine', 'Spine': 'Hips', 'LeftShoulder': 'UpperChest',
+          'RightShoulder': 'UpperChest', 'LeftToes': 'LeftFoot', 'RightToes': 'RightFoot'}
+    for s in ('Left', 'Right'):
+        for a, b2 in (('Hand', 'LowerArm'), ('LowerArm', 'UpperArm'), ('UpperArm', 'Shoulder'), ('Foot', 'LowerLeg'),
+                      ('LowerLeg', 'UpperLeg'), ('UpperLeg', None)):
+            up[s + a] = s + b2 if b2 else 'Hips'
+    out = []
+    if 24 <= b <= 53:  # a finger: 24 + side * 15 + finger * 3 + segment
+        side, k = divmod(b - 24, 15)
+        finger, seg = divmod(k, 3)
+        out += [24 + side * 15 + finger * 3 + s for s in range(seg - 1, -1, -1)]
+        near = sorted((f for f in range(5) if f != finger), key=lambda f: (abs(f - finger), -f))
+        for f in near:
+            out += [24 + side * 15 + f * 3 + s for s in range(seg, -1, -1)]
+        hand = 18 if side else 17
+        return out + [hand] + human_fallbacks(hand)
+    name = HUMAN_BONES[b] if 0 <= b < len(HUMAN_BONES) else None
+    while name in up:
+        name = up[name]
+        out.append(HUMAN_BONES.index(name))
+    return out
+
+
+class VRCFury:
+    """what VRCFury adds to the menu, the parameters and FX, and the resting state it gives the avatar (applied to
+    the objects' own data, as VRCFury changes the avatar it uploads)"""
+
+    def __init__(self, an, comps):
+        self.an, self.av, self.db = an, an.av, an.db
+        self.feats = [(c, f) for c in comps for f in vrcf_features(c)]
+        self.declared = {}  # parameter -> (value type, default)
+        self.rules = []  # [(parameter, test, {property: value})]: test 'on' (a bool at 1), 'nonzero' or 'slider'
+        self.menu = []  # [(path of menu names, control)]
+        self.merged = []  # [(priority, order, Controller, {its parameter names: the avatar's}, False)]
+        self.links = [(c, f) for c, f in self.feats if f['@class'] == 'ArmatureLink']
+        self.skipped = []
+        self.missed = {}  # actions and features that are not converted: kind -> count
+        others = {}
+        for c, f in self.feats:
+            k = f['@class']
+            if k not in VRCF_DONE and k not in VRCF_QUIET:
+                others[k] = others.get(k, 0) + 1
+        self.upload()
+        self.rest()
+        self.shape_links = self.blendshape_links()
+        for base, sk, m in self.shape_links:  # the linked meshes rest as the base does
+            for a, bs in m.items():
+                for b in bs:
+                    self.set_data(('s', sk, b), self.av.default(('s', base, a)))
+        self.toggles()
+        self.full_controllers()
+        for k, n in sorted(others.items()):
+            warn('%d VRCFury %s feature(s): not converted' % (n, re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', k)))
+        for k, n in sorted(self.missed.items()):
+            warn('VRCFury: %d %s: not converted' % (n, k))
+        n = {k: sum(1 for c, f in self.feats if f['@class'] == k) for k in VRCF_DONE}
+        said = ['%d %s' % (n[k], t) for k, t in (('ArmatureLink', 'Armature Link'), ('Toggle', 'Toggle'),
+                                                 ('FullController', 'Full Controller'),
+                                                 ('BlendShapeLink', 'Blend Shape Link'),
+                                                 ('ApplyDuringUpload', 'Apply During Upload'),
+                                                 ('DeleteDuringUpload', 'Delete During Upload')) if n[k]]
+        if said:
+            log('VRCFury: ' + ', '.join(said))
+
+    def miss(self, what):
+        self.missed[what] = self.missed.get(what, 0) + 1
+
+    def go(self, x):
+        """the avatar's GameObject a reference names (a GameObject or one of its components)"""
+        if isinstance(x, Obj):
+            g = x if x.cls == 1 else x.go
+            if g is not None and id(g) in self.av.inside:
+                return g
+        return None
+
+    def bases(self, g):
+        """where a clip's paths are looked for, from g up to the avatar's root"""
+        out = []
+        while g is not None and id(g) in self.av.inside:
+            out.append(av_path(self.av, g))
+            if g is self.av.root:
+                break
+            g = g.parent
+        return tuple(out) or ('',)
+
+    # ---- actions
+
+    def actions(self, state):
+        """the actions of a State that play here: on the desktop, for the wearer"""
+        out = []
+        for a in listof(dictof(state).get('actions')):
+            if not isinstance(a, dict) or not a.get('@class'):
+                continue
+            if (truthy(a.get('desktopActive', '0')) or truthy(a.get('androidActive', '0'))) and not truthy(
+                    a.get('desktopActive', '0')):
+                continue
+            if truthy(a.get('remoteOnly', '0')):
+                continue
+            out.append(a)
+        return out
+
+    def props(self, state, comp, count=True):
+        """{property: value} a State's actions set"""
+        av, out = self.av, {}
+        for a in self.actions(state):
+            k = a['@class']
+            if k == 'ObjectToggleAction':
+                g = self.go(a.get('obj'))
+                if g is None:
+                    continue
+                mode = inum(a.get('mode'))
+                on = mode == 0 or (mode == 2 and av.default(('a', g)) < 0.5)
+                out[('a', g)] = 1.0 if on else 0.0
+            elif k == 'BlendShapeAction':
+                shape = _str(a.get('blendShape'))
+                r = a.get('renderer')
+                one = r if isinstance(r, Obj) and r.cls == 137 else None
+                for smr in av.renderers:
+                    if smr.cls != 137 or (not truthy(a.get('allRenderers', '1')) and smr is not one):
+                        continue
+                    if shape in av.shape_names(smr):
+                        out[('s', smr, shape)] = num(a.get('blendShapeValue'), 100.0)
+            elif k == 'AnimationClipAction':
+                p = vrcf_asset(a.get('clip'))
+                if p and not p[1]:  # the file's main object
+                    uf = self.db.yaml(p[0])
+                    p = (p[0], uf.main(74)) if uf is not None and not uf.binary and uf.main(74) is not None else None
+                clip = Anim(self.db, av, self.bases(comp.go)).clip(p) if p else None
+                if clip is not None:
+                    if clip.other and count:
+                        self.miss('toggle clip(s) with curves other than objects and shape keys')
+                    out.update(clip.sample(None))
+            elif count:
+                self.miss('%s action(s) in toggles' % re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', k[:-6] if k.endswith(
+                    'Action') else k))
+        return out
+
+    def states(self, f):
+        """the States of a feature whose actions give the avatar a resting state (Apply During Upload's do not)"""
+        out = []
+
+        def walk(x, depth=0):
+            if isinstance(x, dict):
+                if isinstance(x.get('actions'), list) and '@class' not in x:
+                    out.append(x)
+                for k, y in x.items():
+                    if depth < 20 and not k.startswith('@'):
+                        walk(y, depth + 1)
+            elif isinstance(x, list):
+                for y in x:
+                    walk(y, depth + 1)
+        if f['@class'] != 'ApplyDuringUpload':
+            walk(f)
+        return out
+
+    # ---- the avatar as VRCFury uploads it
+
+    def set_data(self, pr, v):
+        if pr[0] == 'a':
+            pr[1].data['m_IsActive'] = '1' if v >= 0.5 else '0'
+        elif pr[0] == 's':
+            names = self.av.shape_names(pr[1])
+            if pr[2] in names:
+                w = pr[1].data.get('m_BlendShapeWeights')
+                if not isinstance(w, list):
+                    w = pr[1].data['m_BlendShapeWeights'] = []
+                i = names.index(pr[2])
+                while len(w) <= i:
+                    w.append('0')
+                w[i] = v
+
+    def upload(self):
+        """Apply During Upload: its actions, done to the avatar"""
+        for c, f in self.feats:
+            if f['@class'] == 'ApplyDuringUpload':
+                for pr, v in self.props(f.get('action'), c).items():
+                    self.set_data(pr, v)
+
+    def rest(self):
+        """the implicit resting state: an object some action turns on rests off, one it turns off rests on; a Full
+        Controller toggled by a parameter rests off"""
+        for c, f in self.feats:
+            for st in self.states(f):
+                for a in self.actions(st):
+                    if a['@class'] == 'ObjectToggleAction' and inum(a.get('mode')) in (0, 1):
+                        g = self.go(a.get('obj'))
+                        if g is not None:
+                            self.set_data(('a', g), 0.0 if inum(a.get('mode')) == 0 else 1.0)
+            if f['@class'] == 'FullController' and _str(f.get('toggleParam')).strip():
+                g = self.go(f.get('rootObjOverride')) or c.go
+                if g is not None:
+                    self.set_data(('a', g), 0.0)
+
+    # ---- toggles
+
+    def toggles(self):
+        entries = []
+        for k, (c, f) in enumerate(x for x in self.feats if x[1]['@class'] == 'Toggle'):
+            name = _str(f.get('name'))
+            path = vrcf_path(name)
+            local = truthy(f.get('separateLocal', '0'))
+            props = self.props(f.get('localState' if local else 'state'), c)
+            if not props and truthy(f.get('hasTransition', '0')):  # an empty main state holds the end of the in one
+                props = self.props(f.get('localTransitionStateIn' if local else 'transitionStateIn'), c)
+            g = _str(f.get('globalParam')).strip() if truthy(f.get('useGlobalParam', '0')) else ''
+            param = g or 'VF%d_%s' % (k, name or 'Toggle')
+            if truthy(f.get('slider', '0')):
+                self.declared.setdefault(param, (1, num(f.get('defaultSliderValue'))))
+                self.rules.append((param, 'slider', props))
+                if path:
+                    self.skipped.append((path[-1], 'a slider'))
+                continue
+            dflt = 1.0 if truthy(f.get('defaultOn', '0')) else 0.0
+            self.declared.setdefault(param, (2, dflt))
+            self.rules.append((param, 'on', props))
+            tags = [t.strip() for t in _str(f.get('exclusiveTag')).split(',') if t.strip()] if truthy(
+                f.get('enableExclusiveTag', '0')) else []
+            entries.append((path, param, dflt, tags, truthy(f.get('holdButton', '0')),
+                            truthy(f.get('exclusiveOffState', '0'))))
+        count = {}
+        for e in entries:
+            for t in dict.fromkeys(e[3]):
+                count[t] = count.get(t, 0) + 1
+        group_on = {}
+        for path, param, dflt, tags, hold, off in entries:
+            group = next((t for t in tags if count[t] > 1), '')
+            if group and dflt:
+                group_on[group] = True
+        for path, param, dflt, tags, hold, off in entries:
+            group = next((t for t in tags if count[t] > 1), '')
+            if off and group and not group_on.get(group):  # on while the others of its tag are off: at first
+                self.declared[param] = (2, 1.0)
+                group_on[group] = True
+            if not path:  # no menu item
+                continue
+            ctl = {'name': path[-1], 'type': 101 if hold else 102, 'parameter': {'name': param}, 'value': 1.0}
+            if group:
+                ctl['group'] = group
+            self.menu.append((tuple(path[:-1]), ctl))
+
+    def blendshape_links(self):
+        """Blend Shape Links: [(base mesh, linked mesh, {base shape key: [linked ones]})]"""
+        av, out = self.av, []
+        for c, f in self.feats:
+            if f['@class'] != 'BlendShapeLink':
+                continue
+            name = _str(f.get('baseObj'))
+            cands = [g for g in av.gos if go_name(g) == name and any(x.cls == 137 for x in g.comps)]
+            if not cands:
+                warn('%s: its Blend Shape Link\'s base mesh %s is not in the avatar' % (go_name(c.go), name))
+                continue
+            bg = min(cands, key=lambda g: len(av_path(av, g)))
+            base = next(x for x in bg.comps if x.cls == 137)
+            for e in listof(f.get('linkSkins')):
+                sk = dictof(e).get('renderer')
+                if isinstance(sk, Obj) and sk.cls == 137 and sk.go is not None and id(sk.go) in av.inside:
+                    m = self.shape_map(f, av.shape_names(base), av.shape_names(sk))
+                    if m:
+                        out.append((base, sk, m))
+        return out
+
+    @staticmethod
+    def shape_map(f, base_names, link_names):
+        """which of a linked mesh's shape keys follow which of the base's: named alike (exactly, else ignoring case and
+        spaces, where that is unambiguous), all of them or the ones listed"""
+        norms = [lambda x: x] + ([] if truthy(f.get('exactMatch', '0')) else
+                                 [lambda x: re.sub(r'\s', '', x.lower())])
+
+        def finder(names):
+            tables = []
+            for n in norms:
+                t = {}
+                for x in names:
+                    t.setdefault(n(x), []).append(x)
+                tables.append({k: v[0] for k, v in t.items() if len(v) == 1})
+            return lambda x: next((t[n(x)] for n, t in zip(norms, tables) if n(x) in t), None)
+        fb, fl = finder(base_names), finder(link_names)
+        out = {}
+
+        def attempt(a, b, again):
+            a = fb(a)
+            if a is None or (a in out and not again):
+                return
+            b = fl(b)
+            if b is not None and b not in out.get(a, []):
+                out.setdefault(a, []).append(b)
+        for e in listof(f.get('includes')):
+            e = dictof(e)
+            a, b = _str(e.get('nameOnBase')).strip(), _str(e.get('nameOnLinked')).strip()
+            if a or b:
+                attempt(a or b, b or a, True)
+        if truthy(f.get('includeAll', '1')):
+            ex = {_str(dictof(e).get('name')) for e in listof(f.get('excludes'))}
+            for x in base_names:
+                if x not in ex:
+                    attempt(x, x, False)
+        return out
+
+    def apply(self, params, vals):
+        """what the toggles set, over the animators' values (their FX layers come last); then what linked shape keys
+        follow"""
+        if not self.rules and not self.shape_links:
+            return vals
+        vals = dict(vals)
+        for pn, test, props in self.rules:
+            x = params.get(pn, 0.0)
+            if test == 'slider':  # from where it rests to the full values
+                if x <= 0:
+                    continue
+                w = min(x, 1.0)
+                for pr, t in props.items():
+                    if pr[0] == 's':
+                        d = vals[pr] if pr in vals else self.av.default(pr)
+                        vals[pr] = d + (t - d) * w
+                    elif w >= 0.5:
+                        vals[pr] = t
+            elif (abs(x) > 1e-6) if test == 'nonzero' else (abs(x - 1.0) < 0.5):
+                vals.update(props)
+        for base, sk, m in self.shape_links:
+            for a, bs in m.items():
+                pr = ('s', base, a)
+                if pr in vals:
+                    for b in bs:
+                        vals[('s', sk, b)] = vals[pr]
+        return vals
+
+    # ---- full controllers
+
+    def full_controllers(self):
+        k = 0
+        for c, f in self.feats:
+            if f['@class'] != 'FullController':
+                continue
+            k += 1
+            root = self.go(f.get('rootObjOverride')) or c.go
+            prms = {}
+            for e in listof(f.get('prms')):
+                p = vrcf_asset(dictof(e).get('parameters'))
+                if p and self.db.get(p[0]):
+                    prms.update(read_params(self.db, p[0]))
+                elif p:
+                    warn('%s: a parameters file its Full Controller merges is not in the input' % go_name(c.go))
+            glob = [_str(x) for x in listof(f.get('globalParams'))]
+            free = truthy(f.get('allNonsyncedAreGlobal', '0'))
+            seen = {}
+
+            def rn(n, k=k, prms=prms, glob=glob, free=free, seen=seen):
+                """a parameter's name once merged: its own if global, else one of its own"""
+                if not n or n in VRC_PARAMS or (free and n not in prms):
+                    return n
+                if n not in seen:
+                    g = False
+                    for x in glob:
+                        neg, x = x.startswith('!'), x[1:] if x.startswith('!') else x
+                        star, x = x.endswith('*'), x[:-1] if x.endswith('*') else x
+                        if n == x or (star and n.startswith(x)):
+                            g = not neg
+                            if neg:
+                                break
+                    seen[n] = n if g else 'VF%d_%s' % (k, n)
+                return seen[n]
+            for n, v in prms.items():
+                self.declared.setdefault(rn(n), v)
+            if listof(f.get('rewriteBindings')):
+                warn('%s: its Full Controller rewrites animation paths, which is not converted' % go_name(c.go))
+            for e in listof(f.get('controllers')):
+                e = dictof(e)
+                p = vrcf_asset(e.get('controller'))
+                if not p:
+                    continue
+                if inum(e.get('type'), 5) != 5:
+                    self.miss('Full Controller controller(s) for layers other than FX')
+                    continue
+                if self.db.get(p[0]) is None:
+                    warn('%s: the controller its Full Controller merges is not in the input' % go_name(c.go))
+                    continue
+                ctl = Controller(Anim(self.db, self.av, self.bases(root)), p[0])
+                if ctl.guid is None:
+                    warn('%s: the controller its Full Controller merges cannot be read' % go_name(c.go))
+                    continue
+                self.merged.append((1 << 20, len(self.merged), ctl, {n: rn(n) for n in ctl.params}, False))
+            for e in listof(f.get('menus')):
+                e = dictof(e)
+                p = vrcf_asset(e.get('menu'))
+                if not p or self.db.get(p[0]) is None:
+                    continue
+                for pf, ctl in read_menu(self.db, p[0], [], tuple(vrcf_path(_str(e.get('prefix'))))):
+                    ctl = dict(ctl)
+                    ctl['parameter'] = {'name': rn(_str(dictof(ctl.get('parameter')).get('name')))}
+                    ctl['subParameters'] = [{'name': rn(_str(dictof(s).get('name')))}
+                                            for s in listof(ctl.get('subParameters'))]
+                    self.menu.append((pf, ctl))
+            tp = _str(f.get('toggleParam')).strip()
+            if tp and root is not None:
+                self.rules.append((rn(tp), 'nonzero', {('a', root): 1.0}))
+
+
+def link_armatures(h, vf, human):
+    """VRCFury's Armature Links, on the hierarchy Modular Avatar left (h)"""
+    av, U = h.av, h.U
+    humans = {id(g) for g in human.values()}
+    # a PhysBone's root and the bones it moves are neither moved nor given the avatar's bones' weights
+    pb_roots, pb_kids = set(), set()
+    for g in av.gos:
+        for c in g.comps:
+            if not is_physbone(c) or id(c) in h.dead or not truthy(c.data.get('m_Enabled', '1')):
+                continue
+            r = h.pb_root(c) or g
+            pb_roots.add(id(r))
+            stop = {id(x) for x in h.refs(c, 'ignoreTransforms')}
+            todo = list(h.down(r))
+            while todo:
+                x = todo.pop()
+                if id(x) not in stop and id(x) not in pb_kids:
+                    pb_kids.add(id(x))
+                    todo += h.down(x)
+    done, n_bones, n_links = [], 0, 0
+    for c, f in vf.links:
+        prop = vf.go(f.get('propBone'))
+        where = go_name(c.go)
+        if prop is None or id(prop) in h.deleted:
+            warn('%s: its Armature Link has no Link From object' % where)
+            continue
+        t = link_target(h, vf, f, human)
+        if t is None:
+            warn('%s: its Armature Link finds nothing in the avatar to link %s to' % (where, h.name(prop)))
+            continue
+        if any(id(g) in h.parent and h.under(g, prop) for g in human.values()):
+            warn('%s: its Armature Link\'s Link From (%s) holds bones of the avatar, so it is not linked' % (
+                where, h.name(prop)))
+            continue
+        rec = f.get('recursive')
+        rec = external_skin(h, prop) if rec is None else truthy(rec)
+        if '@align' in f:  # an old link: alignment follows recursion unless it said
+            ap = ar = asc = rec if f['@align'] is None else f['@align']
+        else:
+            ap, ar, asc = (truthy(f.get(k, '0')) for k in ('alignPosition', 'alignRotation', 'alignScale'))
+        suffix = _str(f.get('removeBoneSuffix'))
+        if not suffix.strip():
+            a, p = h.name(t), h.name(prop)
+            if a in p and a != p:
+                suffix = p.replace(a, '')
+        pairs = [(prop, t)]
+        if rec:
+            stack = [(prop, t)]
+            while stack:
+                p, q = stack.pop()
+                for ch in list(h.down(p)):
+                    nm = h.name(ch).replace(suffix, '') if suffix.strip() else h.name(ch)
+                    qc = next((x for x in h.down(q) if h.name(x) == nm), None)
+                    if qc is not None:
+                        pairs.append((ch, qc))
+                        stack.append((ch, qc))
+        auto = f.get('autoScaleFactor')
+        auto = rec if auto is None else truthy(auto)
+        factor = num(f.get('skinRewriteScalingFactor'), 1.0)
+        if auto:
+            factor = 1.0
+            if rec:
+                a = abs(U[id(t)].col[0].xyz.length) or 1e-12
+                factor = U[id(prop)].col[0].xyz.length / a
+                if truthy(f.get('scalingFactorPowersOf10Only', '1')) and factor > 0:
+                    lg = math.log10(factor)
+                    lg = math.ceil(lg) if lg % 1.0 > 0.75 else math.floor(lg)
+                    factor = 10.0 ** lg
+        one = truthy(f.get('forceOneWorldScale', '0'))
+        stay = []  # bones left where they are, and so all under them
+        for p, q in reversed(pairs):  # the ones found last first, as VRCFury does
+            if p is not prop and id(q) not in humans and (id(p) in pb_kids or any(h.under(p, s) for s in stay)):
+                stay.append(p)
+                continue
+            if ap or ar or asc or one:
+                tl, tr, ts = U[id(q)].decompose()
+                pl, pr, ps = U[id(p)].decompose()
+                s = Vector((1.0, 1.0, 1.0)) if one else (ts * factor if asc else ps)
+                h.place(p, Matrix.LocRotScale(tl if ap else pl, tr if ar else pr, s))
+            h.set_parent(p, q)
+            x = q
+            while x is not None:  # a PhysBone above where it goes leaves it out
+                if id(x) in pb_roots:
+                    h.blocks.setdefault(id(x), []).append(p)
+                x = h.up(x)
+            if id(p) not in pb_roots and id(p) not in pb_kids:
+                h.retarget[id(p)] = q
+                h.bound[id(p)] = U[id(p)].copy()
+                n_bones += 1
+            done.append((p, q))
+        n_links += 1
+    # what is left unused goes: an object nothing uses, with nothing under it that is used
+    used = vrcf_used(h)
+    gone = 0
+    for p, q in done:
+        if id(p) in h.deleted or id(p) in used:
+            continue
+        sub, todo = [], [p]
+        while todo:
+            x = todo.pop()
+            sub.append(x)
+            todo += h.down(x)
+        par = h.parent[id(p)]
+        if par is not None:
+            h.kids[id(par)].remove(p)
+        h.parent[id(p)] = None
+        for x in sub:
+            h.deleted.add(id(x))
+            h.retarget.setdefault(id(x), q)
+            gone += 1
+    if n_links:
+        log('VRCFury: %d Armature Link%s (%d objects linked to the avatar\'s, %d meshes\' bones given the avatar\'s, '
+            '%d objects left unused and removed)' % (n_links, '' if n_links == 1 else 's', len(done), n_bones, gone))
+
+
+def link_target(h, vf, f, human):
+    """an Armature Link's Link To: the first of its targets the avatar has (a humanoid bone, an object or the root,
+    with an offset path under it), then the humanoid bones above the first humanoid one"""
+    tos = [dictof(x) for x in listof(f.get('linkTo'))] or [{'useBone': '1', 'bone': 0}]
+    tries = list(tos)
+    first = next((x for x in tos if truthy(x.get('useBone', '1')) and not _str(x.get('offset')).strip()), None)
+    if first is not None:
+        tries += [{'useBone': '1', 'bone': b} for b in human_fallbacks(inum(first.get('bone')))]
+    for x in tries:
+        if truthy(x.get('useBone', '1')):
+            b = inum(x.get('bone'))
+            g = human.get(HUMAN_BONES[b]) if 0 <= b < len(HUMAN_BONES) else None
+        elif truthy(x.get('useObj', '0')):
+            g = vf.go(x.get('obj'))
+        else:
+            g = h.root
+        if g is None or id(g) in h.deleted or id(g) not in h.parent:
+            continue
+        off = _str(x.get('offset'))
+        if off.strip():
+            g = h.find(g, off)
+        if g is not None and h.under(g, h.root):
+            return g
+    return None
+
+
+def external_skin(h, prop):
+    """does a mesh outside prop use a bone inside it (an old Armature Link on Auto merges only then)"""
+    for r in h.av.renderers:
+        if r.cls != 137 or h.under(r.go, prop):
+            continue
+        bones = [x.go for x in [r.data.get('m_RootBone')] + listof(r.data.get('m_Bones')) if isinstance(x, Obj)]
+        if any(b is not None and id(b) in h.parent and h.under(b, prop) for b in bones):
+            return True
+    return False
+
+
+def vrcf_used(h):
+    """the GameObjects VRCFury's clean-up keeps: ones with a component (a Transform or a constraint aside), ones some
+    component names (a PhysBone's ignore list and the bones of meshes given the avatar's aside), and their parents"""
+    av, out = h.av, set()
+
+    def mark(g):
+        while g is not None and id(g) not in out:
+            out.add(id(g))
+            g = h.up(g)
+
+    def walk(x, skip_bones, key=''):
+        if isinstance(x, Obj):
+            g = x if x.cls == 1 else x.go
+            if g is not None and id(g) in av.inside and not (skip_bones and id(g) in h.retarget):
+                mark(g)
+        elif isinstance(x, dict):
+            for k, v in x.items():
+                if k not in ('m_GameObject', 'ignoreTransforms', 'm_Script'):
+                    walk(v, skip_bones or k == 'm_Bones', k)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v, skip_bones, key)
+    for g in av.gos:
+        if id(g) in h.deleted:
+            continue
+        for c in g.comps:
+            if c.cls in TRANSFORMS or id(c) in h.dead or ma_kind(c):
+                continue
+            if not is_constraint(c):
+                mark(g)
+            walk(c.data, False)
+    return out
 
 
 # ---------------------------------------------------------------- Setup Outfit
@@ -3969,6 +4817,9 @@ class OutfitSetup:
         merges = [c for g in gos for c in g.comps if ma_kind(c) == 'MergeArmature']
         if merges and all(ma_objref(av, c.data.get('mergeTarget')) is not None for c in merges):
             log('%s: set up for Modular Avatar already' % self.name)
+            return
+        if any(f['@class'] == 'ArmatureLink' for g in gos for c in g.comps if is_vrcfury(c) for f in vrcf_features(c)):
+            log('%s: set up for VRCFury already' % self.name)
             return
         ahips = human.get('Hips')
         if ahips is None or ahips.parent is None:
@@ -5394,6 +6245,8 @@ def convert(db, found, opts, outfits=()):
         x.fix(b.U)
     ma = ModularAvatar(av, dict(human), b.U, [m for x in setups for m in x.specs])
     an.ma = av.ma = ma
+    if an.vrcf is not None and an.vrcf.links:
+        link_armatures(ma, an.vrcf, human)
     jaw = human.get('Jaw')
     if jaw is not None and id(jaw) in an.chained():  # Unity's guess, which the avatar does not use as a jaw
         warn('the Jaw bone %s swings with a PhysBone, so it is left out of the humanoid map' % jaw.data.get('m_Name'))

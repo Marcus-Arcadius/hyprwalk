@@ -206,17 +206,29 @@ and `OUT.hypr3d.json` for hypr3d, carrying over:
   join the avatar's and its meshes follow them), Bone Proxy, Move To, PhysBone Blocker, and MA's
   menus and toggles (Menu Item, Menu Installer, Menu Group, Object Toggle, Shape Changer, Merge
   Animator for FX, Parameters)
+- VRCFury setups, built after MA's as VRCFury builds them:
+  - Armature Link: an outfit's bones are linked to the avatar's (snapped on if it says so), and its
+    meshes follow the avatar's bones.
+  - Toggles: they turn objects on and off, set shape keys and play clips. Exclusive tags become
+    groups, and the avatar starts in the resting state the toggles give it.
+  - Full Controller: its FX controller, menus and parameters are merged in.
+  - Blend Shape Link, Apply During Upload and Delete During Upload.
+  - The older Modes, Object State and Bone Constraint, upgraded as VRCFury upgrades them. The old
+    Unity 2019 save format is read too.
 
 `--outfit NAME|PATH` puts an outfit on that the avatar's prefab doesn't have yet, the way dragging
 it onto the avatar and running MA's *Setup Outfit* would. It works whether or not the outfit is set
-up for MA. It finds the outfit's hips, works out the prefix and suffix of its bone names, and matches
-bones with MA's name table. It turns A-pose arms to the avatar's pose and warns when bones are more
-than 1 cm off. `--outfit` can be given more than once. `--list` lists the avatars found, `--avatar NAME`
-picks one, and `--max-texture N` caps the texture size (default 2048).
+up for MA. It finds the outfit's hips, works out the prefix and suffix of its bone names, and
+matches bones with MA's name table. It turns A-pose arms to the avatar's pose and warns when bones
+are more than 1 cm off. An outfit set up with VRCFury is put on as it is, and its Armature Link
+does the rest. `--outfit` can be given more than once. `--list` lists the avatars found,
+`--avatar NAME` picks one, and `--max-texture N` caps the texture size (default 2048).
 
 Not converted: shader effects beyond the above, other animations, material swaps, MA's Replace
-Object, Blendshape Sync, Material Setter/Swap, Visible Head Accessory and Mesh Settings, VRCFury,
-constraints, particles, audio and contacts. Blender imports only binary FBX files.
+Object, Blendshape Sync, Material Setter/Swap, Visible Head Accessory and Mesh Settings, VRCFury's
+other features (sliders, puppets, SPS, gesture drivers, its blinking and visemes and so on; each is
+named in a warning), constraints, particles, audio and contacts. Blender imports only binary FBX
+files.
 
 ### tools/cs2map.py: Counter-Strike 2 maps
 
@@ -255,22 +267,36 @@ Valve's; this reads your copy of the game for your own use.
   under Blender, see below). It holds an unpacked avatar prefab, a variant of an FBX with overrides,
   PSD and TGA textures, and outfits with and without Modular Avatar, including one with VRM bone
   names in an A pose.
+- `tools/test/synth/booth.py OUTDIR`: a stand-in for an avatar bought on Booth, with outfits sold
+  for it, as `.unitypackage` files. It makes `SynthChan_v1.0.unitypackage`, laid out like a Booth
+  avatar: a humanoid FBX with Japanese shape keys and visemes, lilToon materials (the shader itself
+  isn't included, as on Booth), PNG and PSD textures, an FX controller, menus with Japanese labels,
+  PC and Quest prefabs, and PhysBones, colliders and a head-pat contact. It also makes several
+  outfits: a Modular Avatar dress, a plain parka for `--outfit`, a VRCFury cardigan and a hair pin
+  from an old VRCFury. Last, it puts the avatar package inside a Booth-style `.zip` with Shift-JIS
+  names. `unitygen.py` holds what `make.py` and `booth.py` share: Unity's YAML, `.meta` files, prefab
+  variants, controllers, VRChat, MA and VRCFury components, and the packing.
 - `tools/test/synth/check.py OUT.glb`: what a conversion wrote (the node tree, world positions,
   colliders, meshes, materials and images).
 - `tools/test/synth/skincmp.py A.glb [--pose NODE AXIS DEG]… B.glb`: compares where two GLBs put
   every mesh's skinned vertices.
-- `tools/test/synth/ma_unit.py`: unit tests of the Modular Avatar code on small hand-made
-  hierarchies.
+- `tools/test/synth/ma_unit.py` and `vrcf_unit.py`: unit tests of the Modular Avatar and VRCFury
+  code on small hand-made hierarchies and features (VRCFury's two save formats and its upgrades).
 - `tools/test/synth/fbxread.py FILE.fbx`: prints a binary FBX's model tree (plain python3).
-- `tools/test/regress.sh [--base REV|FILE] [--robot PATH]`: converts the synthetic avatars (and
-  VRChat's robot sample, if you give its path) with the working copy's converter and with HEAD's,
-  then compares the results. Avatars without MA must come out byte-identical.
+- `tools/test/regress.sh [--base REV|FILE] [--robot PATH] [--shots]`: converts the synthetic
+  avatars, the Booth-style packages (alone, with each outfit and from the zip) and VRChat's robot
+  sample (if you give its path) with the working copy's converter and with HEAD's, then compares
+  the results. Avatars with neither MA nor VRCFury must come out byte-identical, and the zip must
+  give the same GLB as the package. `--shots` also renders every result, front, side and walking,
+  with the harness.
 
 Scripts that use numpy run under Blender's Python:
 
 ```sh
 blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/make.py -- /tmp/synth
+blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/booth.py -- /tmp/booth
 blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/ma_unit.py
+blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/vrcf_unit.py
 ```
 
 ## Known limits
@@ -280,7 +306,9 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/ma_unit.py
 - In 3D mode, Alt+Tab doesn't reach Hyprland: Tab opens the Action Menu even with Alt held. Only keys
   with Super or Ctrl+Alt are passed through.
 - No lip sync. The visemes are carried over, but nothing drives them yet.
-- `tools/unity2hypr3d.py` doesn't read VRCFury setups yet (see its "not converted" list above).
+- `tools/unity2hypr3d.py` covers the VRCFury features outfits use most, not all of them (see its
+  "not converted" list above). It has been tested on synthetic packages, not yet on a real Booth
+  avatar.
 
 ## Credits
 
@@ -291,5 +319,8 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/ma_unit.py
   HhotateA's AvatarModifyTools (MIT, © 2021 @HhotateA_xR) and Azukimochi's BoneRenamer (MIT,
   © 2023 Azukimochi). The converter's other Modular Avatar support reimplements MA's behaviour in
   Python, written from reading MA's source. The license texts are in [THIRD_PARTY.md](THIRD_PARTY.md).
+- The converter's VRCFury support reimplements VRCFury's build behaviour
+  ([VRCFury](https://github.com/VRCFury/VRCFury), © 2022 Senky, under its own license). It was written
+  after reading VRCFury's source for its save format and behaviour, and contains none of its code.
 - VRChat, Modular Avatar, Counter-Strike 2 and Blender belong to their owners. This project has no
   connection with any of them, and it ships none of their assets.

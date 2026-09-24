@@ -46,3 +46,10 @@ SOFTWARE.
 
 The rest of the converter's Modular Avatar support reimplements MA's behaviour in Python. It was
 written from reading MA's source, and the notice above covers it too.
+
+## VRCFury
+
+`tools/unity2hypr3d.py` reads VRCFury components (https://github.com/VRCFury/VRCFury, (c) 2022 Senky) and
+reimplements what VRCFury does with them when an avatar is built. It was written after reading VRCFury's source
+for its save format and behaviour. It contains none of VRCFury's code or tables, and no part of VRCFury is
+distributed here.
