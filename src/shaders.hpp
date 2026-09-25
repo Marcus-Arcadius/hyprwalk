@@ -786,9 +786,13 @@ void main() {
                 mix(vec3(1.0), albedo, uSelfIllumAlbedo);
             float fogged;
             if (uGlass != 0 && a < 1.0) {
-                // premultiplied: the glass's own color by its opacity, all of what it reflects
-                c = gameFog(c * a + spec * specAO, vPos, fogged);
-                fragColor = vec4(srgbEncode(gameCurve(c * uExposure)), a);
+                // its own color by its opacity and all of what it reflects, over a background it hides by its
+                // opacity and by as much as it reflects (Fresnel): blended as one color at that cover, and encoded
+                // before it's scaled by it, as the frame is (encoded after, a pane came out two or three times too
+                // bright)
+                float cover = clamp(a + (1.0 - a) * luma(envBRDF(F0, r, max(dot(N, V), 0.0))), a, 1.0);
+                c = gameFog((c * a + spec * specAO) / cover, vPos, fogged);
+                fragColor = vec4(srgbEncode(gameCurve(c * uExposure)) * cover, cover);
                 return;
             }
             c = gameFog(c + spec * specAO, vPos, fogged);

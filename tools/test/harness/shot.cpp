@@ -355,6 +355,8 @@ int main(int argc, char** argv) {
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
+        // laid out for the --size, as the plugin's every frame does it: the mouse moves its cursor by logical pixels
+        menu.layout(W, H, 1);
         if (a == "--avatar") {
             need(i, 1);
             std::atomic<bool> cancel = false;

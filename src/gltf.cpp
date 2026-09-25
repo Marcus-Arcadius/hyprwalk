@@ -977,11 +977,17 @@ namespace h3d::gltf {
             const SJson* pj = sj.get("probes");
             if (!pj || pj->type != SJson::OBJECT)
                 continue;
-            float dims[3] = {0, 0, 0};
+            // (the map's numbers, bounded before they're used: a broken map mustn't take Hyprland down)
+            const auto bounded = [](double v, double lo, double hi) { return std::isfinite(v) ? std::clamp(v, lo, hi) : lo; };
+            float      dims[3] = {0, 0, 0};
             pj->numbers("size", dims, 3);
-            const int cols = (int)pj->number("columns", 16);
+            const int cols = (int)bounded(pj->number("columns", 16), 0, 65536);
             for (int c = 0; c < 3; ++c)
-                ls.probeDims[c] = (int)dims[c];
+                ls.probeDims[c] = (int)bounded(dims[c], 0, 65536);
+            if (cols < 1) {
+                log.push_back(std::format("lighting set {}: its light probes have {} columns, left out", k, pj->number("columns", 16)));
+                continue;
+            }
             if (const SJson* vols = pj->get("volumes"); vols && vols->type == SJson::ARRAY)
                 for (const auto& v : vols->items) {
                     SMapLightSet::SVolume vol;
@@ -994,12 +1000,17 @@ namespace h3d::gltf {
                     v.numbers("max", hi, 3);
                     std::memcpy(vol.toBox.m, m, sizeof(m));
                     vol.bounds = {{lo[0], lo[1], lo[2]}, {hi[0], hi[1], hi[2]}};
+                    bool inside = true; // its part of the atlas is in the atlas
                     for (int c = 0; c < 3; ++c) {
-                        vol.atlasOffset[c] = (int)a[c];
-                        vol.atlasSize[c]   = std::max(1, (int)b[c]);
+                        vol.atlasOffset[c] = (int)bounded(a[c], -1, 65536);
+                        vol.atlasSize[c]   = (int)bounded(b[c], 1, 65536);
+                        inside             = inside && vol.atlasOffset[c] >= 0 && vol.atlasOffset[c] + vol.atlasSize[c] <= ls.probeDims[c];
                     }
-                    vol.priority = (int)v.number("priority", 0);
-                    ls.volumes.push_back(vol);
+                    vol.priority = (int)bounded(v.number("priority", 0), -1e6, 1e6);
+                    if (inside)
+                        ls.volumes.push_back(vol);
+                    else
+                        log.push_back(std::format("lighting set {}: a light probe volume reaches outside its atlas, left out", k));
                 }
             // the atlas: its slices in a grid, `cols` wide; six blocks of probeDims[2] slices each
             jobs.push_back([&, pj, cols] {
@@ -1011,8 +1022,11 @@ namespace h3d::gltf {
                 if (!decode(pj->get("shadows"), 1, sw, sh, shd))
                     shd.clear();
                 const auto at = [&](int slice, int x, int y, int iw) { return ((size_t)(slice / cols * H + y) * iw + (size_t)(slice % cols * W + x)); };
-                if (w < cols * W || h < (6 * D + cols - 1) / cols * H)
+                // the rows of slices an image of the first n blocks needs, and whether it's as big
+                const auto holds = [&](int iw, int ih, int blocks) { return (int64_t)iw >= (int64_t)cols * W && (int64_t)ih >= ((int64_t)blocks * D + cols - 1) / cols * H; };
+                if (!holds(w, h, 6))
                     return;
+                const bool shadows = !shd.empty() && holds(sw, sh, 1);
                 ls.probes.assign((size_t)W * H * D * 6 * 4, 0);
                 ls.probeLuma.assign((size_t)W * H * D * 6, 0);
                 double sum[3] = {0, 0, 0};
@@ -1034,8 +1048,7 @@ namespace h3d::gltf {
                                 ++lit;
                             }
                             // the sun's shadow goes with the first block
-                            const bool hasShadow = z < D && !shd.empty() && sw >= cols * W;
-                            o[3]                 = toHalf(hasShadow ? shd[at(z, x, y, sw)] / 255.f : 0.f);
+                            o[3] = toHalf(shadows && z < D ? shd[at(z, x, y, sw)] / 255.f : 0.f);
                         }
                 for (int c = 0; c < 3; ++c)
                     ls.average[c] = lit ? (float)(sum[c] / (double)lit) : 0.f;

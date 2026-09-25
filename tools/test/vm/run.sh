@@ -1,34 +1,43 @@
 #!/usr/bin/env bash
-# run.sh OUTDIR: hypr3d.so in a real Hyprland, in a NixOS VM (vm.nix) that QEMU runs with no window, driven through
+# run.sh OUTDIR: hypr3d.so in a real Hyprland, in NixOS VMs (vm.nix) that QEMU runs with no window, driven through
 # the VM's own keyboard, mouse and tablet (QMP input events, so they go through libinput and Hyprland's input stack
 # to the plugin's hooks), with PipeWire and a virtual microphone singing test vowels. checks.py is the checklist.
 #
-#   tools/test/vm/run.sh [--avatars DIR] [--booth DIR] OUTDIR
+#   tools/test/vm/run.sh [--avatars DIR] [--booth DIR] [--only ITEMS] [--gpu virgl] OUTDIR
 #
 #   --avatars DIR  take BoothAccessories.glb (with its settings file) and BoothGimmicks.hands.vrma from DIR, as
 #                  regress.sh --keep leaves them in OUT/new; else they're converted here from the Booth-style
 #                  packages (synth/booth.py, then unity2hypr3d.py)
 #   --booth DIR    the Booth-style packages to convert (booth.py makes them there if missing)
+#   --only ITEMS   only these sections of checks.py, by item, separated by commas (and "0", which starts Hyprland
+#                  and loads the plugin): for working on one
+#   --gpu virgl    a GPU of this machine draws, through virglrenderer (QEMU's egl-headless display on the render
+#                  node H3D_RENDERNODE, /dev/dri/renderD129 by default: the Intel iGPU here), instead of Mesa's
+#                  llvmpipe in the VM
 #
-# Only synthetic things go into the VM: those two avatars, ToonTest.glb and TestRoom.glb (assets.py), the vowels
-# (synth/vowels.py) and hypr3d.so. OUTDIR gets results.txt (a line per check), results.json, frames/ (grim's PNGs
-# from inside the VM), logs/ (Hyprland's logs, the journal, pw-dump) and driver.log. OUTDIR/driver is the driver
-# (a GC root: delete OUTDIR to let the VM's closure go). The Hyprland is the running one's, as for build.sh, or
-# HYPR_BIN's. Exit status: 0 when every check passed.
+# Only synthetic things go into the VM: those two avatars, ToonTest.glb and TestRoom.glb (assets.py), LitCourt.glb
+# (litmap.py), the vowels (synth/vowels.py), wheel.py, the live check script and hypr3d.so. OUTDIR gets results.txt
+# (a line per check), results.json, frames/ (grim's PNGs from inside the VMs), logs/ (Hyprland's logs, the journal,
+# pw-dump; logs/hidpi: the second VM's), live/ (the live check's results and frames) and driver.log. OUTDIR/driver is
+# the driver (a GC root: delete OUTDIR to let the VMs' closure go). The Hyprland is the running one's, as for
+# build.sh, or HYPR_BIN's. Exit status: 0 when every check passed (a "known" failure is Hyprland's own bug).
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 VM="$REPO/tools/test/vm"
-AVATARS="" BOOTH="" OUT=""
+AVATARS="" BOOTH="" ONLY="" GPU=llvmpipe OUT=""
 while (($#)); do
     case "$1" in
         --avatars) AVATARS="$(realpath "$2")"; shift 2 ;;
         --booth) BOOTH="$(realpath -m "$2")"; shift 2 ;;
+        --only) ONLY="$2"; shift 2 ;;
+        --gpu) GPU="$2"; shift 2 ;;
         -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
         -*) echo "unknown option $1" >&2; exit 2 ;;
         *) OUT="$1"; shift ;;
     esac
 done
-[[ -n "$OUT" ]] || { echo "usage: run.sh [--avatars DIR] [--booth DIR] OUTDIR" >&2; exit 2; }
+[[ -n "$OUT" ]] || { echo "usage: run.sh [--avatars DIR] [--booth DIR] [--only ITEMS] [--gpu virgl] OUTDIR" >&2; exit 2; }
+[[ "$GPU" == llvmpipe || "$GPU" == virgl ]] || { echo "--gpu takes virgl" >&2; exit 2; }
 mkdir -p "$OUT"
 OUT="$(realpath "$OUT")"
 say() { echo ":: $*"; }
@@ -53,8 +62,13 @@ say "Hyprland: $HYPR_OUT"
 IN="$OUT/in"
 rm -rf "$IN"
 mkdir -p "$IN/wav" "$IN/emotes"
-cp "$REPO/hypr3d.so" "$IN/"
+cp "$REPO/hypr3d.so" "$VM/wheel.py" "$IN/"
 python3 "$VM/assets.py" "$IN" > /dev/null
+python3 "$VM/litmap.py" "$IN" > /dev/null
+# tools/test/live/check.sh, as you'd run it on your desktop (its section runs it in the VM)
+mkdir -p "$IN/repo/tools/test/live" "$IN/repo/tools/test/vm"
+cp "$REPO/tools/test/live/check.sh" "$REPO/tools/test/live/util.py" "$IN/repo/tools/test/live/"
+cp "$VM/assets.py" "$IN/repo/tools/test/vm/"
 python3 "$REPO/tools/test/synth/vowels.py" "$IN/wav" > /dev/null
 if [[ -z "$AVATARS" ]]; then
     AVATARS="$OUT/work/avatars"
@@ -104,20 +118,27 @@ with wave.open(os.path.join(d, 'o_then_hiss_long.wav'), 'wb') as w:
 EOF
 
 say "building the VM's test driver (vm.nix)"
-nix-build "$VM/vm.nix" -A driver --argstr hyprland "$HYPR_OUT" -o "$OUT/driver" > "$OUT/nix-build.log" 2>&1 ||
+nix-build "$VM/vm.nix" -A driver --argstr hyprland "$HYPR_OUT" --argstr gpu "$GPU" --argstr rendernode "${H3D_RENDERNODE:-/dev/dri/renderD129}" \
+    -o "$OUT/driver" > "$OUT/nix-build.log" 2>&1 ||
     { tail -n 30 "$OUT/nix-build.log"; die "nix-build failed, see $OUT/nix-build.log"; }
 BUILT=$(date +%s)
 
 say "running the checks (checks.py); the VM has no window"
-rm -rf "$OUT/frames" "$OUT/logs" "$OUT/results.txt" "$OUT/results.json"
-mkdir -p "$OUT/tmp"
+rm -rf "$OUT/frames" "$OUT/logs" "$OUT/live" "$OUT/results.txt" "$OUT/results.json"
+# The driver keeps the VMs' disk images, its shared folder and its sockets in XDG_RUNTIME_DIR (before TMPDIR): a
+# folder of this run's, on disk (the runtime dir is a small tmpfs, which a core dump fills) and with a short path (a
+# socket's path can't be long), gone afterwards
+RUNDIR="$(mktemp -d "${H3D_VM_TMP:-/tmp}/h3d-vm.XXXXXX")"
+trap 'rm -rf "$RUNDIR"' EXIT
 set +e
-# no DISPLAY or WAYLAND_DISPLAY: the driver then starts QEMU with -nographic (the VM's config asks for it too)
-env -u DISPLAY -u WAYLAND_DISPLAY TMPDIR="$OUT/tmp" H3D_IN="$IN" H3D_OUT="$OUT" \
+# no DISPLAY or WAYLAND_DISPLAY: the driver then starts QEMU with -nographic (the VM's config asks for it too). With
+# virgl, a WAYLAND_DISPLAY that goes nowhere keeps it off, so QEMU's display is egl-headless, which opens no window
+NODISPLAY=(-u WAYLAND_DISPLAY)
+[[ "$GPU" == virgl ]] && NODISPLAY=(WAYLAND_DISPLAY=/nonexistent/no-display)
+env -u DISPLAY "${NODISPLAY[@]}" TMPDIR="$RUNDIR" XDG_RUNTIME_DIR="$RUNDIR" H3D_IN="$IN" H3D_OUT="$OUT" H3D_ONLY="$ONLY" \
     "$OUT/driver/bin/nixos-test-driver" --test-script "$VM/checks.py" -o "$OUT" > "$OUT/driver.log" 2>&1
 STATUS=$?
 set -e
-rm -rf "$OUT/tmp"
 END=$(date +%s)
 
 if [[ -f "$OUT/results.txt" ]]; then

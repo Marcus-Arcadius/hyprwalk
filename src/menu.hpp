@@ -72,6 +72,9 @@ namespace h3d {
 
         // every frame: fades, asks for the page again and draws it anew when it looks different
         void      update(float dt, int outW, int outH, float scale);
+        // where it goes and how big it is on an output of that size (update() does it): the mouse moves the cursor by
+        // logical pixels of it
+        void      layout(int outW, int outH, float scale);
         SHudImage hud() const;
 
       private:
@@ -90,6 +93,7 @@ namespace h3d {
         float                 m_fade = 0;
         float                 m_flash = 0; // a slot just picked lights up
         int                   m_flashSlot = -1;
+        int                   m_R             = 0; // its radius, output pixels
         float                 m_radiusLogical = 300;
         float                 m_x = 0, m_y = 0; // where its middle is, output pixels
 

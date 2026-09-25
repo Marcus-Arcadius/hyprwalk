@@ -123,8 +123,13 @@ the vowels' formant values are the usual measurements of Japanese vowels. It bor
 `tools/test/vm/vm.nix` runs Hyprland in a NixOS VM the way Hyprland's own test does (`nix/tests/default.nix` in
 https://github.com/hyprwm/Hyprland, BSD 3-Clause License, Copyright (c) 2022-2026, vaxerski): nixpkgs'
 `testers.runNixOSTest`, QEMU without VGA and with a virtio GPU. No code of it is copied. The VM itself is built from
-nixpkgs (MIT License) when you run the test, and nothing of it is in this repo; its QEMU, fonts, PipeWire, foot and
-grim keep their own licenses.
+nixpkgs (MIT License) when you run the test, and nothing of it is in this repo; its QEMU (with `--gpu virgl`, the
+full one, with virglrenderer), fonts, PipeWire, foot, grim, wev and Python keep their own licenses.
+
+`src/main.cpp`'s `onAxis` sends a window the wheel the way Hyprland's `CInputManager::onMouseWheel` does (its scroll
+factors and its discrete scrolling made up for high-resolution wheels, `input:emulate_discrete_scroll`), written
+after reading it (https://github.com/hyprwm/Hyprland, BSD 3-Clause License, Copyright (c) 2022-2026, vaxerski), so
+that a window scrolls the same in 3D as on the desktop.
 
 ## VRCFury
 

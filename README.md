@@ -129,11 +129,12 @@ all the way in the eight directions, from up clockwise.
 **Lip sync** is off until you turn it on: with `lipsync = true` in the config,
 `hyprctl hypr3d avatar lipsync on`, or the Action Menu's options. Then, while you are in 3D with an
 avatar, hypr3d listens to your default microphone through PipeWire (as the "hypr3d lip sync"
-stream), and a red "lip sync: listening" badge sits in the top right corner. How loud you are opens
-the mouth, and the vowel you make (its first two formants, from linear prediction) picks the shape:
-the avatar's aa, ih, ou, ee and oh visemes. A consonant keeps the last vowel's shape, less open, for a
-moment; hiss or noise that goes on shuts the mouth. It keeps a quarter of a second of sound at most, to
-look at, and nothing is written anywhere or sent. Leaving 3D, or turning it off, closes the microphone.
+stream), and a red "lip sync: listening" badge sits in the top right corner, below Hyprland's
+notifications while any show. How loud you are opens the mouth, and the vowel you make (its first
+two formants, from linear prediction) picks the shape: the avatar's aa, ih, ou, ee and oh visemes. A
+consonant keeps the last vowel's shape, less open, for a moment; hiss or noise that goes on shuts the
+mouth. It keeps a quarter of a second of sound at most, to look at, and nothing is written anywhere or
+sent. Leaving 3D, or turning it off, closes the microphone.
 
 ## hyprctl
 
@@ -148,6 +149,7 @@ look at, and nothing is written anywhere or sent. Leaving 3D, or turning it off,
 | `click [left\|right\|middle]` | click where the crosshair is |
 | `sens [value]` | mouse sensitivity |
 | `grab`, `place`, `hold dist [scale]`, `reset-windows` | carry windows, and put them all back |
+| `windows` | the windows off the wall: where, how far from your eye and how big (1 = as on the wall), and how far and big the one you carry is held |
 | `map [path\|none\|reload\|forget\|scale s]` | load a map; `forget` drops the start and desktop place saved for it |
 | `spawn [here]` | go back to the start, or make where you stand the start |
 | `desktop [here [height]]` | where the desktop hangs, or hang it where the crosshair points |
@@ -384,42 +386,87 @@ Valve's; this reads your copy of the game for your own use.
 - `tools/test/harness/ctl_check.sh DIR`: those, checked on the MA accessories and dances regress.sh
   converted (its `--keep`'s `OUT/new`): sliders by number and percent, a two-axis one, a toggle and
   its material variant, the menu's pages, a dial turned by the mouse and the wheel, a stick, and an
-  emote at twice its speed.
+  emote at twice its speed. It runs at the VM's 1280×800, and the harness lays its menu out for its
+  `--size` before each option, as the plugin does every frame, so the dial and the stick come out
+  where the VM test has them.
 - `tools/test/harness/lipsync_check.sh AVATAR.glb`: lip sync on vowels `tools/test/synth/vowels.py`
   sings (a source-filter model of a man's and a woman's a, i, u, e, o), silence, hiss, a quiet
   voice, and hiss right after a vowel.
-- `tools/test/vm/run.sh OUTDIR`: the plugin in a real Hyprland, in a NixOS VM (`vm.nix`) built the way
-  Hyprland's own CI tests Hyprland: QEMU with KVM and a virtio GPU that Mesa's llvmpipe draws for, the
-  Hyprland you run (the one `build.sh` builds against) started as a user's login session on the VM's
-  tty1, and PipeWire with a virtual microphone. QEMU opens no window. The NixOS test driver then runs
-  `checks.py`, a checklist:
+- `tools/test/vm/run.sh [--only ITEMS] [--gpu virgl] OUTDIR`: the plugin in a real Hyprland, in NixOS
+  VMs (`vm.nix`) built the way Hyprland's own CI tests Hyprland: QEMU with KVM and a virtio GPU that
+  Mesa's llvmpipe draws for, the Hyprland you run (the one `build.sh` builds against, or `HYPR_BIN`'s)
+  started as a user's login session on the VM's tty1, and PipeWire with a virtual microphone. QEMU
+  opens no window. The NixOS test driver then runs `checks.py`, a checklist, in a VM at 1280×800 and then in
+  one at 1920×1200 (a virtio GPU only takes the mode it's given):
   - loading the plugin with `hyprctl plugin load`, with `hl.plugin.load` in a Lua config and with
     `plugin =` in a `hyprland.conf`, unloading it (in 3D too) and loading it again, and that
     Hyprland exits cleanly with it
   - the config values, set in the config, at run time, and through `hyprctl keyword`
   - input from the VM's own keyboard, PS/2 mouse, USB tablet and wheel (QMP input events, so they
-    pass through libinput and Hyprland's input stack to the plugin's hooks): the Action Menu, a
-    slider's dial and a stick, F1–F8 with and without the Shifts, Super and Ctrl+Alt shortcuts,
-    and clicking and typing into a window in 3D
+    pass through libinput and Hyprland's input stack to the plugin's hooks), and from a mouse with a
+    high-resolution wheel (`wheel.py`, through uinput): the Action Menu, a slider's dial and a
+    stick, F1–F8 with and without the Shifts, Super and Ctrl+Alt shortcuts, and clicking and typing
+    into a window in 3D
+  - what a window gets in 3D, seen by `wev`: the pointer entering, moving (surface-local, where the
+    crosshair is), leaving, the buttons, keys only while you type, and the wheel exactly as on the
+    2D desktop, whole notches and half ones, both wheels
+  - carrying windows: G, a left or right click, Esc and X, the wheel and Ctrl+wheel while holding
+    one, `hyprctl hypr3d grab`, `place`, `hold`, `reset-windows` and `windows`, and a placed window
+    that keeps drawing when its workspace is hidden
+  - a second monitor (Hyprland's own headless output): 3D on one while the other stays 2D, then on
+    the other; the mouse, the focus, notifications on the focused one, and a monitor going away in 3D
+  - scales 1.5 and 2: the frame, the crosshair, the Action Menu and the badge drawn at the monitor's
+    scale, the dial's mouse counts, aiming, clicking and typing, and the cursor hidden
   - sliders, a material variant and an emote's speed through hyprctl; the Lua functions and the
     `hypr3d:toggle` and `hypr3d:menu` dispatchers, from hyprctl and from keybinds
   - stencil eyes and outlines on `assets.py`'s ToonTest.glb, and its TestRoom.glb as a map
-  - that Hyprland draws its notifications over the 3D view, and its windows (rounding, blur,
-    borders) as before once 3D is left
+  - a map with a game's own lighting, as `tools/cs2map.py` writes one: `litmap.py`'s LitCourt.glb, made
+    up here, with two lightmap sets, light probes, the sun's baked shadow, fog, a sky, an exposure range,
+    a tone curve, Source 2 materials (glass, decals, detail textures, self-illumination), a blend layer,
+    a backdrop and block compressed textures, each checked in a frame
+  - that Hyprland draws its notifications over the 3D view, that the lip sync badge moves below them,
+    and that Hyprland draws its windows (rounding, blur, borders) as before once 3D is left
   - lip sync through PipeWire: `pw-cat` sings the vowels into the virtual microphone, and the
     visemes, the badge, the "hypr3d lip sync" stream in `pw-dump` and its going away when you
     leave 3D or turn lip sync off are checked
+  - `tools/test/live/check.sh`, below, run in the VM with its microphone prompts sung into the test
+    microphone, and stopped with Ctrl+C halfway through
+  - that Hyprland exits cleanly with windows open. Hyprland 0.55.x doesn't: it crashes in its dwindle
+    layout (with or without hypr3d), which upstream fixed in 0.56.0 (commit 338bdbb3), so this check
+    says "known" there instead of failing, and the other checks close the terminals before they stop
+    Hyprland
 
   `OUTDIR` gets `results.txt` (a line per check), `results.json`, `frames/` (grim's frames from inside
-  the VM), `logs/` (Hyprland's logs, the VM's journal, `lipsync.json`, `pw-dump.json`) and
-  `driver.log`. Only synthetic things go into the VM: BoothAccessories converted from `booth.py`'s
-  packages (or taken from `--avatars DIR`, as `regress.sh --keep` leaves them), `assets.py`'s two
-  files, the vowels and `hypr3d.so`. A run takes about six minutes, nearly all of it in the VM (Mesa
-  draws in software there, at about 13 frames a second). The first run builds the VM in about a minute
-  and fetches about 410 MiB for it (1.3 GiB unpacked, mostly QEMU and a kernel); `OUTDIR/driver` keeps
-  the VM's closure (4 GiB, most of it already in a NixOS store) alive until `OUTDIR` is deleted.
-  Hyprland 0.55.2 itself crashes when it exits with windows open (in its layout code, with or without
-  hypr3d), so the checks close the terminals before they stop it.
+  the VM), `logs/` (Hyprland's logs, the VM's journal, `lipsync.json`, `pw-dump.json`; `logs/hidpi`
+  for the second VM), `live/` (the live check's results and frames) and `driver.log`. `--only 14,15`
+  runs only those sections (after section 0, which starts Hyprland). Only synthetic things go into the
+  VM: BoothAccessories converted from `booth.py`'s packages (or taken from `--avatars DIR`, as
+  `regress.sh --keep` leaves them), `assets.py`'s two files, `litmap.py`'s LitCourt, the vowels,
+  `wheel.py`, the live check script and `hypr3d.so`. A run takes about eleven minutes, nearly all of it
+  in the VMs: Mesa draws in software there, at 6 to 13 frames a second (the lit map's first frames take
+  a while more, as llvmpipe compiles its shaders). With `--gpu virgl` a GPU of yours draws instead,
+  through virglrenderer on the render node
+  `H3D_RENDERNODE` (`/dev/dri/renderD129` by default, an Intel iGPU here): QEMU's egl-headless display,
+  which opens no window either. The first run builds the VMs in about a minute and fetches about
+  410 MiB for them (1.3 GiB unpacked, mostly QEMU and a kernel), `--gpu virgl` about 200 MiB more (the
+  full QEMU, 1 GiB unpacked); `OUTDIR/driver` keeps the VMs' closure (4 GiB, most of it already in a
+  NixOS store) alive until `OUTDIR` is deleted. While it runs, the VMs' disks and the driver's
+  sockets are in a folder under `/tmp` (`H3D_VM_TMP` picks another), deleted afterwards: the test
+  driver puts them in `XDG_RUNTIME_DIR`, a small tmpfs that a core dump fills.
+- `tools/test/live/check.sh OUTDIR [--mic] [--avatar FILE] [--map FILE|--no-map]`: for what only your
+  own desktop can check: your GPU and monitor, and your voice. You run it, in your Hyprland session,
+  and don't touch the mouse or keyboard while it runs. It loads `hypr3d.so` and compares your desktop
+  before and after, enters 3D on the focused monitor (and checks it keeps up with your monitor's
+  refresh rate), loads an avatar (`--avatar`, else `assets.py`'s ToonTest) and looks at it, opens the
+  Action Menu and plays an emote, shows a notification over the 3D view, picks up the window the
+  crosshair starts on and puts it back, walks into your map (`--map`, else
+  `~/.local/share/hypr3d/maps/de_mirage.glb` if you have it), leaves 3D and unloads the plugin. With
+  `--mic` it turns lip sync on and asks you, in notifications over the 3D view, to say a, i, u, e and
+  o, then "sss", then nothing, and says which vowel it heard each time. `OUTDIR` gets `results.txt`,
+  `frames/` (grim's, and `diff-*.png` showing in red what changed between two), `status/` (hyprctl's
+  answers), `lipsync.jsonl` and `hypr3d.log` (the plugin's lines from Hyprland's log). Whatever
+  happens, Ctrl+C included (Esc leaves 3D first, so the terminal gets it), it leaves 3D, turns lip
+  sync off and unloads the plugin. It won't start while hypr3d is loaded already.
 - `tools/test/synth/make.py PROJ`: writes a synthetic Unity project for the converter's tests (run it
   under Blender, see below). It holds an unpacked avatar prefab, a variant of an FBX with overrides,
   PSD and TGA textures, and outfits with and without Modular Avatar, including one with VRM bone
@@ -491,10 +538,13 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check
 - Lip sync knows five vowels and how loud you are, not consonants. Its vowels are Japanese ones,
   between a man's and a woman's voice; other voices and languages may pick the wrong shape now and
   then. It was tested on sung vowels, through the harness and through PipeWire in a VM
-  (`tools/test/vm`), not on a real voice.
+  (`tools/test/vm`); `tools/test/live/check.sh --mic` tries it on your voice.
 - The plugin's Hyprland code (its hooks, dispatchers, hyprctl command, Lua functions and config
   values) is tested in a real Hyprland in a VM (`tools/test/vm`), on a virtual GPU that Mesa draws for
-  in software, not on your monitor and GPU.
+  in software, at scales 1, 1.5 and 2 and with a second (headless) monitor; `tools/test/live/check.sh`
+  goes through it on your own monitor and GPU.
+- Hyprland 0.55.x crashes when it quits with windows open, with or without hypr3d (its dwindle
+  layout calls a window that's gone). Hyprland 0.56.0 fixed it (commit 338bdbb3).
 - `tools/unity2hypr3d.py` covers the MA and VRCFury features avatars and outfits use most, not all
   of them (see its "not converted" list above). It has been tested on synthetic packages and on
   three free Booth items (an UnlitWF avatar and two MA dance motions), not on paid avatars or

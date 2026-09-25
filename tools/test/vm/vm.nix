@@ -1,30 +1,33 @@
-# The NixOS VM that tools/test/vm/run.sh tests hypr3d in, the way Hyprland's own CI tests Hyprland
+# The NixOS VMs that tools/test/vm/run.sh tests hypr3d in, the way Hyprland's own CI tests Hyprland
 # (nix/tests/default.nix in its repo): QEMU with KVM and a virtio GPU (Mesa's llvmpipe draws), the very
 # Hyprland hypr3d.so was built for, started as alice's login session on tty1 the way a display manager
 # would, and PipeWire with a virtual microphone. The driver starts QEMU with -nographic, and so does
-# virtualisation.graphics = false, so no window opens anywhere.
+# virtualisation.graphics = false, so no window opens anywhere (with gpu = "virgl", QEMU's egl-headless display,
+# which draws on a render node and opens no window either).
 #
 #   nix-build tools/test/vm/vm.nix -A driver --argstr hyprland /nix/store/...-hyprland-...
 #
-# The checks are tools/test/vm/checks.py, which run.sh hands the driver (--test-script), so changing them
-# doesn't rebuild anything.
+# There are two VMs, the same but for the screen: `machine` at 1280x800, and `hidpi` at 1920x1200 for scales 1.5
+# and 2. (virtio-gpu only takes the mode it prefers, the xres and yres it's given: any other one fails DRM's atomic
+# test, so a monitor can't change its resolution in a VM.) The checks are tools/test/vm/checks.py, which run.sh hands
+# the driver (--test-script), so changing them doesn't rebuild anything.
 {
   hyprland, # the Hyprland's store path (the one build.sh built against)
   nixpkgs ? <nixpkgs>,
   cores ? 8, # llvmpipe draws with all of them
+  # "llvmpipe": Mesa draws in software on a plain virtio GPU. "virgl": a GPU of the host's draws, through
+  # virglrenderer: QEMU's egl-headless display on its render node (it opens no window)
+  gpu ? "llvmpipe",
+  rendernode ? "/dev/dri/renderD129", # the Intel iGPU here (renderD128 is the NVIDIA that runs the desktop)
 }:
 let
   pkgs = import nixpkgs { };
   # the one that's installed, with its closure (not in pure evaluation mode: nix-build is fine)
   hypr = builtins.storePath hyprland;
-in
-pkgs.testers.runNixOSTest {
-  name = "hypr3d-vm";
-  testScript = "raise Exception('run tools/test/vm/run.sh: it gives the driver the test script')";
-  skipLint = true;
-  skipTypeCheck = true;
 
-  nodes.machine =
+  # a VM with a screen of that size
+  vm =
+    width: height:
     { config, pkgs, ... }:
     {
       system.stateVersion = "26.11";
@@ -32,16 +35,25 @@ pkgs.testers.runNixOSTest {
       virtualisation = {
         inherit cores;
         memorySize = 4096;
-        graphics = false;
+        # (no -nographic with virgl: it would take the place of egl-headless, a display that opens no window either)
+        graphics = gpu == "virgl";
         diskSize = 8192; # (a sparse image) room for a core dump, so a crash's stack trace can be had
-        # no VGA, a virtio GPU without 3D: Mesa's llvmpipe draws, through GBM on its DRM device. No VMware port
-        # either: through it the PS/2 mouse turns into an absolute vmmouse, and there'd be no relative mouse (the
-        # USB tablet is the absolute one)
+        # no VGA, a virtio GPU without 3D: Mesa's llvmpipe draws, through GBM on its DRM device (or, with gpu =
+        # "virgl", one with 3D). No VMware port either: through it the PS/2 mouse turns into an absolute vmmouse, and
+        # there'd be no relative mouse (the USB tablet is the absolute one)
         qemu.options = [
           "-vga none"
-          "-device virtio-gpu-pci,xres=1280,yres=800"
           "-machine vmport=off"
-        ];
+        ]
+        ++ (
+          if gpu == "virgl" then
+            [
+              "-device virtio-gpu-gl-pci,xres=${toString width},yres=${toString height}"
+              "-display egl-headless,rendernode=${rendernode}"
+            ]
+          else
+            [ "-device virtio-gpu-pci,xres=${toString width},yres=${toString height}" ]
+        );
       };
 
       hardware.graphics.enable = true;
@@ -72,6 +84,8 @@ pkgs.testers.runNixOSTest {
         grim
         jq
         pipewire
+        python3 # wheel.py: a mouse with a high-resolution wheel, through uinput
+        wev # prints the pointer and keyboard events its window gets
         wireplumber
       ]);
 
@@ -153,4 +167,15 @@ pkgs.testers.runNixOSTest {
         };
       };
     };
+in
+pkgs.testers.runNixOSTest {
+  name = "hypr3d-vm";
+  testScript = "raise Exception('run tools/test/vm/run.sh: it gives the driver the test script')";
+  skipLint = true;
+  skipTypeCheck = true;
+  # (the tests' own QEMU has no OpenGL)
+  qemu.package = if gpu == "virgl" then pkgs.qemu else pkgs.qemu_test;
+
+  nodes.machine = vm 1280 800;
+  nodes.hidpi = vm 1920 1200;
 }

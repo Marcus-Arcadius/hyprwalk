@@ -18,10 +18,11 @@ check() { # what, the harness output, a line it must have
 
 A="$DIR/BoothAccessories.glb"
 if [[ -f "$A" ]]; then
-    out="$("$SHOT" --size 64x64 --avatar "$A" \
+    # (at the VM's 1280x800, the menu's radius is 224 px: the same numbers as tools/test/vm/checks.py's)
+    out="$("$SHOT" --size 1280x800 --avatar "$A" \
         --ctl "avatar slider ニーハイの緩さ 50%" --ctl "avatar slider しっぽの向き 0.5 -0.25" \
         --ctl "avatar slider しっぽの向き 0.5" --ctl "avatar toggle 紺の制服 on" --ctl "avatar parts" --ctl "avatar parts reset" \
-        --key tab --key 4 --key 8 --key 8 --key 1 --mouse 150 0 --wheel 2 --ctl menu --click left \
+        --key tab --key 4 --key 8 --key 8 --key 1 --mouse 150 0 --ctl menu --wheel 2 --ctl menu --click left \
         --key 3 --mouse 90 -45 --ctl menu --key backspace --key esc --ctl menu --ctl "avatar parts" 2>&1)"
     check 'a slider by percent' "$out" 'ニーハイの緩さ: 50%'
     check 'a two-axis one by x and y' "$out" 'しっぽの向き: +50% -25%'
@@ -29,13 +30,14 @@ if [[ -f "$A" ]]; then
     check 'a toggle' "$out" '紺の制服: on'
     check '... and the material variant it switches' "$out" '{"name": "紺の制服", "on": true}'
     check 'all as it came again' "$out" 'ctl avatar parts reset -> ok'
-    check 'Tab, 4, More, More, 1: the third outfit page'"'"'s first slider'"'"'s dial, turned by the mouse, two wheel notches' \
+    check 'Tab, 4, More, More, 1: the third outfit page'"'"'s first slider'"'"'s dial' \
         "$out" '"path": "main/outfit:3/~ニーハイの緩さ", "title"'
-    check '... at 20%' "$out" '"dial": {"label": "ニーハイの緩さ", "value": 0.200}'
-    check 'a stick moved by the mouse' "$out" '"dial": {"label": "しっぽの向き", "value": [0.309, 0.155]}'
+    check '... turned by the mouse, 150 counts right of the top (224 px out): 12.6%' "$out" '"dial": {"label": "ニーハイの緩さ", "value": 0.126}'
+    check '... and two wheel notches on: 25%' "$out" '"dial": {"label": "ニーハイの緩さ", "value": 0.250}'
+    check 'a stick moved by the mouse, 90 and -45 counts' "$out" '"dial": {"label": "しっぽの向き", "value": [0.414, 0.207]}'
     check 'Backspace and Esc: closed' "$out" 'ctl menu -> {"open": false}'
-    check 'what the dial and the stick set, kept' "$out" '{"name": "ニーハイの緩さ", "value": 0.200}'
-    check '...' "$out" '{"name": "しっぽの向き", "value": [0.309, 0.155]}'
+    check 'what the dial and the stick set, kept' "$out" '{"name": "ニーハイの緩さ", "value": 0.250}'
+    check '...' "$out" '{"name": "しっぽの向き", "value": [0.414, 0.207]}'
 else
     echo "skipped: no $A"
 fi

@@ -304,6 +304,7 @@ class CDesktop3D {
     std::vector<float>            m_micSamples;
     std::vector<uint32_t>         m_badge;
     int                           m_badgeW = 0, m_badgeH = 0;
+    CBox                          m_badgeBox; // where it was drawn last, output pixels (empty: it wasn't)
     float                         m_badgeScale = 0;
     uint64_t                      m_badgeSerial = 0;
     // emotes from files: the config's, and those hyprctl adds (made again for each avatar that loads)
@@ -359,7 +360,11 @@ class CDesktop3D {
     bool                         m_typing = false;
     Vector2D                     m_look;
     Vector2D                     m_lastAbs{-1, -1};
-    std::array<double, 2>        m_scrollAcc{}; // unsent fractions of a wheel notch, in 1/120ths, per axis
+    struct {
+        bool     negative = false;
+        uint32_t axis = 0, timeMs = 0;
+        uint32_t acc = 0; // 1/120ths of a notch not sent as a whole one yet
+    } m_wheel;            // a high-resolution wheel's notches made up for the window aimed at, as Hyprland does
 
     // the Action Menu (Tab), like VRChat's: while it's open the mouse moves its cursor, not the camera
     CActionMenu m_menu{[this](const std::string& id) {
@@ -2313,28 +2318,74 @@ void CDesktop3D::onAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& inf
     if (m_mode != MODE_ACTIVE || m_aimSurface.expired())
         return;
 
+    // to the window as Hyprland sends it on the 2D desktop (CInputManager::onMouseWheel): the scroll factor (a window
+    // rule's first; the device's own isn't known here), and for clients without high-resolution scrolling whole
+    // notches made up from a high-resolution wheel's (input:emulate_discrete_scroll: the first at once, then one per
+    // notch's worth, afresh after half a second or a change of direction)
     static auto PSCROLL   = CConfigValue<Config::FLOAT>("input:scroll_factor");
     static auto PTPSCROLL = CConfigValue<Config::FLOAT>("input:touchpad:scroll_factor");
-    const double factor   = e.source == WL_POINTER_AXIS_SOURCE_FINGER ? *PTPSCROLL : *PSCROLL;
-
-    // deltaDiscrete is already in 1/120ths of a notch (hi-res wheels send
-    // fractions); clients without v120 support only get whole notches
-    const int32_t value120 = std::round(factor * e.deltaDiscrete);
-    int32_t       discrete = 0;
-    if (value120 != 0 && e.axis < m_scrollAcc.size()) {
-        auto& acc = m_scrollAcc[e.axis];
-        if (std::signbit(acc) != std::signbit((double)value120))
-            acc = 0;
-        acc += value120;
-        discrete = (int32_t)(acc / 120.0);
-        acc -= discrete * 120.0;
+    static auto PEMULATE  = CConfigValue<Config::INTEGER>("input:emulate_discrete_scroll");
+    const bool  touchpad  = *PTPSCROLL <= 0.f || e.source == WL_POINTER_AXIS_SOURCE_FINGER;
+    double      factor    = touchpad ? *PTPSCROLL : *PSCROLL;
+    if (m_aimed >= 0 && m_aimed < (int)m_panels.size()) {
+        if (const auto w = m_panels[m_aimed].window.lock()) {
+            if (!touchpad && w->isScrollMouseOverridden())
+                factor = w->getScrollMouse();
+            else if (touchpad && w->isScrollTouchpadOverridden())
+                factor = w->getScrollTouchpad();
+        }
     }
 
-    g_pSeatManager->sendPointerAxis(e.timeMs, e.axis, e.delta * factor, discrete, value120, e.source, e.relativeDirection);
+    double discrete = e.deltaDiscrete != 0 ? factor * e.deltaDiscrete / std::abs(e.deltaDiscrete) : 0;
+    double delta    = e.delta * factor;
+    if (e.source == WL_POINTER_AXIS_SOURCE_WHEEL && ((*PEMULATE >= 1 && std::abs(e.deltaDiscrete) != 120) || *PEMULATE >= 2)) {
+        auto&     wh       = m_wheel;
+        const int interval = factor != 0 ? (int)std::round(120 * (1 / factor)) : 120;
+        if (std::signbit((double)e.deltaDiscrete) != wh.negative || e.axis != wh.axis || e.timeMs - wh.timeMs > 500) {
+            wh.acc   = 0;
+            discrete = std::copysign(1, e.deltaDiscrete);
+        } else
+            discrete = 0;
+        for (; (int)wh.acc >= interval; wh.acc -= interval)
+            discrete += std::copysign(1, e.deltaDiscrete);
+        wh.negative = std::signbit((double)e.deltaDiscrete);
+        wh.axis     = e.axis;
+        wh.timeMs   = e.timeMs;
+        wh.acc += std::abs(e.deltaDiscrete);
+        delta = 15.0 * discrete * factor;
+    }
+    const int32_t value120 = std::round(factor * e.deltaDiscrete);
+    const int32_t steps    = std::abs(discrete) != 0 && std::abs(discrete) < 1 ? std::copysign(1, discrete) : std::round(discrete);
+
+    g_pSeatManager->sendPointerAxis(e.timeMs, e.axis, delta, steps, value120, e.source, WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
     g_pSeatManager->sendPointerFrame();
 }
 
 // ----------------------------------------------------------------- drawing
+
+namespace {
+    // How far down the top right corner Hyprland's own things reach on this monitor, output pixels (0 = none). They
+    // show on the focused monitor only: the config error bar (errorOverlay/Overlay.cpp, at the top unless
+    // debug:error_position is bottom), and the notifications, stacked from the top right under the reserved area
+    // (notification/NotificationOverlay.cpp's drawNotifications; its NOTIF_OFFSET_Y, NOTIF_PAD_Y and NOTIF_GAP_Y, 10 px
+    // each, aren't in a header). Their sizes are what Hyprland drew them at this frame, before our element.
+    float hyprlandOverlaysBottom(const PHLMONITOR& mon) {
+        if (!mon || mon != Desktop::focusState()->monitor())
+            return 0;
+        constexpr float OFFSET_Y = 10, PAD_Y = 10, GAP_Y = 10;
+        static auto     PERRORPOS = CConfigValue<Config::INTEGER>("debug:error_position");
+        float           bottom    = 0;
+        if (ErrorOverlay::overlay()->active() && *PERRORPOS == 0)
+            bottom = 10.f * (float)mon->m_scale + ErrorOverlay::overlay()->height(); // (its pad is 10 logical px)
+        if (const auto notes = Notification::overlay()->getNotifications(); !notes.empty()) {
+            float y = OFFSET_Y + (float)(mon->m_reservedArea.top() * mon->m_scale);
+            for (const auto& n : notes)
+                y += (float)std::max(n->m_cache.textSize.y, n->m_cache.iconSize.y) + PAD_Y + GAP_Y;
+            bottom = std::max(bottom, y - GAP_Y);
+        }
+        return bottom;
+    }
+}
 
 std::vector<UP<IPassElement>> CDesktop3D::drawFrame() {
     std::vector<UP<IPassElement>> out;
@@ -2415,7 +2466,8 @@ std::vector<UP<IPassElement>> CDesktop3D::drawFrame() {
 
     f.menu = m_menu.hud();
     f.menu.alpha *= f.hudAlpha;
-    if (m_mic.on()) { // while it listens, a badge says so
+    m_badgeBox = {};
+    if (m_mic.on()) { // while it listens, a badge says so: top right, under Hyprland's notifications while they show
         const float scale = (float)mon->m_scale;
         if (scale != m_badgeScale || m_badge.empty()) {
             drawBadge(m_badge, m_badgeW, m_badgeH, "lip sync: listening", scale);
@@ -2423,8 +2475,10 @@ std::vector<UP<IPassElement>> CDesktop3D::drawFrame() {
             ++m_badgeSerial;
         }
         const float margin = 12.f * scale;
+        const float top    = std::max(margin, std::min(hyprlandOverlaysBottom(mon) + margin, f.height - margin - m_badgeH));
+        m_badgeBox         = {f.width - margin - m_badgeW, top, (double)m_badgeW, (double)m_badgeH};
         f.badge            = {.pixels = &m_badge, .w = m_badgeW, .h = m_badgeH, .serial = m_badgeSerial, .x = f.width - margin - m_badgeW / 2.f,
-                              .y = margin + m_badgeH / 2.f, .scale = 1, .alpha = 1};
+                              .y = top + m_badgeH / 2.f, .scale = 1, .alpha = 1};
     }
 
     m_renderer.render(f, m_outTex->m_texID);
@@ -2472,6 +2526,7 @@ void CDesktop3D::lipSync() {
         m_lip.reset();
         m_anim.setVisemes({});
         m_badge.clear();
+        m_badgeBox = {};
     }
     if (!m_mic.on())
         return;
@@ -2483,9 +2538,11 @@ void CDesktop3D::lipSync() {
 }
 
 std::string CDesktop3D::lipSyncStatus() const {
-    const auto& v = m_lip.visemes();
-    return std::format(R"({{"on": {}, "listening": {}, "microphone": {}, "level": {:.1f}, "formants": [{:.0f}, {:.0f}], "visemes": {{"aa": {:.2f}, "ih": {:.2f}, "ou": {:.2f}, "ee": {:.2f}, "oh": {:.2f}}}}})",
-                       m_lipsync, m_mic.on(), CMicrophone::available(), m_lip.level(), m_lip.f1(), m_lip.f2(), v[0], v[1], v[2], v[3], v[4]);
+    const auto&       v     = m_lip.visemes();
+    const std::string badge = m_mic.on() && !m_badgeBox.empty() ? std::format("[{:.0f}, {:.0f}, {:.0f}, {:.0f}]", m_badgeBox.x, m_badgeBox.y, m_badgeBox.w, m_badgeBox.h) : "null";
+    return std::format(
+        R"({{"on": {}, "listening": {}, "microphone": {}, "level": {:.1f}, "formants": [{:.0f}, {:.0f}], "visemes": {{"aa": {:.2f}, "ih": {:.2f}, "ou": {:.2f}, "ee": {:.2f}, "oh": {:.2f}}}, "badge": {}}})",
+        m_lipsync, m_mic.on(), CMicrophone::available(), m_lip.level(), m_lip.f1(), m_lip.f2(), v[0], v[1], v[2], v[3], v[4], badge);
 }
 
 std::string CDesktop3D::menuAction(const SMenuItem& it) {
@@ -2548,8 +2605,8 @@ std::string CDesktop3D::status() {
     }
     const char* modes[] = {"off", "entering", "active", "exiting"};
     return std::format(
-        R"({{"mode": "{}", "view": "{}", "typing": {}, "fly": {}, "feet": [{:.3f}, {:.3f}, {:.3f}], "eye": [{:.3f}, {:.3f}, {:.3f}], "yaw": {:.2f}, "pitch": {:.2f}, "onGround": {}, "panels": {}, "aimed": {}, "fps": {:.1f}, "frames": {}, "minDt": {:.5f}, "sens": {}, "placed": {}, "holding": {}, "world": "{}", "map": "{}", "mapLoading": {}, "avatar": "{}", "avatarLoading": {}, "anim": "{}", "exposure": {:.2f}, "light": {:.3f}, "menu": "{}", "hooks": {{"motion": {}, "warp": {}, "cursor": {}}}}})",
-        modes[m_mode], m_thirdPerson ? "third" : "first", m_typing, m_fly, m_feet.x, m_feet.y, m_feet.z, m_camera.eye.x, m_camera.eye.y, m_camera.eye.z, m_yaw * 180.f / F_PI, m_pitch * 180.f / F_PI, m_onGround,
+        R"({{"mode": "{}", "monitor": "{}", "view": "{}", "typing": {}, "fly": {}, "feet": [{:.3f}, {:.3f}, {:.3f}], "eye": [{:.3f}, {:.3f}, {:.3f}], "yaw": {:.2f}, "pitch": {:.2f}, "onGround": {}, "panels": {}, "aimed": {}, "fps": {:.1f}, "frames": {}, "minDt": {:.5f}, "sens": {}, "placed": {}, "holding": {}, "world": "{}", "map": "{}", "mapLoading": {}, "avatar": "{}", "avatarLoading": {}, "anim": "{}", "exposure": {:.2f}, "light": {:.3f}, "menu": "{}", "hooks": {{"motion": {}, "warp": {}, "cursor": {}}}}})",
+        modes[m_mode], m_mode != MODE_OFF && m_monitor.lock() ? jsonEscape(m_monitor.lock()->m_name) : "", m_thirdPerson ? "third" : "first", m_typing, m_fly, m_feet.x, m_feet.y, m_feet.z, m_camera.eye.x, m_camera.eye.y, m_camera.eye.z, m_yaw * 180.f / F_PI, m_pitch * 180.f / F_PI, m_onGround,
         m_panels.size(), aimed, m_fps, m_frames, m_minDt, m_sens, m_placements.size(), m_hold.key != 0, jsonEscape(m_world.name), jsonEscape(m_mapPath), m_mapLoader.busy(),
         jsonEscape(m_avatarPath), m_avatarLoader.busy(), jsonEscape(m_anim.playing()), m_exposure, m_lightAvg, m_menu.open() ? jsonEscape(m_menu.path()) : "", m_hookMoved != nullptr, m_hookWarp != nullptr, m_hookCursor != nullptr);
 }
@@ -2649,6 +2706,17 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         for (auto& [key, pl] : m_placements)
             pl.returning = true;
         return "ok";
+    }
+    if (cmd == "windows") { // the windows off the wall: where, how far from the eye, how big (1 = as on the wall)
+        std::string list;
+        for (const auto& [key, pl] : m_placements) {
+            const auto w = pl.window.lock();
+            list += std::format(R"({}{{"class": "{}", "title": "{}", "center": [{:.3f}, {:.3f}, {:.3f}], "distance": {:.3f}, "size": {:.3f}, "held": {}, "settled": {}, "returning": {}}})",
+                                list.empty() ? "" : ", ", jsonEscape(w ? w->m_class : ""), jsonEscape(w ? w->m_title : ""), pl.center.x, pl.center.y, pl.center.z,
+                                length(pl.center - m_camera.eye), pl.scale / m_screen.scale(), key == m_hold.key, pl.settled, pl.returning);
+        }
+        const std::string hold = m_hold.key ? std::format(R"({{"dist": {:.3f}, "size": {:.3f}}})", m_hold.dist, m_hold.scaleMul) : "null";
+        return std::format(R"({{"placed": [{}], "hold": {}}})", list, hold);
     }
     // everything after the command word (and more), so paths can have spaces
     auto afterWords = [&](int words) {
@@ -2750,7 +2818,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         return std::format("{}", m_sens);
     }
     return "usage: hyprctl hypr3d [status|toggle|on|off [now]|type [on|off]|look dx dy|turn yaw pitch|tp x y z|walk secs [forward|back|left|right]|jump|fly|click "
-           "[left|right|middle]|sens [value]|grab|place|hold dist [scale]|reset-windows|map [path|none|reload|forget|scale s]|spawn [here]|desktop [here [height]]|"
+           "[left|right|middle]|sens [value]|grab|place|hold dist [scale]|reset-windows|windows|map [path|none|reload|forget|scale s]|spawn [here]|desktop [here [height]]|"
            "avatar [path|none|reload|height m|expression [name [weight]|none]|gesture [left|right|both gesture]|parts [reset]|toggle name [on|off|reset]|"
            "shape name [weight|reset]|physics [on|off|toggle]|emote [name|number|file|folder [once|loop]|stop]]|view [first|third|toggle] [distance] [side]|"
            "menu [open [page]|close|toggle|back|pick [n]|move dx dy|scroll n]]";

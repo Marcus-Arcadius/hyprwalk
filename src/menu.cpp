@@ -362,19 +362,26 @@ namespace h3d {
         return out;
     }
 
+    void CActionMenu::layout(int outW, int outH, float scale) {
+        if (outW < 1 || outH < 1)
+            return;
+        // right of the middle, where it doesn't hide the avatar in third person
+        const int side  = std::min(outW, outH);
+        m_R             = std::max(40, (int)std::lround(0.28f * side));
+        m_radiusLogical = m_R / std::max(scale, 0.1f);
+        m_x             = outW / 2.f + std::max(0.f, std::min(outW * 0.22f, outW / 2.f - m_R - 0.04f * side));
+        m_y             = outH / 2.f;
+    }
+
     void CActionMenu::update(float dt, int outW, int outH, float scale) {
         dt      = std::max(dt, 0.f);
         m_fade  = open() ? std::min(1.f, m_fade + dt / OPEN_TIME) : std::max(0.f, m_fade - dt / CLOSE_TIME);
         m_flash = std::max(0.f, m_flash - dt / FLASH_TIME);
+        // closed too, so the mouse moves the cursor by the right amount from the moment it opens
+        layout(outW, outH, scale);
         if (!visible() || outW < 1 || outH < 1)
             return;
-
-        // right of the middle, where it doesn't hide the avatar in third person
-        const int side  = std::min(outW, outH);
-        const int R     = std::max(40, (int)std::lround(0.28f * side));
-        m_radiusLogical = R / std::max(scale, 0.1f);
-        m_x             = outW / 2.f + std::max(0.f, std::min(outW * 0.22f, outW / 2.f - R - 0.04f * side));
-        m_y             = outH / 2.f;
+        const int R = m_R;
 
         if (open())
             refresh();
