@@ -108,6 +108,16 @@ namespace h3d::gl {
         glGetIntegerv(GL_BLEND_EQUATION_RGB, &m_blendEqRGB);
         glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &m_blendEqA);
         glGetIntegerv(GL_DEPTH_FUNC, &m_depthFunc);
+        static constexpr GLenum STENCIL[2][7] = {
+            {GL_STENCIL_FUNC, GL_STENCIL_REF, GL_STENCIL_VALUE_MASK, GL_STENCIL_FAIL, GL_STENCIL_PASS_DEPTH_FAIL, GL_STENCIL_PASS_DEPTH_PASS, GL_STENCIL_WRITEMASK},
+            {GL_STENCIL_BACK_FUNC, GL_STENCIL_BACK_REF, GL_STENCIL_BACK_VALUE_MASK, GL_STENCIL_BACK_FAIL, GL_STENCIL_BACK_PASS_DEPTH_FAIL,
+             GL_STENCIL_BACK_PASS_DEPTH_PASS, GL_STENCIL_BACK_WRITEMASK}};
+        for (int f = 0; f < 2; ++f)
+            for (int k = 0; k < 7; ++k)
+                glGetIntegerv(STENCIL[f][k], &m_stencilState[f][k]);
+        glGetIntegerv(GL_STENCIL_CLEAR_VALUE, &m_stencilClear);
+        glGetIntegerv(GL_FRONT_FACE, &m_frontFace);
+        glGetIntegerv(GL_CULL_FACE_MODE, &m_cullFace);
         glGetIntegerv(GL_UNPACK_ALIGNMENT, &m_unpackAlign);
         glGetIntegerv(GL_PACK_ALIGNMENT, &m_packAlign);
         glGetBooleanv(GL_DEPTH_WRITEMASK, &m_depthMask);
@@ -148,6 +158,15 @@ namespace h3d::gl {
         glBlendEquationSeparate(m_blendEqRGB, m_blendEqA);
         glDepthFunc(m_depthFunc);
         glDepthMask(m_depthMask);
+        for (int f = 0; f < 2; ++f) {
+            const GLenum face = f == 0 ? GL_FRONT : GL_BACK;
+            glStencilFuncSeparate(face, m_stencilState[f][0], m_stencilState[f][1], (GLuint)m_stencilState[f][2]);
+            glStencilOpSeparate(face, m_stencilState[f][3], m_stencilState[f][4], m_stencilState[f][5]);
+            glStencilMaskSeparate(face, (GLuint)m_stencilState[f][6]);
+        }
+        glClearStencil(m_stencilClear);
+        glFrontFace(m_frontFace);
+        glCullFace(m_cullFace);
         glColorMask(m_colorMask[0], m_colorMask[1], m_colorMask[2], m_colorMask[3]);
         glClearColor(m_clearColor[0], m_clearColor[1], m_clearColor[2], m_clearColor[3]);
         glClearDepthf(m_clearDepth);

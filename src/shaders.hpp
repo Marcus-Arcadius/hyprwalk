@@ -273,6 +273,15 @@ vec3 shade(vec3 albedo, vec3 P, vec3 N, vec4 sunPos, float ambOcc, float lightOc
     return albedo * light + sunCol * sp;
 }
 
+// the light shade() lights an albedo with
+vec3 shadeLight(vec3 P, vec3 N, vec4 sunPos, float ambOcc, float lightOcc) {
+    float ndl = max(dot(N, uSunDir), 0.0);
+    float shadow = ndl > 0.0 ? sunShadow(sunPos) : 0.0;
+    vec3 skyAmb = srgbToLinear(vec3(0.55, 0.66, 0.85)) * 0.75;
+    vec3 gndAmb = srgbToLinear(vec3(0.70, 0.56, 0.40)) * 0.45;
+    return SUN_COLOR * ndl * shadow + mix(gndAmb, skyAmb, N.y * 0.5 + 0.5) * ambOcc + panelLights(P, N) * lightOcc;
+}
+
 // aerial perspective
 vec3 applyFog(vec3 c, vec3 P) {
     vec3 V = normalize(uEye - P);
@@ -477,6 +486,16 @@ uniform vec4 uEffectFade;       // distance, falloff, min, max
 uniform vec4 uEffectFresnel;    // exponent, falloff, min, max
 uniform float uTime;
 uniform float uCutoff;
+// the avatar's (unity2hypr3d's material extras, MToon's outlines)
+uniform int uOutline;       // 0: the surface, else its outline
+uniform vec4 uOutlineColor; // linear
+uniform vec3 uOutlineMix;   // how much of the base color it takes, how much it's multiplied by it, how much it's shaded
+uniform int uBack;          // back faces: 0 as the front, 1 uBackColor, 2 uBackColor times uLayerTex (avatars have no layers)
+uniform vec4 uBackColor;
+uniform vec4 uBackXf;
+uniform vec2 uBackOffset;
+uniform vec3 uLightClamp;   // UnlitWF's: the light's brightness kept between x and 1, 1 from y up (y 0: not), its chroma z
+uniform float uAgain;       // > 0: drawn again where the stencil hid it, this much as opaque (MaskOut_Blend)
 uniform int uMode;      // 0 lit, 1 unlit, 2 sky
 // the game's own lighting (HYPR3D_lighting)
 uniform int uBaked;
@@ -578,9 +597,20 @@ float luma(vec3 c) {
     return dot(c, vec3(0.2125, 0.7154, 0.0721));
 }
 
+// UnlitWF's anti-glare (calcLightColorFrag): the light's brightest channel p kept between uLightClamp.x and 1,
+// reaching 1 at uLightClamp.y, its color uLightClamp.z as saturated; in the units the tone curve takes
+vec3 clampLight(vec3 L) {
+    float p = max(max(L.r, L.g), L.b);
+    if (p <= 0.0)
+        return vec3(uLightClamp.x);
+    return mix(vec3(p), L, uLightClamp.z) * mix(clamp(p / uLightClamp.y, 0.0, 1.0), 1.0, uLightClamp.x) / p;
+}
+
 void main() {
     vec2 uv = mat2(uBaseXf.xy, uBaseXf.zw) * vUV + uBaseOffset;
     vec4 base = texture(uBaseTex, uv) * uBaseColor;
+    if (uBack != 0 && !gl_FrontFacing) // UnlitWF's back faces: their own color (and texture) in place of the base's
+        base.rgb = uBackColor.rgb * (uBack == 2 ? texture(uLayerTex, mat2(uBackXf.xy, uBackXf.zw) * vUV + uBackOffset).rgb : vec3(1.0));
     if (uEffect != 0) {
         // csgo_effects: the color, through its scrolling masks, less of it up close and edge on
         vec4 col = base * vColor;
@@ -647,9 +677,17 @@ void main() {
         base *= vec4(srgbDecode(vColor.rgb), vColor.a);
     else if (uVertexColor == 3)
         base.rgb *= mix(vec3(1.0), vColor.rgb, vColor.a);
+    if (uOutline != 0) {
+        // none where the texture is see-through (in place of UnlitWF's canceller), then the line's color
+        if (base.a < (uAlphaMode == 1 ? uCutoff : uAlphaMode == 2 ? 0.5 : 0.0))
+            discard;
+        base = vec4(mix(uOutlineColor.rgb, base.rgb, uOutlineMix.x) * mix(vec3(1.0), base.rgb, uOutlineMix.y), uOutlineColor.a);
+    }
     if (uAlphaMode == 1 && base.a < uCutoff)
         discard;
     float a = uAlphaMode == 2 ? base.a : 1.0;
+    if (uAgain > 0.0)
+        a *= uAgain;
 
     if (uBaked != 0 && uMode != 0) {
         // unlit and the sky: straight through the game's fog and tone curve
@@ -681,7 +719,7 @@ void main() {
         vec3 Ng = cross(dFdx(vPos), dFdy(vPos));
         if (dot(Ng, uEye - vPos) < 0.0)
             Ng = -Ng;
-        vec3 N = dot(Nv, Ng) < 0.0 ? -Nv : Nv;
+        vec3 N = uOutline != 0 || dot(Nv, Ng) >= 0.0 ? Nv : -Nv; // (an outline: the surface's under it)
         // the normal map, in tangent space the way Source has it
         vec3 nTs = vec3(0.0, 0.0, 1.0);
         if (uNormal != 0 && dot(vTangent.xyz, vTangent.xyz) > 0.01) {
@@ -735,8 +773,15 @@ void main() {
                 float dim = clamp(luma(indirect) / max(luma(uSkyAverage), 1e-3), 0.0, 1.0);
                 spec += skyLight(R, r * uSkyLod) * envBRDF(F0, r, max(dot(N, V), 0.0)) * dim;
             }
-            c = diffuse * (uSunColor * ndl * sun + indirect) * occ;
-            c += diffuse * panelLights(vPos, N) * occ;
+            if (uLightClamp.y > 0.0) {
+                float k = uExposure * 2.8; // (as gameCurve() scales it)
+                c = diffuse * clampLight((uSunColor * ndl * sun + indirect + panelLights(vPos, N)) * occ * k) / k;
+            } else {
+                c = diffuse * (uSunColor * ndl * sun + indirect) * occ;
+                c += diffuse * panelLights(vPos, N) * occ;
+            }
+            if (uOutline != 0)
+                c = mix(albedo, c, uOutlineMix.z); // unshaded: its color as it is
             c += uEmissive * texture(uEmissiveTex, mat2(uEmissiveXf.xy, uEmissiveXf.zw) * (uEmissiveUV == 0 ? vUV : vUV1) + uEmissiveOffset).rgb *
                 mix(vec3(1.0), albedo, uSelfIllumAlbedo);
             float fogged;
@@ -751,11 +796,18 @@ void main() {
             return;
         }
         float local = vAO.x * occ;
-        c = shade(base.rgb, vPos, N, vSun, local * mix(0.45, 1.0, vAO.y), local, 0.0);
-        // sunlight bounced off the surroundings (baked), off surfaces of about this albedo
-        c += base.rgb * SUN_COLOR * (vAO.z * 0.8 * occ);
+        if (uLightClamp.y > 0.0)
+            c = base.rgb * clampLight((shadeLight(vPos, N, vSun, local * mix(0.45, 1.0, vAO.y), local) + SUN_COLOR * (vAO.z * 0.8 * occ)) * uExposure) /
+                uExposure;
+        else {
+            c = shade(base.rgb, vPos, N, vSun, local * mix(0.45, 1.0, vAO.y), local, 0.0);
+            // sunlight bounced off the surroundings (baked), off surfaces of about this albedo
+            c += base.rgb * SUN_COLOR * (vAO.z * 0.8 * occ);
+        }
         c += uEmissive * texture(uEmissiveTex, mat2(uEmissiveXf.xy, uEmissiveXf.zw) * (uEmissiveUV == 0 ? vUV : vUV1) + uEmissiveOffset).rgb;
         c = tonemap(applyFog(c, vPos) * uExposure);
+        if (uOutline != 0)
+            c = mix(applyFog(base.rgb, vPos), c, uOutlineMix.z); // unshaded: its color as it is
     }
     fragColor = vec4(linearToSrgb(c) * a, a);
 }
@@ -827,6 +879,17 @@ uniform float uBounce; // sunlight bounced off the surroundings
 uniform int uLightMode;    // eMapLight: hypr3d's own (uSky, uBounce), the map's light probes, or its average light
 uniform mat4 uProbeMatrix; // world -> the probe atlas (texels)
 uniform vec3 uProbeMin, uProbeMax; // the volume's block of it, half a texel in
+// an outline (the mesh again, pushed out: an inverted hull): 0 none, 1 in metres, 2 in NDC units (as wide on screen)
+uniform int uOutline;
+uniform vec4 uOutlineA;    // width, shift towards the eye (m), how much thinner up close, up to how far (m)
+uniform vec4 uOutlineMask; // which of the mask's channels scales the width
+uniform float uOutlineInvert;
+uniform float uOutlineMaxW; // on screen: as wide up to this far, then thinner
+uniform float uAspect;      // the output's height over its width
+uniform sampler2D uOutlineMaskTex;
+uniform vec3 uEye;
+uniform vec4 uBaseXf; // the mask has the base color's uvs
+uniform vec2 uBaseOffset;
 out vec3 vPos;
 out vec3 vNormal;
 out vec2 vUV;
@@ -844,8 +907,18 @@ void main() {
     vTangent = vec4(0.0);
     vLightMode = uLightMode;
     vec4 p = m * vec4(aPos + aMorphPos, 1.0);
-    vPos = p.xyz;
     vNormal = normalize(mat3(m) * (aNormal + aMorphNormal));
+    float w = 0.0;
+    if (uOutline != 0) {
+        float k = dot(textureLod(uOutlineMaskTex, mat2(uBaseXf.xy, uBaseXf.zw) * aUV + uBaseOffset, 0.0), uOutlineMask);
+        vec3 toEye = uEye - p.xyz;
+        float d = length(toEye);
+        w = uOutlineA.x * mix(k, 1.0 - k, uOutlineInvert) * mix(1.0, min(d, uOutlineA.w), uOutlineA.z);
+        if (uOutline == 1)
+            p.xyz += vNormal * w;
+        p.xyz += toEye / max(d, 1e-4) * min(uOutlineA.y, d * 0.5); // along the view ray: only its depth changes
+    }
+    vPos = p.xyz;
     vUV = aUV;
     vUV1 = aUV1;
     vColor = aColor;
@@ -854,6 +927,12 @@ void main() {
     vec3 n = dot(vNormal, uSunDir) < 0.0 ? -vNormal : vNormal;
     vSun = uSunViewProj * vec4(vPos + n * uNormalOffset, 1.0);
     gl_Position = uViewProj * p;
+    if (uOutline == 2) {
+        // MToon's screen width: along the normal as the screen shows it, none where it faces the eye
+        vec2 sn = (uViewProj * vec4(vNormal, 0.0)).xy;
+        float facing = abs(dot(vNormal, normalize(uEye - p.xyz)));
+        gl_Position.xy += sn / max(length(sn), 1e-6) * vec2(uAspect, 1.0) * w * min(gl_Position.w, uOutlineMaxW) * (1.0 - facing);
+    }
 }
 )";
 

@@ -6,8 +6,9 @@ walk up to them in first person. The crosshair clicks, scrolls and types into wh
 You can take a window off the wall and put it anywhere.
 
 With an avatar loaded you can switch to third person. The avatar works much like one in VRChat: it
-has faces, hand gestures, emotes, a radial Action Menu, outfit toggles, and hair and clothes that
-swing. It can be a VRM, a plain GLB, or a VRChat avatar converted with `tools/unity2hypr3d.py`.
+has faces, hand gestures, emotes and dances, a radial Action Menu, outfit toggles and sliders, hair
+and clothes that swing, toon outlines, and lip sync from your microphone if you turn it on. It can be
+a VRM, a plain GLB, or a VRChat avatar converted with `tools/unity2hypr3d.py`.
 
 ![Your windows on the courtyard wall](screenshots/desktop-wall.png)
 
@@ -32,9 +33,15 @@ which holds the headers, and then runs `make` inside the derivation's own build 
 Hyprland isn't running, name its binary:
 `HYPR_BIN=/nix/store/…-hyprland-…/bin/Hyprland ./build.sh`. Any arguments go on to `make`.
 
+Hyprland's build shell has no audio library, so for lip sync's microphone `build.sh` does the same
+for the PipeWire that runs: it finds its binary, builds its derivation's `dev` output and adds that
+to `pkg-config`'s path. The plugin then links `libpipewire-0.3` from that PipeWire. Without it (no
+PipeWire running, or its derivation gone), hypr3d builds without a microphone, and lip sync says so
+when you turn it on. The `dev` output may not be in the binary cache; then Nix builds PipeWire once.
+
 On other distributions, `make` should work anywhere `pkg-config` finds the headers of the Hyprland
-you run (`hyprland`, `pixman-1`, `libdrm`, `glesv2`, `egl`, `cairo` and `pangocairo`). This is
-untested.
+you run (`hyprland`, `pixman-1`, `libdrm`, `glesv2`, `egl`, `cairo` and `pangocairo`, and
+`libpipewire-0.3` for the microphone if it is there). This is untested.
 
 ## Loading
 
@@ -74,6 +81,7 @@ A plugin runs inside the compositor, so a crash in it takes your session down wi
 | `plugin:hypr3d:avatar_height` | `0` | scale the avatar to this height in metres; 0 keeps its own |
 | `plugin:hypr3d:avatar_physics` | `true` | hair, skirts and the like swing (spring bones) |
 | `plugin:hypr3d:avatar_emotes` | `""` | more emotes: VRM animations (`.vrma`) or glTF clips; files or folders, separated by commas |
+| `plugin:hypr3d:lipsync` | `false` | lip sync: the microphone moves the avatar's mouth while you are in 3D (below) |
 
 Paths may start with `~/`. Maps and avatars load in the background, and a failure shows up as a
 notification.
@@ -103,9 +111,26 @@ compositor shortcuts keep working in 3D.
 | Esc | leave 3D |
 
 The Action Menu has pages for emotes, expressions, gestures, the outfit and options (view, physics,
-fly, respawn, reset face, stop emote). With it open, the mouse moves its cursor, a left click
+fly, lip sync, respawn, reset face, stop emote). With it open, the mouse moves its cursor, a left click
 picks, a right click goes back and a middle click closes it. The wheel goes round it, 1–8 pick an
 item, Enter picks, Backspace goes back and Esc closes it. WASD still walks.
+
+A slider on the outfit page (🎚️, VRChat's radial puppet) opens a dial. The cursor sets it by going
+round from the top, clockwise from 0% to 100%. It stops at the ends rather than jump across the top.
+The wheel moves it in 5% steps, and 1–8 set 0%, 14%, … 100%. A click, Backspace or a right click
+closes the dial.
+
+A two-axis puppet (🕹️, VRChat's and VRCFury's two- and four-axis puppets) opens a stick instead:
+where the cursor is in the disc sets x and y, −1 to 1 each, right and up positive, and 1–8 push it
+all the way in the eight directions, from up clockwise.
+
+**Lip sync** is off until you turn it on: with `lipsync = true` in the config,
+`hyprctl hypr3d avatar lipsync on`, or the Action Menu's options. Then, while you are in 3D with an
+avatar, hypr3d listens to your default microphone through PipeWire (as the "hypr3d lip sync"
+stream), and a red "lip sync: listening" badge sits in the top right corner. How loud you are opens
+the mouth, and the vowel you make (its first two formants, from linear prediction) picks the shape:
+the avatar's aa, ih, ou, ee and oh visemes. It keeps a quarter of a second of sound at most, to look
+at, and nothing is written anywhere or sent. Leaving 3D, or turning it off, closes the microphone.
 
 ## hyprctl
 
@@ -127,10 +152,11 @@ item, Enter picks, Backspace goes back and Esc closes it. WASD still walks.
 | `avatar [path\|none\|reload\|height m]` | load an avatar, or print its state |
 | `avatar expression [name [weight]\|none]` | set a face |
 | `avatar gesture [left\|right\|both gesture]` | set a hand gesture |
-| `avatar parts [reset]`, `avatar toggle name [on\|off\|reset]`, `avatar shape key [weight\|reset]` | the outfit |
+| `avatar parts [reset]`, `avatar toggle name [on\|off\|reset]`, `avatar slider name [0..1\|NN%\|reset]`, `avatar slider name x y`, `avatar shape key [weight\|reset]` | the outfit; `parts` lists the toggles, sliders and material variants. A two-axis slider takes x and y, −1..1 or NN% each |
 | `avatar physics [on\|off\|toggle]` | spring bones |
-| `avatar emote [name\|number\|file\|folder [once\|loop]\|stop]` | play an emote, or load emotes from files |
-| `menu [open [page]\|close\|toggle\|back\|pick [n]\|move dx dy\|scroll n]` | drive the Action Menu |
+| `avatar lipsync [on\|off\|toggle]` | lip sync; without an argument, what it hears: the level, the formants and the visemes |
+| `avatar emote [name\|number\|file\|folder [once\|loop]\|stop]` | play an emote, or load emotes from files; without a name, the list, with each one's speed |
+| `menu [open [page]\|close\|toggle\|back\|pick [n]\|move dx dy\|scroll n]` | drive the Action Menu; without an argument, what it shows (a dial's value, a stick's x and y) |
 
 The `hypr3d:menu` dispatcher toggles the Action Menu. `hypr3d:menu emotes` opens a page, and any
 other argument does what `hyprctl hypr3d menu` does. The Lua functions are
@@ -141,8 +167,9 @@ other argument does what `hyprctl hypr3d menu` does. The Lua functions are
 `plugin:hypr3d:avatar` (or `hyprctl hypr3d avatar FILE`) takes one of these:
 
 - **VRM 0.x and 1.0**: the humanoid map, expressions (blend shapes, material colours and texture
-  transforms), look-at, spring bones (VRM 0.x `secondaryAnimation` and `VRMC_springBone`) and node
-  constraints (`VRMC_node_constraint`).
+  transforms), look-at, spring bones (VRM 0.x `secondaryAnimation` and `VRMC_springBone`, with
+  `VRMC_springBone_extended_collider`'s inside and plane colliders), node constraints
+  (`VRMC_node_constraint`), and MToon's outlines and render queue.
 - **A plain glTF/GLB**: the humanoid bones are guessed from their names (Mixamo, VRoid, Blender's
   rigs and most other naming styles). Expressions come from shape key names (VRoid, VRChat, MMD and
   ARKit), and spring bones from bone names (hair, skirt, cape, sleeves, ribbons, tail and ears, in
@@ -152,7 +179,21 @@ other argument does what `hyprctl hypr3d menu` does. The Lua functions are
 
 It blinks, its eyes wander, it turns its head where you look, and walks, runs, jumps, falls, crouches
 and flies. Gestures curl its fingers and can set a face. The built-in emotes are Wave, Clap, Point,
-Cheer, Dance, Backflip, Sad Kick and Die, and `avatar_emotes` adds your own `.vrma` or glTF clips.
+Cheer, Dance, Backflip, Sad Kick and Die. `avatar_emotes` adds your own `.vrma` or glTF clips, and
+so does the settings file's `emotes`, where the converter lists the dances and poses it finds. Toggles
+and sliders can show and hide parts, set shape keys, move, turn and scale nodes, and switch
+materials: the GLB's glTF material variants (`KHR_materials_variants`) that the settings file names.
+A toggle can also loop shape keys and nodes back and forth (VRCFury's Breathing), or leave a part
+where it is in the world while it is on (VRCFury's World Drop).
+
+Materials are drawn in Unity's render queue order, with Unity's stencil test: the eyes of an UnlitWF
+avatar show through its fringe, as in VRChat. Toon outlines are drawn as an inverted hull: the mesh
+again, pushed out along its normals, its front faces culled (UnlitWF's, lilToon's, Poiyomi's and
+MToon's; `hyprctl` has no switch for them, the harness's `--outlines 0` turns them off). It costs a
+second draw of each outlined mesh: 0.24 → 0.28 ms a frame for Hatsune Miku NT at 1920×1080 on an RTX
+4090. UnlitWF's back faces take their own colour or texture, and its light clamp keeps the light's
+brightness between its minimum and one (its anti-glare). The converter writes these into the
+material's glTF extras (below).
 
 ### The settings file
 
@@ -163,12 +204,24 @@ or overrides it. The converter writes it; you can also write one by hand. Every 
 |---|---|
 | `humanoid` | `{"LeftUpperArm": "Arm_L", …}`: humanoid bone (Unity's or VRM's names) → node name |
 | `expressions` | `[{"name", "preset", "shapes": {"shape key" or "mesh/shape key": 0..1}, "binary", "blink"/"lookAt"/"mouth": "block"\|"blend"\|"none"}]` |
-| `gestures` | `{"left"/"right"/"both": {"fist": "expression name" or "none", …}}`: the face each hand gesture sets |
+| `gestures` | `{"left"/"right"/"both": {"fist": "expression name" or "none", …}, "combos": {"fist+open": "expression name" or "none"}}`: the face each hand gesture sets; a combo's while the left hand makes one sign and the right the other |
+| `hands` | `{"file": "a .vrma", "left"/"right": {"fist": seconds, …}}`: each sign's finger pose, the animation's at that time (the converter writes an avatar's Gesture layer's hand poses so); the others stay procedural |
+| `floor` | the height the avatar stands on, in the GLB's units (MA's Floor Adjuster); otherwise its lowest point |
 | `hidden` | `["mesh node", …]`: parts that start hidden |
-| `toggles` | `[{"name", "group", "on", "show": [parts], "hide": [parts], "shapes": {…}}]`: outfit toggles for the Action Menu; the toggles of a group are exclusive |
+| `toggles` | `[{"name", "group" or "groups": [names], "on", "show": [parts], "hide": [parts], "shapes": {…}, "variants": [material variants], "transforms": {…}, "loop": {"seconds", "a": {"shapes", "transforms"}, "b": {…}}, "drop": [nodes]}]`: outfit toggles for the Action Menu; the toggles of a group are exclusive, and a toggle in several groups turns off the others of each. A toggle that is on puts its material variants' materials on, sets its nodes' `transforms` (`{"node": {"t": [x,y,z], "r": [x,y,z,w], "s": [x,y,z]}}`, each part optional, in the node's own space), goes from `a` to `b` and back every `seconds` (smoothly), and leaves the `drop` nodes where they were in the world when it went on |
+| `sliders` | `[{"name", "value": 0..1, "keys": [{"at": 0..1, "shapes": {…}, "transforms": {…}, "show": [parts], "hide": [parts], "variants": [material variants]}]}]`: dials for the Action Menu (VRChat's radial puppets). Between two keys the shape keys and transforms blend. Parts and material variants switch at a key, so each key has what holds from it up to the next. A two-axis one has `"axes": 2`, `"value": [x, y]` and a `"grid": n` of n×n keys, each `"at": [x, y]` (−1..1), blended between the four around the stick |
+| `emotes` | `[{"file" or "clip", "name", "loop", "hold", "grounded", "speed"}]`: more emotes. `file` is a `.vrma` or glTF file (next to the settings file unless absolute), `clip` a clip of the avatar's own. `hold` keeps the last frame until you move, `grounded` keeps the feet on the floor, and `speed` (default 1) plays it faster or slower |
 | `springs` | `[{"name", "bones": [roots], "ignore": [bones], "stiffness", "drag", "gravity", "gravityDir": [x,y,z], "radius", "center", "immobile", "colliders": [names, or "body"]}]`: each root and everything under it swings |
-| `colliders` | `[{"name", "node", "offset": [x,y,z], "tail": [x,y,z], "radius"}]`: spheres, or capsules with a tail, in the node's units |
+| `colliders` | `[{"name", "node", "offset": [x,y,z], "tail": [x,y,z], "radius", "inside"}]`: spheres, or capsules with a tail, in the node's units; `"inside": true` keeps the bones inside it (PhysBones' inside bounds). A plane is `{"name", "node", "offset", "normal": [x,y,z]}`: the bones keep to the side it faces |
 | `immobile` | 0..1, default 0.9: how much of the air the avatar carries along as it moves. With 0, walking at 4.5 m/s blows long hair out level behind it |
+
+The converter also leaves things for hypr3d in the GLB's glTF extras. A primitive's `hypr3d_part`
+makes it a part of its own (what an MA Mesh Cutter hides while a toggle is on). A material's
+`hypr3d_queue` is Unity's render queue, `hypr3d_stencil` its stencil test and write (`ref`, `read`,
+`write`, `comp`, `pass`, `fail`, `zfail`, and `again` for UnlitWF's MaskOut_Blend, which draws what
+its mask hides again, fainter), `hypr3d_outline` its toon outline (`width` in metres, `space`
+world, object or screen, `color`, `base`, `tint`, `mask`, `shift`, `fix`, `lit`), `hypr3d_back` its
+back faces' `color` and `texture`, and `hypr3d_light` UnlitWF's light clamp (`min`, `max`, `chroma`).
 
 ## Maps
 
@@ -197,24 +250,54 @@ It takes a `.unitypackage`, a Booth-style `.zip` (Shift-JIS names too), a Unity 
 and `OUT.hypr3d.json` for hypr3d, carrying over:
 
 - the humanoid bone map, the visemes, the blink shape and the eye bones
-- faces set by hand gestures in the FX controller
-- Expressions Menu toggles that show or hide objects or set shape keys, and objects that start hidden
-- PhysBones and Dynamic Bones, as springs and colliders
+- faces set by hand gestures in the FX controller, both hands' signs together too, and the finger
+  poses of the avatar's Gesture layer (its own, an MA Merge Animator's or a VRCFury Full
+  Controller's), as the settings file's `hands`
+- Expressions Menu toggles that show or hide objects, set shape keys, change materials, or move, turn
+  and scale objects (transform curves, in the FX controller's clips and blend trees), and objects
+  that start hidden. Radial puppets become sliders, and two- and four-axis puppets two-axis sliders
+- PhysBones and Dynamic Bones, as springs and colliders: spheres, capsules, planes, and the ones that
+  keep bones inside them
 - materials: colour, texture, cutout or transparent, emission and culling (Standard, lilToon,
-  Poiyomi and MToon settings, and the common property names of other shaders)
+  Poiyomi, MToon and UnlitWF settings, and the common property names of other shaders). A material
+  that a toggle or slider puts in a slot is written as a glTF material variant, and so is one whose
+  colour, emission, tiling or cutoff it changes. The toggle or slider names the variant. Changes in
+  effect at rest go straight into the GLB. Also Unity's render queue, the stencil (UnlitWF's
+  Mask/MaskOut/MaskOut_Blend shaders by their passes, or by their GUIDs when the shaders aren't in
+  the input; lilToon's and Poiyomi's stencil settings), toon outlines (UnlitWF's `_TL_*`, lilToon's
+  outline shaders, Poiyomi's and MToon's: width and its mask, colour, Z shift, fixed width near the
+  eye), UnlitWF's back faces (`_BK_*`) and light clamp (`_GL_*`), in the materials' extras. UnlitWF's
+  alpha from a mask texture (`_AL_Source` 1 or 2) or inverted (`_AL_InvMaskVal`) is baked into the
+  base texture's alpha
+- the Action layer's humanoid clips, dances and poses, as emotes (below)
 - Modular Avatar setups, built the way MA builds them for VRChat: Merge Armature (an outfit's bones
-  join the avatar's and its meshes follow them), Bone Proxy, Move To, PhysBone Blocker, and MA's
-  menus and toggles (Menu Item, Menu Installer, Menu Group, Object Toggle, Shape Changer, Merge
-  Animator for FX, Parameters)
+  join the avatar's and its meshes follow them), Bone Proxy, Move To, Replace Object, PhysBone
+  Blocker, Platform Filter, Scale Adjuster (the meshes weighted to a bone scaled, not its children),
+  Floor Adjuster (the settings file's `floor`), Global Collider (a collider every PhysBone that
+  allows it meets), and MA's menus and reactive components: Menu Item (radial ones too), Menu
+  Installer, Menu Install Target, Menu Group, Object Toggle, Shape Changer (its Delete too), Mesh
+  Cutter (its vertex filters by axis, bone, mask, shape key and UV tile: cut away for good when it is
+  always in effect, else a part of its own that the toggles hide while it is), Material Setter,
+  Material Swap, Blendshape Sync, Merge Animator (FX, Gesture for hand poses, and Action for emotes),
+  Merge Blend Tree and Parameters
 - VRCFury setups, built after MA's as VRCFury builds them:
   - Armature Link: an outfit's bones are linked to the avatar's (snapped on if it says so), and its
-    meshes follow the avatar's bones.
-  - Toggles: they turn objects on and off, set shape keys and play clips. Exclusive tags become
-    groups, and the avatar starts in the resting state the toggles give it.
-  - Full Controller: its FX controller, menus and parameters are merged in.
-  - Blend Shape Link, Apply During Upload and Delete During Upload.
-  - The older Modes, Object State and Bone Constraint, upgraded as VRCFury upgrades them. The old
-    Unity 2019 save format is read too.
+    meshes follow the avatar's bones. A bone that an animation moves keeps its own weights, and what
+    is under it stays with it.
+  - Toggles: they turn objects on and off, set shape keys, swap materials, set material properties
+    and FX floats, scale objects (the Scale action), loop (Smooth Loop), leave objects in the world
+    (World Drop), and play clips (with transform curves too). Exclusive tags become groups (a toggle
+    may have several), and the avatar starts in the resting state the toggles give it. Slider toggles
+    and Puppets become sliders, two-axis Puppets two-axis ones.
+  - Gesture Driver (and Senky's): faces for the hand signs, both hands' combos too, with their lock
+    toggles. Blinking and Visemes give the blink and mouth shapes, and Block Blinking and Block
+    Visemes stop them.
+  - Full Controller: its FX controller (with its path rewrites), its Action controller (emotes), its
+    Gesture controller (hand poses), menus and parameters are merged in. Its other layers (Base,
+    Additive, Sitting, TPose, IKPose) are left out quietly: hypr3d walks, sits and stands by itself.
+  - Blend Shape Link, Apply During Upload, Delete During Upload, Move Menu Item and Reorder Menu Item.
+  - The older Modes, Object State, Bone Constraint, Breathing, World Constraint and Senky Gesture
+    Driver, upgraded as VRCFury upgrades them. The old Unity 2019 save format is read too.
 
 `--outfit NAME|PATH` puts an outfit on that the avatar's prefab doesn't have yet, the way dragging
 it onto the avatar and running MA's *Setup Outfit* would. It works whether or not the outfit is set
@@ -224,11 +307,39 @@ are more than 1 cm off. An outfit set up with VRCFury is put on as it is, and it
 does the rest. `--outfit` can be given more than once. `--list` lists the avatars found,
 `--avatar NAME` picks one, and `--max-texture N` caps the texture size (default 2048).
 
-Not converted: shader effects beyond the above, other animations, material swaps, MA's Replace
-Object, Blendshape Sync, Material Setter/Swap, Visible Head Accessory and Mesh Settings, VRCFury's
-other features (sliders, puppets, SPS, gesture drivers, its blinking and visemes and so on; each is
-named in a warning), constraints, particles, audio and contacts. Blender imports only binary FBX
-files.
+**Emotes and dances.** Humanoid clips in the avatar's Action layer (its own, an MA Merge Animator's
+or a VRCFury Full Controller's) become VRM animations, `OUT.<name>.vrma`, listed in the settings
+file's `emotes` and named after the menu item that plays them. Unity keeps such clips as muscle
+values. The converter turns them into bone turns for the avatar's own T pose, from its model's import
+settings, following Unity's humanoid as lox9973's ShaderMotion and uvw.js describe it. The body's
+motion moves the hips. Keys with weighted tangents are Unity's Bezier spans. A state with Foot IK on
+(`m_IKOnFeet`) plants the feet where the clip's foot goals say, by two-bone IK on the legs. Clips'
+translation curves (Translation DoF) only apply to avatars that enable it, as in Unity; the converter
+warns for those. Shape-key curves such as MMD's faces (あ, まばたき, 笑い…) set the avatar's
+shape keys of the same names, else the matching VRM expression. A motion sold for any avatar, set up
+with MA like VRSuya's, goes on with `--outfit`:
+
+```sh
+python3 tools/unity2hypr3d.py Avatar.zip --outfit VRSuya_Doodle_Dance_Released_260709.zip -o me.glb
+```
+
+hypr3d plays no sound, so play the song yourself. VRSuya's Booth pages name the songs: "Doodle" by
+Zachz Winner for Doodle Dance, and しぐれうい's 「粛聖!! ロリ神レクイエム☆」 for Loli Kami Requiem. A
+dance's `speed` in the settings file matches it to the song's tempo. The Doodle Dance page suggests
+about 97.7%. At `"speed": 0.977`, the dance's 22-frame bounce lasts 0.375 s, one beat at 160 BPM.
+
+Not converted: shader effects beyond the above (toon shading, matcaps, rim lights, UnlitWF's outline
+colour texture, lilToon's outline texture, Poiyomi's other outline modes and the like), constraints,
+particles, audio and contacts. MA's World Fixed Object is named in a warning: its objects move with
+the avatar, as hypr3d has no constraints to hold them in the world. World Scale Object and Convert
+Constraints are left out quietly (constraints aren't converted, and hypr3d doesn't scale the
+avatar's world), and so are Visible Head Accessory, Mesh Settings and MA's VRChat-only settings,
+since hypr3d has no use for them. VRCFury leaves out SPS, TPS and OGB (hypr3d has no contacts or
+haptics) with a warning.
+
+VRCFury features for VRChat's own systems change nothing hypr3d shows: Advanced Collider, Avatar
+Scale, Toes, Talking, Cross Eye Fix and the like. Security locks are taken as unlocked. Blender
+imports only binary FBX files.
 
 ### tools/cs2map.py: Counter-Strike 2 maps
 
@@ -251,7 +362,7 @@ Valve's; this reads your copy of the game for your own use.
 - `tools/test/harness/`: `shot`, an offscreen render harness. It drives the plugin's real renderer,
   avatar animator and Action Menu on a surfaceless EGL context and writes PNGs, with no compositor
   involved. `tools/test/harness/build.sh` builds it into `build/test/shot` through `./build.sh`,
-  linking the plugin's objects except `main.o` and `panels.o`. Its arguments run in order:
+  linking the plugin's objects except `main.o`, `panels.o` and `mic.o`. Its arguments run in order:
 
   ```sh
   build/test/shot --size 960x720 --avatar me.glb --frames 30 --out front.png --view 90 --out side.png
@@ -261,8 +372,19 @@ Valve's; this reads your copy of the game for your own use.
   ```
 
   `grep 'a == "--' tools/test/harness/shot.cpp` lists every option. There are options for the camera,
-  motion, faces, gestures, toggles, emotes, the menu, maps, timing (`--bench`) and debugging
-  (`--hide`, `--show`, `--glinfo`).
+  motion, faces, gestures, toggles, sliders (`--slider NAME X Y` for a two-axis one), emotes, the
+  menu, lip sync from a WAV file (`--audio FILE`, `--visemes`, `--badge`), outlines (`--outlines 0`),
+  maps, timing (`--bench`) and debugging (`--hide`, `--show`, `--glinfo`, `--where NODE`). `--ctl`
+  runs a `hyprctl hypr3d avatar …` or `menu …` request, and `--key`, `--click`, `--wheel` and
+  `--mouse` give the Action Menu the plugin's input: the same code as the plugin's (`src/control.cpp`,
+  which `main.cpp` hands its commands and menu input to).
+- `tools/test/harness/ctl_check.sh DIR`: those, checked on the MA accessories and dances regress.sh
+  converted (its `--keep`'s `OUT/new`): sliders by number and percent, a two-axis one, a toggle and
+  its material variant, the menu's pages, a dial turned by the mouse and the wheel, a stick, and an
+  emote at twice its speed.
+- `tools/test/harness/lipsync_check.sh AVATAR.glb`: lip sync on vowels `tools/test/synth/vowels.py`
+  sings (a source-filter model of a man's and a woman's a, i, u, e, o), silence, hiss and a quiet
+  voice.
 - `tools/test/synth/make.py PROJ`: writes a synthetic Unity project for the converter's tests (run it
   under Blender, see below). It holds an unpacked avatar prefab, a variant of an FBX with overrides,
   PSD and TGA textures, and outfits with and without Modular Avatar, including one with VRM bone
@@ -271,9 +393,13 @@ Valve's; this reads your copy of the game for your own use.
   for it, as `.unitypackage` files. It makes `SynthChan_v1.0.unitypackage`, laid out like a Booth
   avatar: a humanoid FBX with Japanese shape keys and visemes, lilToon materials (the shader itself
   isn't included, as on Booth), PNG and PSD textures, an FX controller, menus with Japanese labels,
-  PC and Quest prefabs, and PhysBones, colliders and a head-pat contact. It also makes several
-  outfits: a Modular Avatar dress, a plain parka for `--outfit`, a VRCFury cardigan and a hair pin
-  from an old VRCFury. Last, it puts the avatar package inside a Booth-style `.zip` with Shift-JIS
+  PC and Quest prefabs, and PhysBones, colliders (a floor plane for the twin tails, a sphere the
+  skirt keeps inside) and a head-pat contact. It also makes several outfits: a Modular Avatar dress,
+  a plain parka for `--outfit`, a VRCFury cardigan, a hair pin from an old VRCFury, Modular Avatar
+  accessories (thigh socks with a Mesh Cutter and Scale Adjusters, a Merge Blend Tree slider, a Menu
+  Install Target, a Floor Adjuster, a Global Collider, a tail that sliders scale and turn), and
+  VRCFury gimmicks (a World Drop heart, gesture combos, a Gesture controller's hand poses, a
+  two-axis Puppet). Last, it puts the avatar package inside a Booth-style `.zip` with Shift-JIS
   names. `unitygen.py` holds what `make.py` and `booth.py` share: Unity's YAML, `.meta` files, prefab
   variants, controllers, VRChat, MA and VRCFury components, and the packing.
 - `tools/test/synth/check.py OUT.glb`: what a conversion wrote (the node tree, world positions,
@@ -282,13 +408,29 @@ Valve's; this reads your copy of the game for your own use.
   every mesh's skinned vertices.
 - `tools/test/synth/ma_unit.py` and `vrcf_unit.py`: unit tests of the Modular Avatar and VRCFury
   code on small hand-made hierarchies and features (VRCFury's two save formats and its upgrades).
+- `tools/test/synth/mat_unit.py`: the material reader on hand-made UnlitWF, lilToon, Poiyomi and
+  MToon materials (alpha sources and masks, inverted alpha, which faces its shaders draw, emission,
+  stencils, render queues, outlines, back faces, the light clamp), and a GLB exported and read back
+  (the alpha baked into the base texture, the extras and their textures).
+- `tools/test/synth/anim_unit.py`: transform curves, VRCFury's Scale, World Drop and Breathing, 2D
+  blend trees, four-axis puppets, avatar masks and hand poses.
+- `tools/test/synth/human_unit.py [-- T_POSE.anim…]`: the muscle-to-bone maths on a small T-posed
+  skeleton. Unity's T-pose muscle values must give the T pose back, left and right must mirror, and
+  the signs, twists, body motion, curves (weighted keys too) and Foot IK must behave. Given Unity's
+  own T pose clips (VRChat's SDK has `proxy_tpose.anim`), it poses them too.
+- `tools/test/synth/goal_check.py -- AVATAR CLIP.anim…`: how far the converter puts an avatar's feet
+  and hands from where a humanoid clip's own IK goal curves say they were. Unity writes those goals
+  from the motion when it imports the clip, so they are Unity's own record of it.
 - `tools/test/synth/fbxread.py FILE.fbx`: prints a binary FBX's model tree (plain python3).
-- `tools/test/regress.sh [--base REV|FILE] [--robot PATH] [--shots]`: converts the synthetic
-  avatars, the Booth-style packages (alone, with each outfit and from the zip) and VRChat's robot
-  sample (if you give its path) with the working copy's converter and with HEAD's, then compares
-  the results. Avatars with neither MA nor VRCFury must come out byte-identical, and the zip must
-  give the same GLB as the package. `--shots` also renders every result, front, side and walking,
-  with the harness.
+- `tools/test/regress.sh [--base REV|FILE] [--robot PATH] [--items DIR] [--shots]`: converts the
+  synthetic avatars, the Booth-style packages (alone, with each outfit and from the zip), VRChat's
+  robot sample (if you give its path) and three free Booth items (if you give the folder you
+  downloaded them to: 止丸式初音ミクNT, and VRSuya's Doodle Dance and Loli Kami Requiem as emotes on
+  it and on SynthChan) with the working copy's converter and with HEAD's. Then it compares the
+  results, emote files included. Avatars with neither MA nor VRCFury must come out byte-identical,
+  and the zip must give the same GLB as the package. `--shots` also renders every result, front,
+  side and walking, with the harness. The robot and the Booth items belong to their makers, so they
+  are not in this repo.
 
 Scripts that use numpy run under Blender's Python:
 
@@ -297,7 +439,13 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/make.py --
 blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/booth.py -- /tmp/booth
 blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/ma_unit.py
 blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/vrcf_unit.py
+blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/mat_unit.py
+blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/human_unit.py
+blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/anim_unit.py
+blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check.py -- Avatar.zip Dance.anim
 ```
+
+`vowels.py`, `fbxread.py` and the shell scripts run with plain `python3` or `bash`.
 
 ## Known limits
 
@@ -305,10 +453,18 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/vrcf_unit.
   Load real ones as `.vrma` or glTF clips with `avatar_emotes`.
 - In 3D mode, Alt+Tab doesn't reach Hyprland: Tab opens the Action Menu even with Alt held. Only keys
   with Super or Ctrl+Alt are passed through.
-- No lip sync. The visemes are carried over, but nothing drives them yet.
-- `tools/unity2hypr3d.py` covers the VRCFury features outfits use most, not all of them (see its
-  "not converted" list above). It has been tested on synthetic packages, not yet on a real Booth
-  avatar.
+- Lip sync knows five vowels and how loud you are, not consonants. Its vowels are Japanese ones,
+  between a man's and a woman's voice; other voices and languages may pick the wrong shape now and
+  then. It was tested on sung vowels, not on a live microphone.
+- The plugin's input and hyprctl code is tested through the harness (`src/control.cpp`); the
+  Hyprland hooks around it (key and button events, the dispatchers) only run in a real session.
+- `tools/unity2hypr3d.py` covers the MA and VRCFury features avatars and outfits use most, not all
+  of them (see its "not converted" list above). It has been tested on synthetic packages and on
+  three free Booth items (an UnlitWF avatar and two MA dance motions), not on paid avatars or
+  outfits.
+- The dance emotes are Unity's humanoid worked out without Unity: within a few degrees of Unity's own
+  T pose, and their feet and hands within a few centimetres of where the clips' own IK goals (Unity's
+  record of the motion) say (`goal_check.py`), but not compared frame by frame with Unity.
 
 ## Credits
 
@@ -319,6 +475,16 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/vrcf_unit.
   HhotateA's AvatarModifyTools (MIT, © 2021 @HhotateA_xR) and Azukimochi's BoneRenamer (MIT,
   © 2023 Azukimochi). The converter's other Modular Avatar support reimplements MA's behaviour in
   Python, written from reading MA's source. The license texts are in [THIRD_PARTY.md](THIRD_PARTY.md).
+- The converter's humanoid muscle maths follow lox9973's
+  [ShaderMotion](https://gitlab.com/lox9973/ShaderMotion) (MIT, © 2020-2021 lox9973) and
+  [uvw.js](https://gitlab.com/lox9973/uvw.js) (Apache 2.0, © 2022-2023 lox9973): the muscle table,
+  signs, masses and twist sharing. See [THIRD_PARTY.md](THIRD_PARTY.md).
+- The converter knows UnlitWF's stencil and outline shaders by their GUIDs (from the `.meta` files of
+  whiteflare's [Unlit_WF_ShaderSuite](https://github.com/whiteflare/Unlit_WF_ShaderSuite), zlib), and
+  lilToon's outline shaders by theirs (from [lilToon](https://github.com/lilxyzw/lilToon)'s, MIT,
+  © 2020-2024 lilxyzw). What their materials' settings do was read in those shaders' sources, and in
+  [Poiyomi Toon](https://github.com/poiyomi/PoiyomiToonShader)'s (MIT); none of their code is in this
+  repo. See [THIRD_PARTY.md](THIRD_PARTY.md).
 - The converter's VRCFury support reimplements VRCFury's build behaviour
   ([VRCFury](https://github.com/VRCFury/VRCFury), © 2022 Senky, under its own license). It was written
   after reading VRCFury's source for its save format and behaviour, and contains none of its code.

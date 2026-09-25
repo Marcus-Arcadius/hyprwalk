@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstring>
 #include <numeric>
+#include <ranges>
 
 #ifndef GL_TEXTURE_EXTERNAL_OES
 #define GL_TEXTURE_EXTERNAL_OES 0x8D65
@@ -184,6 +185,7 @@ namespace h3d {
             UNIT_BAKED_SHADOW = 14,
             UNIT_PROBES = 15,
             UNIT_SKY = 16,
+            UNIT_OUTLINE_MASK = 17, // the avatar's, in its vertex shader
         };
 
         // which texture unit each of MAP_FS_BODY's samplers reads
@@ -193,6 +195,7 @@ namespace h3d {
                 {"uLayerMaskTex", UNIT_LAYER_MASK}, {"uNormalTex", UNIT_NORMAL},       {"uLayerNormalTex", UNIT_LAYER_NORMAL}, {"uDetailTex", UNIT_DETAIL},
                 {"uDetailMaskTex", UNIT_DETAIL_MASK}, {"uIrradianceTex", UNIT_IRRADIANCE}, {"uDirectionalTex", UNIT_DIRECTIONAL},
                 {"uBakedShadowTex", UNIT_BAKED_SHADOW}, {"uProbeTex", UNIT_PROBES},     {"uSkyTex", UNIT_SKY},
+                {"uOutlineMaskTex", UNIT_OUTLINE_MASK},
             };
             for (const auto& [name, unit] : UNITS)
                 glUniform1i(U(prog, name), unit);
@@ -818,10 +821,11 @@ namespace h3d {
         glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(2.f, 4.f);
         const auto& mats = avatarMaterials(f);
-        for (const auto& b : model.batches) {
+        for (size_t i = 0; i < model.batches.size(); ++i) {
+            const auto& b = model.batches[i];
             if (!f.avatar.drawn(b))
                 continue;
-            const auto& m   = mats[b.material];
+            const auto& m   = mats[f.avatar.material(b, i)];
             const bool  cut = m.alphaMode != ALPHA_OPAQUE && m.baseTex >= 0 && (size_t)m.baseTex < m_avatar.textures.size() && m_avatar.textures[m.baseTex];
             glBindTexture(GL_TEXTURE_2D, cut ? m_avatar.textures[m.baseTex] : m_avatar.white);
             glUniform4f(U(prog, "uBaseXf"), m.baseXf[0], m.baseXf[1], m.baseXf[2], m.baseXf[3]);
@@ -983,13 +987,13 @@ namespace h3d {
                 glDeleteRenderbuffers(1, r);
             *r = 0;
         }
-        for (GLuint* t : {&m_shadowTex, &m_shadowStaticTex, &m_hudTex}) {
+        for (GLuint* t : {&m_shadowTex, &m_shadowStaticTex, &m_hudGL[0].tex, &m_hudGL[1].tex}) {
             if (*t)
                 glDeleteTextures(1, t);
             *t = 0;
         }
-        m_hudW = m_hudH = 0;
-        m_hudSerial     = 0;
+        for (auto& g : m_hudGL)
+            g = {};
         m_lightTarget.destroy();
         for (auto& [k, g] : m_panelGL)
             g.target.destroy();
@@ -1012,11 +1016,12 @@ namespace h3d {
         glBindRenderbuffer(GL_RENDERBUFFER, m_msaaColor);
         glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_RGBA8, w, h);
         glBindRenderbuffer(GL_RENDERBUFFER, m_msaaDepth);
-        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_DEPTH_COMPONENT24, w, h);
+        // with a stencil for the avatar's (Unity's stencil masks: eyes that show through the hair)
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_DEPTH24_STENCIL8, w, h);
 
         glBindFramebuffer(GL_FRAMEBUFFER, m_msaaFBO);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, m_msaaColor);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_msaaDepth);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, m_msaaDepth);
 
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
             logf("MSAA framebuffer incomplete ({}x{}, {} samples)", w, h, m_samples);
@@ -1364,26 +1369,44 @@ namespace h3d {
         glClear(GL_DEPTH_BUFFER_BIT);
     }
 
-    void CRenderer::drawAvatar(const SFrameParams& f, const M4& viewProj, int lightCount, const float* lights, bool blended) {
+    namespace {
+        GLenum stencilFunc(eStencilComp c) {
+            static constexpr GLenum FUNCS[] = {GL_NEVER, GL_LESS, GL_EQUAL, GL_LEQUAL, GL_GREATER, GL_NOTEQUAL, GL_GEQUAL, GL_ALWAYS};
+            return FUNCS[std::min<size_t>(c, 7)];
+        }
+        GLenum stencilOp(eStencilOp o) {
+            static constexpr GLenum OPS[] = {GL_KEEP, GL_ZERO, GL_REPLACE, GL_INCR, GL_DECR, GL_INVERT, GL_INCR_WRAP, GL_DECR_WRAP};
+            return OPS[std::min<size_t>(o, 7)];
+        }
+    }
+
+    void CRenderer::drawAvatar(const SFrameParams& f, const M4& viewProj, int lightCount, const float* lights, bool late) {
         if (!m_avatar.live || !f.avatar.visible)
             return;
-        const auto&  model = *m_avatar.model;
-        const size_t from = blended ? model.blendFrom : 0, to = blended ? model.batches.size() : model.blendFrom;
-        if (from >= to)
+        const auto& model = *m_avatar.model;
+        // a batch's material says which pass it's in (a material variant may make it blended, or not): what's opaque
+        // or alpha tested before the windows, what blends or tests the stencil after them and the map's glass; each
+        // by its render queue, as Unity draws them (a stencil mask before what it shows through)
+        const auto&                         mats = avatarMaterials(f);
+        std::vector<std::pair<int, size_t>> order; // (queue, batch)
+        for (size_t i = 0; i < model.batches.size(); ++i) {
+            const auto& b = model.batches[i];
+            if (!f.avatar.drawn(b))
+                continue;
+            const auto& m = mats[f.avatar.material(b, i)];
+            if ((m.alphaMode == ALPHA_BLEND || m.stencil.reads()) == late)
+                order.emplace_back(m.renderQueue(), i);
+        }
+        if (order.empty())
             return;
+        std::ranges::stable_sort(order, {}, &std::pair<int, size_t>::first);
 
         glEnable(GL_DEPTH_TEST);
-        if (blended) {
-            glDepthFunc(GL_LEQUAL);
-            glDepthMask(GL_FALSE);
-            glEnable(GL_BLEND);
-            glBlendEquation(GL_FUNC_ADD);
-            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-        } else {
-            glDepthFunc(GL_LESS);
-            glDepthMask(GL_TRUE);
-            glDisable(GL_BLEND);
-        }
+        glBlendEquation(GL_FUNC_ADD);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        // the output is drawn upside down (flipY()), which turns the triangles round: front faces go clockwise
+        glFrontFace(GL_CW);
+        glCullFace(GL_FRONT);
 
         const GLuint prog = m_progAvatar;
         setLighting(prog, f, viewProj, lightCount, lights);
@@ -1426,16 +1449,85 @@ namespace h3d {
             glVertexAttrib4f(7, 0, 0, 0, 1);
             glVertexAttrib4f(8, 0, 0, 0, 1);
         }
-        const auto& mats = avatarMaterials(f);
-        for (size_t i = from; i < to; ++i) {
-            const auto& b = model.batches[i];
-            if (!f.avatar.drawn(b))
-                continue;
-            const auto& m = mats[b.material];
+        const auto loaded = [&](int image) { return image >= 0 && (size_t)image < m_avatar.textures.size() && m_avatar.textures[image]; };
+        const M4    world = f.avatar.transform * model.fix;
+        const float scale = length(V3{world.m[0], world.m[1], world.m[2]}); // the model's (lilToon's outlines scale with it)
+        uVec3(prog, "uEye", f.eye);
+        glUniform1f(U(prog, "uAspect"), (float)f.height / (float)std::max(f.width, 1));
+        glUniform1i(U(prog, "uOutline"), 0);
+        glUniform1f(U(prog, "uAgain"), 0.f);
+        for (const auto& [queue, i] : order) {
+            const auto& b     = model.batches[i];
+            const auto& m     = mats[f.avatar.material(b, i)];
+            const bool  blend = m.alphaMode == ALPHA_BLEND;
+            const auto  draw  = [&] { glDrawElements(GL_TRIANGLES, b.count, GL_UNSIGNED_INT, (void*)(b.first * sizeof(uint32_t))); };
+            if (blend) {
+                glDepthFunc(GL_LEQUAL);
+                glDepthMask(GL_FALSE);
+                glEnable(GL_BLEND);
+            } else {
+                glDepthFunc(GL_LESS);
+                glDepthMask(GL_TRUE);
+                glDisable(GL_BLEND);
+            }
+            const auto& st = m.stencil;
+            if (st.on) {
+                glEnable(GL_STENCIL_TEST);
+                glStencilFunc(stencilFunc(st.comp), st.ref, st.read);
+                glStencilOp(stencilOp(st.fail), stencilOp(st.zfail), stencilOp(st.pass));
+                glStencilMask(st.write);
+            } else
+                glDisable(GL_STENCIL_TEST);
             setMaterial(prog, m, m_avatar.textures, model.images, m_avatar.white);
             glUniform1i(U(prog, "uMode"), m.unlit ? 1 : 0);
-            glDrawElements(GL_TRIANGLES, b.count, GL_UNSIGNED_INT, (void*)(b.first * sizeof(uint32_t)));
+            // UnlitWF's back faces and light clamp
+            const int back = m.back == 2 && !loaded(m.backTex) ? 1 : m.back;
+            glUniform1i(U(prog, "uBack"), back);
+            if (back) {
+                glUniform4f(U(prog, "uBackColor"), m.backColor[0], m.backColor[1], m.backColor[2], m.backColor[3]);
+                glUniform4f(U(prog, "uBackXf"), m.backXf[0], m.backXf[1], m.backXf[2], m.backXf[3]);
+                glUniform2f(U(prog, "uBackOffset"), m.backXf[4], m.backXf[5]);
+                if (back == 2) {
+                    glActiveTexture(GL_TEXTURE0 + UNIT_LAYER);
+                    glBindTexture(GL_TEXTURE_2D, m_avatar.textures[m.backTex]);
+                }
+            }
+            glUniform3f(U(prog, "uLightClamp"), m.lightClamp[0], m.lightClamp[1], m.lightClamp[2]);
+            // the outline first, as Unity's toon shaders draw it: the mesh pushed out, its front faces culled
+            if (const auto& ol = m.outline; ol.width > 0 && f.avatar.outlines) {
+                glEnable(GL_CULL_FACE);
+                glUniform1i(U(prog, "uOutline"), ol.space == OUTLINE_SCREEN ? 2 : 1);
+                glUniform4f(U(prog, "uOutlineA"), ol.width * (ol.space == OUTLINE_OBJECT ? scale : 1.f), ol.shift, ol.fix, ol.fixMax);
+                const bool mask = loaded(ol.maskTex);
+                glUniform4f(U(prog, "uOutlineMask"), !mask || ol.maskChannel == 0 ? 1.f : 0.f, mask && ol.maskChannel == 1 ? 1.f : 0.f,
+                            mask && ol.maskChannel == 2 ? 1.f : 0.f, mask && ol.maskChannel == 3 ? 1.f : 0.f);
+                glUniform1f(U(prog, "uOutlineInvert"), mask && ol.maskInvert ? 1.f : 0.f);
+                glUniform1f(U(prog, "uOutlineMaxW"), ol.maxW);
+                glUniform4f(U(prog, "uOutlineColor"), ol.color[0], ol.color[1], ol.color[2], ol.color[3]);
+                glUniform3f(U(prog, "uOutlineMix"), ol.base, ol.tint, ol.lit);
+                glActiveTexture(GL_TEXTURE0 + UNIT_OUTLINE_MASK);
+                glBindTexture(GL_TEXTURE_2D, mask ? m_avatar.textures[ol.maskTex] : m_avatar.white);
+                draw();
+                glUniform1i(U(prog, "uOutline"), 0);
+                glDisable(GL_CULL_FACE);
+            }
+            draw();
+            // UnlitWF's MaskOut_Blend: again where its mask hid it, fainter
+            if (st.on && st.again > 0) {
+                glEnable(GL_BLEND);
+                glDepthFunc(GL_LEQUAL);
+                glDepthMask(GL_FALSE);
+                glStencilFunc(stencilFunc(st.againComp), st.ref, st.read);
+                glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+                glUniform1f(U(prog, "uAgain"), st.again);
+                draw();
+                glUniform1f(U(prog, "uAgain"), 0.f);
+            }
         }
+        glDisable(GL_STENCIL_TEST);
+        glStencilMask(0xFF);
+        glFrontFace(GL_CCW);
+        glCullFace(GL_BACK);
         glActiveTexture(GL_TEXTURE0);
     }
 
@@ -1540,31 +1632,35 @@ namespace h3d {
     }
 
     void CRenderer::drawHud(const SFrameParams& f) {
-        const SHudImage& m = f.menu;
+        drawHudImage(f, f.menu, m_hudGL[0]);
+        drawHudImage(f, f.badge, m_hudGL[1]);
+    }
+
+    void CRenderer::drawHudImage(const SFrameParams& f, const SHudImage& m, SHudGL& g) {
         if (!m.pixels || m.w < 1 || m.h < 1 || m.pixels->size() < (size_t)m.w * m.h || m.alpha <= 0.f)
             return;
 
         glActiveTexture(GL_TEXTURE0);
-        if (!m_hudTex) {
-            glGenTextures(1, &m_hudTex);
-            glBindTexture(GL_TEXTURE_2D, m_hudTex);
+        if (!g.tex) {
+            glGenTextures(1, &g.tex);
+            glBindTexture(GL_TEXTURE_2D, g.tex);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            m_hudSerial = 0;
+            g.serial = 0;
         } else
-            glBindTexture(GL_TEXTURE_2D, m_hudTex);
+            glBindTexture(GL_TEXTURE_2D, g.tex);
 
-        if (m.serial != m_hudSerial || m.w != m_hudW || m.h != m_hudH) {
+        if (m.serial != g.serial || m.w != g.w || m.h != g.h) {
             CUnpackGuard unpack;
-            if (m.w != m_hudW || m.h != m_hudH)
+            if (m.w != g.w || m.h != g.h)
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m.w, m.h, 0, GL_RGBA, GL_UNSIGNED_BYTE, m.pixels->data());
             else
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m.w, m.h, GL_RGBA, GL_UNSIGNED_BYTE, m.pixels->data());
-            m_hudW      = m.w;
-            m_hudH      = m.h;
-            m_hudSerial = m.serial;
+            g.w      = m.w;
+            g.h      = m.h;
+            g.serial = m.serial;
         }
 
         glDisable(GL_DEPTH_TEST);
@@ -1621,8 +1717,10 @@ namespace h3d {
         glViewport(0, 0, f.width, f.height);
         glClearColor(0, 0, 0, 1);
         glClearDepthf(1.f);
+        glClearStencil(0);
         glDepthMask(GL_TRUE);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glStencilMask(0xFF);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
         drawSky(f, viewProj);
         drawMap(f, viewProj, lightCount, lights, MAP_PASS_SKY);

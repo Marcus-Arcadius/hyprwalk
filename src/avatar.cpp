@@ -1432,7 +1432,7 @@ namespace h3d {
             std::vector<bool>         skinJoint; // ours: used by a skin
             std::vector<uint32_t>     skinBase;  // glTF skin -> first of its joints
             std::vector<M4>           restGlobal;
-            std::map<std::pair<int, int>, std::vector<uint32_t>> batches; // by material, part
+            std::map<std::tuple<int, int, int>, std::vector<uint32_t>> batches; // by material, part, variant map
             int                       part = 0;                                    // of the mesh node being read
             bool                      vrm = false;
             size_t                    skippedDraco = 0, skippedOther = 0;
@@ -1663,7 +1663,20 @@ namespace h3d {
                     }
                     model.vertices.push_back(v);
                 }
-                auto& out = batches[{mat, part}];
+                // the materials it takes in material variants (KHR_materials_variants), shared by the primitives alike
+                std::vector<std::pair<int, int>> map;
+                for (size_t k = 0; k < prim.mappings_count; ++k)
+                    if (prim.mappings[k].material && prim.mappings[k].variant < data->variants_count)
+                        map.push_back({(int)prim.mappings[k].variant, (int)cgltf_material_index(data, prim.mappings[k].material)});
+                std::ranges::sort(map);
+                int vm = 0;
+                if (!map.empty()) {
+                    const auto it = std::ranges::find(model.variantMaps, map);
+                    vm            = (int)(it - model.variantMaps.begin());
+                    if (it == model.variantMaps.end())
+                        model.variantMaps.push_back(std::move(map));
+                }
+                auto& out = batches[{mat, part, vm}];
                 for (size_t t = 0; t + 2 < idx.size(); t += 3) {
                     if (idx[t] >= n || idx[t + 1] >= n || idx[t + 2] >= n)
                         continue;
@@ -1741,6 +1754,22 @@ namespace h3d {
                 targets.clear();
             }
 
+            // the part a primitive belongs to: its mesh node's, or one of its own that its extras name ("hypr3d_part": what
+            // unity2hypr3d splits off a mesh for an MA Mesh Cutter that a toggle switches)
+            int primitivePart(const cgltf_primitive& prim, int nodePart, int ni, size_t gi) {
+                SJson j;
+                if (!prim.extras.data || !CJsonReader(prim.extras.data).read(j))
+                    return nodePart;
+                const std::string name(jstr(j.get("hypr3d_part")));
+                if (name.empty())
+                    return nodePart;
+                for (size_t p = nodePart + 1; p < model.parts.size(); ++p)
+                    if (model.parts[p].name == name)
+                        return (int)p;
+                model.parts.push_back({name, ni, (int)gi});
+                return (int)model.parts.size() - 1;
+            }
+
             void meshes() {
                 for (size_t gi = 0; gi < data->nodes_count; ++gi) {
                     const cgltf_node& nd = data->nodes[gi];
@@ -1760,10 +1789,13 @@ namespace h3d {
                     for (size_t p = 0; p < nd.mesh->primitives_count; ++p)
                         morphTargets = std::max(morphTargets, nd.mesh->primitives[p].targets_count);
                     targets.assign(morphTargets, {});
-                    part = (int)model.parts.size();
-                    model.parts.push_back({model.nodes[ni].name.empty() ? std::format("mesh {}", part) : model.nodes[ni].name, ni, (int)gi});
-                    for (size_t p = 0; p < nd.mesh->primitives_count; ++p)
+                    const int nodePart = (int)model.parts.size();
+                    model.parts.push_back({model.nodes[ni].name.empty() ? std::format("mesh {}", nodePart) : model.nodes[ni].name, ni, (int)gi});
+                    for (size_t p = 0; p < nd.mesh->primitives_count; ++p) {
+                        part = primitivePart(nd.mesh->primitives[p], nodePart, ni, gi);
                         primitive(nd.mesh->primitives[p], skin, ownJoint);
+                    }
+                    part = nodePart;
                     addMorphs(gi);
                     check(cancel);
                 }
@@ -1776,14 +1808,16 @@ namespace h3d {
                 }
 
                 // opaque and alpha tested first, blended last
+                for (size_t v = 0; v < data->variants_count; ++v)
+                    model.variants.push_back(data->variants[v].name ? data->variants[v].name : std::format("variant {}", v));
                 for (int pass = 0; pass < 2; ++pass) {
                     if (pass == 1)
                         model.blendFrom = model.batches.size();
                     for (auto& [key, idx] : batches) {
-                        const auto [mat, pt] = key;
+                        const auto [mat, pt, vm] = key;
                         if (idx.empty() || (model.materials[mat].alphaMode == ALPHA_BLEND) != (pass == 1))
                             continue;
-                        model.batches.push_back({mat, pt, (uint32_t)model.indices.size(), (uint32_t)idx.size()});
+                        model.batches.push_back({mat, pt, (uint32_t)model.indices.size(), (uint32_t)idx.size(), vm});
                         model.parts[pt].triangles += idx.size() / 3;
                         model.indices.insert(model.indices.end(), idx.begin(), idx.end());
                     }
@@ -2073,7 +2107,9 @@ namespace h3d {
                 if (model.humanoid)
                     pivot = restPos(h[HB_HIPS]);
                 const V3 p = turn.rotate(pivot) * s;
-                model.fix    = M4::trs({-p.x, -b.min.y * s, -p.z}, turn, {s, s, s});
+                // on its lowest point, or where the settings file's "floor" says the ground is (MA's Floor Adjuster)
+                const float floor = (float)jnum(settings.get("floor"), b.min.y);
+                model.fix    = M4::trs({-p.x, -floor * s, -p.z}, turn, {s, s, s});
                 model.scale  = s;
                 model.height = height * s;
             }
@@ -2451,7 +2487,53 @@ namespace h3d {
                 }
             }
 
-            // "hidden": [parts]; "toggles": [{"name", "group", "on", "show": [parts], "hide": [parts], "shapes": {...}}]
+            // material variants by name (the model's KHR_materials_variants)
+            void variantsOf(const SJson* names, std::vector<int>& out) {
+                if (const auto* list = jarr(names))
+                    for (const auto& n : *list) {
+                        const int v = model.findVariant(jstr(&n));
+                        if (v < 0)
+                            missing.push_back(std::format("material variant {}", jstr(&n)));
+                        else if (std::ranges::find(out, v) == out.end())
+                            out.push_back(v);
+                    }
+            }
+
+            // "transforms": {"node": {"t": [x, y, z], "r": [x, y, z, w], "s": [x, y, z]}}: what of each node's own
+            // translation, rotation and scale is set
+            void posesOf(const SJson* j, std::vector<SNodePose>& out) {
+                if (!j || j->type != SJson::J_OBJ)
+                    return;
+                for (const auto& [name, v] : j->obj) {
+                    const int n = nodeNamed(name);
+                    if (n < 0) {
+                        missing.push_back(name);
+                        continue;
+                    }
+                    SNodePose p;
+                    p.node = n;
+                    p.trs  = model.nodes[n].rest;
+                    if (const auto* a = jarr(v.get("t")); a && a->size() == 3) {
+                        p.set |= SNodePose::T;
+                        p.trs.t = jvec(v.get("t"), p.trs.t);
+                    }
+                    if (const auto* a = jarr(v.get("r")); a && a->size() == 4) {
+                        p.set |= SNodePose::R;
+                        p.trs.r = Quat{(float)jnum(&(*a)[0], 0), (float)jnum(&(*a)[1], 0), (float)jnum(&(*a)[2], 0), (float)jnum(&(*a)[3], 1)}.normalized();
+                    }
+                    if (const auto* a = jarr(v.get("s")); a && a->size() == 3) {
+                        p.set |= SNodePose::S;
+                        p.trs.s = jvec(v.get("s"), p.trs.s);
+                    }
+                    if (p.set)
+                        out.push_back(p);
+                }
+            }
+
+            // "hidden": [parts]; "toggles": [{"name", "group" or "groups": [...], "on", "show": [parts], "hide": [parts],
+            // "shapes": {...}, "variants": [material variants], "transforms": {...}, "loop": {"seconds", "a": {"shapes",
+            // "transforms"}, "b": {...}}, "drop": [nodes]}]; "sliders": [{"name", "value", "keys": [{"at", "shapes",
+            // "show", "hide", "variants", "transforms"}]}]
             void outfit() {
                 std::vector<int> hidden;
                 partsOf(settings.get("hidden"), hidden);
@@ -2463,17 +2545,86 @@ namespace h3d {
                         tg.name = jstr(t.get("name"));
                         if (tg.name.empty() || model.findToggle(tg.name) >= 0)
                             continue;
-                        tg.group = jstr(t.get("group"));
+                        if (const auto* gs = jarr(t.get("groups")))
+                            for (const auto& g : *gs)
+                                if (!jstr(&g).empty())
+                                    tg.groups.emplace_back(jstr(&g));
+                        if (tg.groups.empty() && !jstr(t.get("group")).empty())
+                            tg.groups.emplace_back(jstr(t.get("group")));
+                        tg.group = tg.groups.empty() ? std::string() : tg.groups[0];
                         tg.on    = jbool(t.get("on"));
                         partsOf(t.get("show"), tg.show);
                         partsOf(t.get("hide"), tg.hide);
                         morphsOf(t.get("shapes"), [&](int m, float w) { tg.shapes.push_back({m, w}); });
+                        variantsOf(t.get("variants"), tg.variants);
+                        posesOf(t.get("transforms"), tg.poses);
+                        if (const SJson* l = t.get("loop"); l && l->type == SJson::J_OBJ && jnum(l->get("seconds"), 0) > 0.01) {
+                            tg.loop.seconds = (float)jnum(l->get("seconds"), 0);
+                            if (const SJson* a = l->get("a")) {
+                                morphsOf(a->get("shapes"), [&](int m, float w) { tg.loop.shapesA.push_back({m, w}); });
+                                posesOf(a->get("transforms"), tg.loop.posesA);
+                            }
+                            if (const SJson* b = l->get("b")) {
+                                morphsOf(b->get("shapes"), [&](int m, float w) { tg.loop.shapesB.push_back({m, w}); });
+                                posesOf(b->get("transforms"), tg.loop.posesB);
+                            }
+                        }
+                        if (const auto* d = jarr(t.get("drop")))
+                            for (const auto& x : *d) {
+                                if (const int n = nodeNamed(jstr(&x)); n >= 0)
+                                    tg.drop.push_back(n);
+                                else
+                                    missing.push_back(std::string(jstr(&x)));
+                            }
                         // one of a group on at first, at most
-                        if (tg.on && !tg.group.empty())
+                        if (tg.on)
                             for (const auto& o : model.toggles)
-                                if (o.on && o.group == tg.group)
+                                if (o.on && std::ranges::any_of(o.groups, [&](const std::string& g) { return std::ranges::find(tg.groups, g) != tg.groups.end(); }))
                                     tg.on = false;
                         model.toggles.push_back(std::move(tg));
+                    }
+                if (const auto* list = jarr(settings.get("sliders")))
+                    for (const auto& s : *list) {
+                        SAvatarSlider sl;
+                        sl.name = jstr(s.get("name"));
+                        if (sl.name.empty() || model.findSlider(sl.name) >= 0)
+                            continue;
+                        // "axes": 2: a 2D one, its "value" and keys' "at" [x, y], its keys a "grid" of n x n
+                        const bool two = jnum(s.get("axes"), 1) == 2;
+                        auto       xy  = [&](const SJson* j, float& x, float& y) {
+                            const auto* a = jarr(j);
+                            x = a && a->size() == 2 ? std::clamp((float)jnum(&(*a)[0], 0), -1.f, 1.f) : 0.f;
+                            y = a && a->size() == 2 ? std::clamp((float)jnum(&(*a)[1], 0), -1.f, 1.f) : 0.f;
+                        };
+                        if (two) {
+                            sl.grid = std::max(2, (int)jnum(s.get("grid"), 0));
+                            xy(s.get("value"), sl.value, sl.valueY);
+                        } else
+                            sl.value = std::clamp((float)jnum(s.get("value"), 0), 0.f, 1.f);
+                        if (const auto* keys = jarr(s.get("keys")))
+                            for (const auto& k : *keys) {
+                                SAvatarSlider::SKey key;
+                                if (two)
+                                    xy(k.get("at"), key.at, key.atY);
+                                else
+                                    key.at = std::clamp((float)jnum(k.get("at"), 0), 0.f, 1.f);
+                                morphsOf(k.get("shapes"), [&](int m, float w) { key.shapes.push_back({m, w}); });
+                                partsOf(k.get("show"), key.show);
+                                partsOf(k.get("hide"), key.hide);
+                                variantsOf(k.get("variants"), key.variants);
+                                posesOf(k.get("transforms"), key.poses);
+                                sl.keys.push_back(std::move(key));
+                            }
+                        if (two) {
+                            std::ranges::stable_sort(sl.keys, [](const auto& a, const auto& b) { return a.atY != b.atY ? a.atY < b.atY : a.at < b.at; });
+                            if (sl.keys.size() != (size_t)(sl.grid * sl.grid)) {
+                                log.push_back(std::format("{}: the slider {} has {} keys, not a grid of {} x {}; left out", settingsName, sl.name, sl.keys.size(), sl.grid, sl.grid));
+                                continue;
+                            }
+                        } else
+                            std::ranges::stable_sort(sl.keys, {}, &SAvatarSlider::SKey::at);
+                        if (!sl.keys.empty())
+                            model.sliders.push_back(std::move(sl));
                     }
             }
 
@@ -2572,7 +2723,22 @@ namespace h3d {
                     g[GESTURE_GUN]       = wink >= 0 ? wink : P[EX_HAPPY];
                     g[GESTURE_THUMBS_UP] = P[EX_HAPPY];
                 }
-                // or as the settings file says: "gestures": {"left"/"right"/"both": {"fist": "expression" or "none"}}
+                // or as the settings file says: "gestures": {"left"/"right"/"both": {"fist": "expression" or "none"},
+                // "combos": {"fist+open": "expression" or "none"}: the face while the left hand makes one sign and the
+                // right the other}
+                if (const SJson* gs = settings.get("gestures"); gs && gs->type == SJson::J_OBJ)
+                    if (const SJson* combos = gs->get("combos"); combos && combos->type == SJson::J_OBJ)
+                        for (const auto& [pair, face] : combos->obj) {
+                            const size_t plus = pair.find('+');
+                            const int    l = plus == std::string::npos ? -1 : gestureFromName(std::string_view(pair).substr(0, plus));
+                            const int    r = plus == std::string::npos ? -1 : gestureFromName(std::string_view(pair).substr(plus + 1));
+                            const int    e = jstr(&face) == "none" ? -1 : model.findExpression(jstr(&face));
+                            if (l < 0 || r < 0 || (e < 0 && jstr(&face) != "none")) {
+                                missing.push_back(l < 0 || r < 0 ? std::format("gestures {}", pair) : std::string(jstr(&face)));
+                                continue;
+                            }
+                            model.gestureCombo[l][r] = e;
+                        }
                 if (const SJson* gs = settings.get("gestures"))
                     for (const std::string_view side : {"both", "left", "right"})
                         if (const SJson* h = gs->get(side); h && h->type == SJson::J_OBJ)
@@ -2668,8 +2834,8 @@ namespace h3d {
             std::vector<bool>             claimed; // moved by a spring
             std::vector<bool>             human;   // a humanoid bone, or has one under it: never swings
 
-            int addCollider(int node, const V3& offset, const V3& tail, float meters) {
-                model.springColliders.push_back({node, offset, tail, std::max(meters, 0.f)});
+            int addCollider(int node, const V3& offset, const V3& tail, float meters, eColliderKind kind = COLLIDER_OUTSIDE) {
+                model.springColliders.push_back({node, offset, tail, std::max(meters, 0.f), kind});
                 return (int)model.springColliders.size() - 1;
             }
 
@@ -2760,7 +2926,9 @@ namespace h3d {
 
             // VRMC_springBone (VRM 1.0): colliders [{node, shape: {sphere: {offset, radius}} or {capsule: {offset, radius,
             // tail}}}], colliderGroups [{colliders: [i]}], springs [{name, joints: [{node, stiffness, gravityPower, gravityDir,
-            // dragForce, hitRadius}], colliderGroups: [i], center}]: each joint points at the next, the last is only its end
+            // dragForce, hitRadius}], colliderGroups: [i], center}]: each joint points at the next, the last is only its end.
+            // A collider's VRMC_springBone_extended_collider says what it is instead: {shape: {sphere or capsule: {...,
+            // inside}, plane: {offset, normal}}}
             void vrm1Springs() {
                 const cgltf_extension* ext = nullptr;
                 for (size_t i = 0; i < data->data_extensions_count && !ext; ++i)
@@ -2776,16 +2944,24 @@ namespace h3d {
                 std::vector<int> colliders; // ours per theirs, -1 = none
                 if (const auto* list = jarr(j.get("colliders")))
                     for (const auto& c : *list) {
-                        const int    node    = gltfNode(c.get("node"));
-                        const SJson* shape   = c.get("shape");
+                        const int    node     = gltfNode(c.get("node"));
+                        const SJson* extended = c.get("extensions") ? c.get("extensions")->get("VRMC_springBone_extended_collider") : nullptr;
+                        const SJson* shape    = extended && extended->get("shape") ? extended->get("shape") : c.get("shape");
+                        if (const SJson* plane = shape ? shape->get("plane") : nullptr; node >= 0 && plane) {
+                            const V3 o = jvec(plane->get("offset"), {});
+                            colliders.push_back(addCollider(node, o, o + normalize(jvec(plane->get("normal"), {0, 0, 1})), 0, COLLIDER_PLANE));
+                            continue;
+                        }
                         const SJson* capsule = shape ? shape->get("capsule") : nullptr;
                         const SJson* s       = capsule ? capsule : shape ? shape->get("sphere") : nullptr;
                         if (node < 0 || !s) {
                             colliders.push_back(-1);
                             continue;
                         }
-                        const V3 o = jvec(s->get("offset"), {});
-                        colliders.push_back(addCollider(node, o, capsule ? jvec(s->get("tail"), o) : o, (float)jnum(s->get("radius"), 0) * metersAt(node)));
+                        const V3           o      = jvec(s->get("offset"), {});
+                        const SJson*       inside = s->get("inside");
+                        const eColliderKind kind  = inside && inside->type == SJson::J_BOOL && inside->num != 0 ? COLLIDER_INSIDE : COLLIDER_OUTSIDE;
+                        colliders.push_back(addCollider(node, o, capsule ? jvec(s->get("tail"), o) : o, (float)jnum(s->get("radius"), 0) * metersAt(node), kind));
                     }
                 std::vector<std::vector<int>> groups;
                 if (const auto* list = jarr(j.get("colliderGroups")))
@@ -2876,7 +3052,8 @@ namespace h3d {
             }
 
             // the settings file's, over the model's own:
-            // "colliders": [{"name", "node", "offset": [x, y, z], "tail": [x, y, z] (a capsule), "radius"}], in the node's units;
+            // "colliders": [{"name", "node", "offset": [x, y, z], "tail": [x, y, z] (a capsule), "radius", "inside": true (it keeps the
+            // bones in)}, or a plane {"name", "node", "offset", "normal": [x, y, z]} (they keep to where it points)], in the node's units;
             // "springs": [{"name", "bones": [roots], "ignore": [bones], "stiffness", "drag", "gravity", "gravityDir": [x, y, z],
             // "radius", "center": bone, "immobile", "colliders": [names; "body" for the ones made for the body]}]: each root and all under
             // it swing, as VRM 0.x has it. A spring that doesn't name colliders keeps out of all of the file's, or the body's.
@@ -2890,8 +3067,11 @@ namespace h3d {
                             missing.push_back(std::string(jstr(c.get("node"))));
                             continue;
                         }
-                        const V3  o = jvec(c.get("offset"), {});
-                        const int k = addCollider(node, o, jvec(c.get("tail"), o), (float)jnum(c.get("radius"), 0.05) * metersAt(node));
+                        const V3     o      = jvec(c.get("offset"), {});
+                        const SJson* inside = c.get("inside");
+                        const int    k      = c.get("normal") ? addCollider(node, o, o + normalize(jvec(c.get("normal"), {0, 1, 0})), 0, COLLIDER_PLANE) :
+                                                                addCollider(node, o, jvec(c.get("tail"), o), (float)jnum(c.get("radius"), 0.05) * metersAt(node),
+                                                                            inside && inside->type == SJson::J_BOOL && inside->num != 0 ? COLLIDER_INSIDE : COLLIDER_OUTSIDE);
                         named[lower(std::string(jstr(c.get("name"))))].push_back(k);
                         all.push_back(k);
                     }
@@ -3156,7 +3336,7 @@ namespace h3d {
             }
 
             // the built in ones (humanoids), the model's clips that aren't for walking about, the settings file's
-            // ("emotes": [{"name", "file", "clip", "loop", "hold", "grounded"}]: a file by where the settings file is,
+            // ("emotes": [{"name", "file", "clip", "loop", "hold", "grounded", "speed"}]: a file by where the settings file is,
             // else a clip of the model's) and the request's files; a later one of a name replaces an earlier one
             void emotes() {
                 std::vector<std::shared_ptr<SAvatarEmote>> all;
@@ -3184,8 +3364,6 @@ namespace h3d {
                     auto        made = emotesFromFile(file, model, cancel, log, error, clip);
                     if (!error.empty())
                         log.push_back(who.empty() ? error : std::format("{}: {}", who, error));
-                    for (const auto& e : made)
-                        files.push_back(std::format("{} ({})", e->name, e->from));
                     return made;
                 };
                 if (const auto* list = jarr(settings.get("emotes")))
@@ -3211,12 +3389,18 @@ namespace h3d {
                                 e->hold = jbool(v);
                             if (const SJson* v = x.get("grounded"))
                                 e->grounded = jbool(v);
+                            if (const SJson* v = x.get("speed"))
+                                e->speed = std::clamp((float)jnum(v, 1), 0.05f, 20.f);
+                            if (!file.empty())
+                                files.push_back(std::format("{} ({})", e->name, e->from));
                             add(std::move(e));
                         }
                     }
                 for (const auto& f : req.emotes)
-                    for (auto& e : fromFile(f, {}, ""))
+                    for (auto& e : fromFile(f, {}, "")) {
+                        files.push_back(std::format("{} ({})", e->name, e->from));
                         add(std::move(e));
+                    }
                 model.emotes.assign(all.begin(), all.end());
 
                 std::vector<std::string> said;
@@ -3227,6 +3411,52 @@ namespace h3d {
                 if (!files.empty())
                     said.push_back("from files " + join(files));
                 emotesMade = join(said, "; ");
+            }
+
+            // "hands": {"file": a VRM animation, "left"/"right": {"fist": time, ...}}: a gesture's finger pose, the animation's
+            // at that time (unity2hypr3d writes the Gesture layer's hand poses so)
+            void hands() {
+                const SJson* h = settings.get("hands");
+                if (!h || h->type != SJson::J_OBJ || !model.humanoid)
+                    return;
+                std::filesystem::path p{std::string(jstr(h->get("file")))};
+                if (p.empty())
+                    return;
+                if (p.is_relative())
+                    p = std::filesystem::path(model.settings).parent_path() / p;
+                std::string error;
+                const auto  made = emotesFromFile(p.string(), model, cancel, log, error, {});
+                if (made.empty()) {
+                    log.push_back(std::format("{}: the hand poses: {}", settingsName, error));
+                    return;
+                }
+                const SAnimClip& anim = made[0]->anim;
+                int              n    = 0;
+                for (int hand = 0; hand < 2; ++hand) {
+                    const SJson* side = h->get(hand ? "right" : "left");
+                    if (!side || side->type != SJson::J_OBJ)
+                        continue;
+                    for (const auto& [name, t] : side->obj) {
+                        const int g = gestureFromName(name);
+                        if (g < 0) {
+                            missing.push_back(std::format("gesture {}", name));
+                            continue;
+                        }
+                        std::vector<STRS> pose;
+                        for (const auto& nd : model.nodes)
+                            pose.push_back(nd.rest);
+                        sampleClip(anim, (float)jnum(&t, 0), pose);
+                        for (int f = 0; f < FINGER_COUNT; ++f)
+                            for (int s = 0; s < 3; ++s) {
+                                const int b                         = model.human[fingerBone(hand, f, s)];
+                                model.handPose[hand][g][f * 3 + s] = b >= 0 ? pose[b].r : Quat{};
+                            }
+                        model.handPoseSet[hand][g] = true;
+                        ++n;
+                    }
+                }
+                if (n)
+                    log.push_back(std::format("hand poses: {} from {}", n, p.filename().string()));
             }
 
             static std::string join(const std::vector<std::string>& list, std::string_view by = ", ") {
@@ -3412,6 +3642,7 @@ namespace h3d {
         b.springs();
         b.constraints();
         b.emotes();
+        b.hands();
         b.reportMissing();
         check(cancel);
         gltf::decodeImages(data, abs.parent_path().string(), model->images, b.mats.imageSlot, cancel, log);
@@ -3437,8 +3668,10 @@ namespace h3d {
         }
         if (model->parts.size() > 1 || !model->settings.empty()) {
             const size_t hidden = std::ranges::count_if(model->parts, [](const SAvatarPart& p) { return p.hidden; });
-            log.push_back(std::format("outfit: {} parts{}, {} toggles{}", model->parts.size(), hidden ? std::format(" ({} hidden)", hidden) : "",
-                                      model->toggles.size(), model->settings.empty() ? "" : " from " + b.settingsName));
+            log.push_back(std::format("outfit: {} parts{}, {} toggles{}{}{}", model->parts.size(), hidden ? std::format(" ({} hidden)", hidden) : "",
+                                      model->toggles.size(), model->sliders.empty() ? "" : std::format(", {} sliders", model->sliders.size()),
+                                      model->variants.empty() ? "" : std::format(", {} material variants", model->variants.size()),
+                                      model->settings.empty() ? "" : " from " + b.settingsName));
         }
         if (!model->springJoints.empty() || !model->constraints.empty()) {
             std::string physics;
@@ -3517,6 +3750,30 @@ namespace h3d {
         return -1;
     }
 
+    int SAvatarModel::findSlider(std::string_view name) const {
+        if (name.empty())
+            return -1;
+        const std::string low = lower(std::string(name)), loose = normName(name);
+        for (size_t i = 0; i < sliders.size(); ++i)
+            if (lower(sliders[i].name) == low)
+                return (int)i;
+        for (size_t i = 0; i < sliders.size(); ++i)
+            if (normName(sliders[i].name) == loose)
+                return (int)i;
+        return -1;
+    }
+
+    int SAvatarModel::findVariant(std::string_view name) const {
+        for (size_t i = 0; i < variants.size(); ++i)
+            if (variants[i] == name)
+                return (int)i;
+        const std::string low = lower(std::string(name));
+        for (size_t i = 0; i < variants.size(); ++i)
+            if (lower(variants[i]) == low)
+                return (int)i;
+        return -1;
+    }
+
     // by its own name or a parent node's: "Jacket" is every mesh under the jacket's node too, as a GameObject
     // turned off in Unity hides its children
     std::vector<int> SAvatarModel::findParts(std::string_view name) const {
@@ -3579,10 +3836,19 @@ namespace h3d {
         m_saccadeIn  = 1;
         m_saccadeYaw = m_saccadePitch = 0;
         m_toggles.clear();
+        m_sliders.clear();
+        m_slidersY.clear();
         m_partSet.clear();
         m_shapeSet.clear();
         m_shown.clear();
         m_shapeBase.clear();
+        m_variantOn.clear();
+        m_batchMat.clear();
+        m_nodePose.clear();
+        m_loops.clear();
+        m_dropBy.clear();
+        m_dropAt.clear();
+        m_dropTake.clear();
         m_springOf.clear();
         m_tail.clear();
         m_tailPrev.clear();
@@ -3866,6 +4132,15 @@ namespace h3d {
             for (int s = 0; s < 3; ++s)
                 cur.thumb[s] = slerp(cur.thumb[s], m_thumbPose[hand][g][s], k);
             m_handW[hand] += ((g == GESTURE_NEUTRAL && clip ? 0.f : 1.f) - m_handW[hand]) * k;
+            // a pose of the avatar's own for this gesture, eased in over the preset's
+            const bool own = md.handPoseSet[hand][g];
+            if (own) {
+                if (m_handCustom[hand] < 1e-3f)
+                    m_handQ[hand] = md.handPose[hand][g];
+                for (int i = 0; i < 15; ++i)
+                    m_handQ[hand][i] = slerp(m_handQ[hand][i], md.handPose[hand][g][i], k).normalized();
+            }
+            m_handCustom[hand] += ((own ? 1.f : 0.f) - m_handCustom[hand]) * k;
             if (m_handW[hand] < 1e-3f)
                 continue;
             for (int f = 0; f < FINGER_COUNT; ++f)
@@ -3879,8 +4154,10 @@ namespace h3d {
                         d = d * Quat::axisAngle(ax.spread, cur.spread[f] * SPREAD);
                     const int  p    = md.nodes[n].parent;
                     const Quat gp   = p >= 0 ? m_restGlobalRot[p] : Quat{};
-                    const Quat want = (gp.conj() * d * gp * md.nodes[n].rest.r).normalized();
-                    pose[n].r       = m_handW[hand] > 0.999f ? want : slerp(pose[n].r, want, m_handW[hand]).normalized();
+                    Quat       want = (gp.conj() * d * gp * md.nodes[n].rest.r).normalized();
+                    if (m_handCustom[hand] > 1e-3f)
+                        want = slerp(want, m_handQ[hand][f * 3 + s], m_handCustom[hand]).normalized();
+                    pose[n].r = m_handW[hand] > 0.999f ? want : slerp(pose[n].r, want, m_handW[hand]).normalized();
                 }
         }
     }
@@ -3964,6 +4241,24 @@ namespace h3d {
 
     // expressions (held, or the gesture's), blinking, where the eyes look, and what that makes of the morphs
     // and materials; how the expressions combine is VRM 1.0's (three-vrm's)
+    // what a node pose sets of a node's own, f of the way there
+    static void putPose(STRS& d, const SNodePose& p, float f) {
+        if (p.set & SNodePose::T)
+            d.t = lerp(d.t, p.trs.t, f);
+        if (p.set & SNodePose::R)
+            d.r = f >= 1 ? p.trs.r : slerp(d.r, p.trs.r, f).normalized();
+        if (p.set & SNodePose::S)
+            d.s = lerp(d.s, p.trs.s, f);
+    }
+
+    // how far a loop is from a to b: there and back every `seconds`, easing in and out at both (VRCFury's keys have
+    // flat tangents)
+    static float loopWeight(float time, float seconds) {
+        const float p = std::fmod(time, seconds) / seconds;
+        const float u = p < 0.5f ? 2 * p : 2 - 2 * p;
+        return u * u * (3 - 2 * u);
+    }
+
     void CAvatarAnimator::face(const SAvatarMotion& m, std::vector<STRS>& pose) {
         const auto&  md = *m_model;
         const auto&  P  = md.preset;
@@ -3971,10 +4266,13 @@ namespace h3d {
         const float  dt = std::clamp(m.dt, 0.f, 0.1f);
         auto         binary = [&](size_t e, float w) { return md.expressions[e].binary ? (w > 0.5f ? 1.f : 0.f) : w; };
 
-        // the held one, else the face of the hand that made its gesture last
+        // the held one, else the face both hands' gestures make together, else that of the hand that made its gesture last
         int   want  = m_held;
         float wantW = m_heldWeight;
-        if (want < 0)
+        if (want < 0 && md.gestureCombo[m_gesture[0]][m_gesture[1]] != -2) {
+            want  = md.gestureCombo[m_gesture[0]][m_gesture[1]];
+            wantW = 1;
+        } else if (want < 0)
             for (int hand : {m_lastHand, 1 - m_lastHand})
                 if (const int f = md.gestureFace[hand][m_gesture[hand]]; f >= 0) {
                     want  = f;
@@ -4090,6 +4388,11 @@ namespace h3d {
             }
         }
 
+        // lip sync: the mouth's presets as the voice has them
+        for (int k = 0; k < 5; ++k)
+            if (m_visemes[k] > 0)
+                more(EX_AA + k, m_visemes[k]);
+
         for (size_t e = 0; e < n; ++e) {
             float     o = binary(e, out[e]);
             const int p = md.expressions[e].preset;
@@ -4103,6 +4406,17 @@ namespace h3d {
         }
 
         m_morphW = m_shapeBase;
+        for (const int t : m_loops) { // a toggle's loop: its shape keys from a to b and back
+            const auto& l = md.toggles[t].loop;
+            const float w = loopWeight(m_time, l.seconds);
+            auto        at = [&](const std::vector<std::pair<int, float>>& v, int morph) {
+                const auto it = std::ranges::find(v, morph, &std::pair<int, float>::first);
+                return it != v.end() ? it->second : m_shapeBase[morph];
+            };
+            for (const auto* side : {&l.shapesA, &l.shapesB})
+                for (const auto& [mo, _] : *side)
+                    m_morphW[mo] = at(l.shapesA, mo) + (at(l.shapesB, mo) - at(l.shapesA, mo)) * w;
+        }
         for (size_t e = 0; e < n; ++e)
             if (out[e] > 0)
                 for (const auto& b : md.expressions[e].morphs)
@@ -4153,23 +4467,121 @@ namespace h3d {
 
     // --- outfit
 
+    namespace {
+        // the key of a slider in effect at its value: the last at or below it (the first below all of them)
+        size_t sliderKey(const SAvatarSlider& s, float v) {
+            size_t k = 0;
+            for (size_t i = 1; i < s.keys.size(); ++i)
+                if (s.keys[i].at <= v)
+                    k = i;
+            return k;
+        }
+
+        // a 2D slider's keys around (x, y): the grid cell's corners (left bottom, right bottom, left top, right top)
+        // and how far across it
+        struct SCell {
+            const SAvatarSlider::SKey* k[4] = {};
+            float                      fx = 0, fy = 0;
+        };
+        SCell sliderCell(const SAvatarSlider& s, float x, float y) {
+            const int   n  = s.grid;
+            const float gx = std::clamp((x + 1) * 0.5f * (n - 1), 0.f, (float)(n - 1)), gy = std::clamp((y + 1) * 0.5f * (n - 1), 0.f, (float)(n - 1));
+            const int   ix = std::min((int)gx, n - 2), iy = std::min((int)gy, n - 2);
+            SCell       c;
+            c.fx   = gx - ix;
+            c.fy   = gy - iy;
+            c.k[0] = &s.keys[iy * n + ix];
+            c.k[1] = &s.keys[iy * n + ix + 1];
+            c.k[2] = &s.keys[(iy + 1) * n + ix];
+            c.k[3] = &s.keys[(iy + 1) * n + ix + 1];
+            return c;
+        }
+
+        // the key a slider's parts and material variants are as: 1D the last at or below the value, 2D the nearest
+        const SAvatarSlider::SKey& sliderOn(const SAvatarSlider& s, float v, float vy) {
+            if (!s.grid)
+                return s.keys[sliderKey(s, v)];
+            const SCell c = sliderCell(s, v, vy);
+            return *c.k[(c.fx >= 0.5f ? 1 : 0) + (c.fy >= 0.5f ? 2 : 0)];
+        }
+
+        STRS lerpTRS(const STRS& a, const STRS& b, float f) {
+            return {lerp(a.t, b.t, f), slerp(a.r, b.r, f).normalized(), lerp(a.s, b.s, f)};
+        }
+    }
+
+    void CAvatarAnimator::loopPoses(std::vector<STRS>& pose) const {
+        const auto& md = *m_model;
+        for (const int t : m_loops) {
+            const auto& l = md.toggles[t].loop;
+            const float w = loopWeight(m_time, l.seconds);
+            for (const auto& a : l.posesA) {
+                const STRS under = pose[a.node];
+                putPose(pose[a.node], a, 1.f);
+                if (std::ranges::none_of(l.posesB, [&](const SNodePose& b) { return b.node == a.node; })) {
+                    SNodePose back = a;
+                    back.trs       = under;
+                    putPose(pose[a.node], back, w);
+                }
+            }
+            for (const auto& b : l.posesB)
+                putPose(pose[b.node], b, w);
+        }
+    }
+
+    // nodes a toggle leaves in the world (VRCFury's World Drop): where they were when it turned on, and all under them
+    void CAvatarAnimator::drops(const SAvatarMotion& m) {
+        if (m_dropBy.empty())
+            return;
+        const auto& md = *m_model;
+        const M4    W  = m.world * M4::translation({0, m_lift, 0}) * md.fix, Wi = W.inverse();
+        std::vector<uint8_t> moved(md.nodes.size(), 0);
+        for (size_t n = 0; n < md.nodes.size(); ++n) {
+            const int p = md.nodes[n].parent;
+            if (p >= 0 && moved[p]) { // under a dropped one: with it
+                m_global[n] = m_global[p] * m_pose[n].matrix();
+                moved[n]    = 1;
+                continue;
+            }
+            if (m_dropBy[n] < 0)
+                continue;
+            if (m_dropTake[n]) {
+                m_dropAt[n]   = W * m_global[n];
+                m_dropTake[n] = 0;
+            }
+            m_global[n] = Wi * m_dropAt[n];
+            moved[n]    = 1;
+        }
+    }
+
     void CAvatarAnimator::outfit() {
         const auto&  md    = *m_model;
         const size_t parts = md.parts.size();
-        // parts a toggle shows are hidden unless one of those is on; one that hides them wins
-        std::vector<uint8_t> showable(parts, 0), shownBy(parts, 0);
-        for (size_t t = 0; t < md.toggles.size(); ++t)
+        // parts a toggle or a slider shows are hidden unless one of those shows them; one that hides them wins
+        std::vector<uint8_t> showable(parts, 0), shownBy(parts, 0), hiddenBy(parts, 0);
+        for (size_t t = 0; t < md.toggles.size(); ++t) {
             for (const int p : md.toggles[t].show) {
                 showable[p] = 1;
                 shownBy[p] |= m_toggles[t];
             }
-        m_shown.resize(parts);
-        for (size_t p = 0; p < parts; ++p)
-            m_shown[p] = showable[p] ? shownBy[p] : !md.parts[p].hidden;
-        for (size_t t = 0; t < md.toggles.size(); ++t)
             if (m_toggles[t])
                 for (const int p : md.toggles[t].hide)
-                    m_shown[p] = 0;
+                    hiddenBy[p] = 1;
+        }
+        for (size_t s = 0; s < md.sliders.size(); ++s) {
+            const auto& sl = md.sliders[s];
+            const auto& on = sliderOn(sl, m_sliders[s], m_slidersY[s]);
+            for (const auto& k : sl.keys)
+                for (const int p : k.show)
+                    showable[p] = 1;
+            for (const int p : on.show)
+                shownBy[p] = 1;
+            for (const int p : on.hide)
+                hiddenBy[p] = 1;
+        }
+        m_shown.resize(parts);
+        for (size_t p = 0; p < parts; ++p)
+            m_shown[p] = !hiddenBy[p] && (showable[p] ? shownBy[p] : !md.parts[p].hidden);
         for (size_t p = 0; p < parts; ++p)
             if (m_partSet[p] >= 0)
                 m_shown[p] = m_partSet[p];
@@ -4181,9 +4593,144 @@ namespace h3d {
             if (m_toggles[t])
                 for (const auto& [m, w] : md.toggles[t].shapes)
                     m_shapeBase[m] = w;
+        for (size_t s = 0; s < md.sliders.size(); ++s) { // along the line between the keys on each side
+            const auto& sl = md.sliders[s];
+            const float v  = m_sliders[s];
+            if (sl.grid) { // 2D: between the four keys around it
+                const SCell c    = sliderCell(sl, v, m_slidersY[s]);
+                const float w[4] = {(1 - c.fx) * (1 - c.fy), c.fx * (1 - c.fy), (1 - c.fx) * c.fy, c.fx * c.fy};
+                std::vector<int> ms;
+                for (const auto* k : c.k)
+                    for (const auto& [m, _] : k->shapes)
+                        if (std::ranges::find(ms, m) == ms.end())
+                            ms.push_back(m);
+                for (const int m : ms) {
+                    float x = 0;
+                    for (int i = 0; i < 4; ++i) {
+                        const auto it = std::ranges::find(c.k[i]->shapes, m, &std::pair<int, float>::first);
+                        x += w[i] * (it != c.k[i]->shapes.end() ? it->second : m_shapeBase[m]);
+                    }
+                    m_shapeBase[m] = x;
+                }
+                continue;
+            }
+            const auto& a  = sl.keys[sliderKey(sl, v)];
+            const auto* b  = &a;
+            for (const auto& k : sl.keys)
+                if (k.at > v) {
+                    b = &k;
+                    break;
+                }
+            const float f = b->at > a.at ? std::clamp((v - a.at) / (b->at - a.at), 0.f, 1.f) : 0.f;
+            for (const auto& [m, w] : a.shapes)
+                m_shapeBase[m] = w;
+            for (const auto& [m, w] : b->shapes) {
+                const auto it = std::ranges::find(a.shapes, m, &std::pair<int, float>::first);
+                m_shapeBase[m] = (it != a.shapes.end() ? it->second : m_shapeBase[m]) * (1 - f) + w * f;
+            }
+        }
         for (size_t i = 0; i < md.morphs.size(); ++i)
             if (!std::isnan(m_shapeSet[i]))
                 m_shapeBase[i] = m_shapeSet[i];
+
+        // node poses: the rest, as the toggles that are on and the sliders have it
+        const bool posed = std::ranges::any_of(md.toggles, [](const SAvatarToggle& t) { return !t.poses.empty(); }) ||
+            std::ranges::any_of(md.sliders, [](const SAvatarSlider& s) { return std::ranges::any_of(s.keys, [](const SAvatarSlider::SKey& k) { return !k.poses.empty(); }); });
+        if (!posed)
+            m_nodePose.clear();
+        else {
+            m_nodePose.resize(md.nodes.size());
+            for (size_t i = 0; i < md.nodes.size(); ++i)
+                m_nodePose[i] = md.nodes[i].rest;
+            for (size_t t = 0; t < md.toggles.size(); ++t)
+                if (m_toggles[t])
+                    for (const auto& p : md.toggles[t].poses)
+                        putPose(m_nodePose[p.node], p, 1.f);
+            for (size_t s = 0; s < md.sliders.size(); ++s) {
+                const auto& sl = md.sliders[s];
+                const float v  = m_sliders[s];
+                if (sl.grid) { // 2D: between the four keys around it
+                    const SCell      c = sliderCell(sl, v, m_slidersY[s]);
+                    std::vector<int> ns;
+                    for (const auto* k : c.k)
+                        for (const auto& p : k->poses)
+                            if (std::ranges::find(ns, p.node) == ns.end())
+                                ns.push_back(p.node);
+                    for (const int n : ns) {
+                        auto at = [&](int i) {
+                            STRS d = m_nodePose[n];
+                            for (const auto& p : c.k[i]->poses)
+                                if (p.node == n)
+                                    putPose(d, p, 1.f);
+                            return d;
+                        };
+                        m_nodePose[n] = lerpTRS(lerpTRS(at(0), at(1), c.fx), lerpTRS(at(2), at(3), c.fx), c.fy);
+                    }
+                    continue;
+                }
+                const auto& a  = sl.keys[sliderKey(sl, v)];
+                const auto* b  = &a;
+                for (const auto& k : sl.keys)
+                    if (k.at > v) {
+                        b = &k;
+                        break;
+                    }
+                const float f = b->at > a.at ? std::clamp((v - a.at) / (b->at - a.at), 0.f, 1.f) : 0.f;
+                for (const auto& p : a.poses)
+                    putPose(m_nodePose[p.node], p, 1.f);
+                if (b != &a)
+                    for (const auto& p : b->poses)
+                        putPose(m_nodePose[p.node], p, f);
+            }
+        }
+        // what plays while its toggle is on, and what stays in the world
+        m_loops.clear();
+        std::vector<int> was = std::move(m_dropBy);
+        m_dropBy.assign(md.nodes.size(), -1);
+        bool drops = false;
+        for (size_t t = 0; t < md.toggles.size(); ++t) {
+            if (!m_toggles[t])
+                continue;
+            if (md.toggles[t].loop.seconds > 0)
+                m_loops.push_back((int)t);
+            for (const int n : md.toggles[t].drop)
+                if (m_dropBy[n] < 0) {
+                    m_dropBy[n] = (int)t;
+                    drops       = true;
+                }
+        }
+        if (!drops)
+            m_dropBy.clear();
+        else {
+            m_dropAt.resize(md.nodes.size(), M4::identity());
+            m_dropTake.resize(md.nodes.size(), 0);
+            for (size_t n = 0; n < md.nodes.size(); ++n)
+                if (m_dropBy[n] >= 0 && (n >= was.size() || was[n] < 0))
+                    m_dropTake[n] = 1;
+        }
+
+        // material variants: a batch takes the material of the last variant in effect that has one for it
+        if (md.variants.empty()) {
+            m_batchMat.clear();
+            return;
+        }
+        m_variantOn.assign(md.variants.size(), 0);
+        for (size_t t = 0; t < md.toggles.size(); ++t)
+            if (m_toggles[t])
+                for (const int v : md.toggles[t].variants)
+                    m_variantOn[v] = 1;
+        for (size_t s = 0; s < md.sliders.size(); ++s)
+            for (const int v : sliderOn(md.sliders[s], m_sliders[s], m_slidersY[s]).variants)
+                m_variantOn[v] = 1;
+        m_batchMat.resize(md.batches.size());
+        for (size_t i = 0; i < md.batches.size(); ++i) {
+            const auto& b = md.batches[i];
+            m_batchMat[i] = b.material;
+            if (b.variants > 0 && b.variants < (int)md.variantMaps.size())
+                for (const auto& [v, mat] : md.variantMaps[b.variants])
+                    if (m_variantOn[v] && mat >= 0 && mat < (int)md.materials.size())
+                        m_batchMat[i] = mat;
+        }
     }
 
     void CAvatarAnimator::resetOutfit() {
@@ -4192,6 +4739,12 @@ namespace h3d {
         m_toggles.clear();
         for (const auto& t : m_model->toggles)
             m_toggles.push_back(t.on);
+        m_sliders.clear();
+        m_slidersY.clear();
+        for (const auto& s : m_model->sliders) {
+            m_sliders.push_back(s.value);
+            m_slidersY.push_back(s.valueY);
+        }
         m_partSet.assign(m_model->parts.size(), -1);
         m_shapeSet.assign(m_model->morphs.size(), NAN);
         outfit();
@@ -4201,12 +4754,32 @@ namespace h3d {
         if (!m_model || toggle < 0 || toggle >= (int)m_toggles.size())
             return;
         const auto& tg = m_model->toggles;
-        if (on && !tg[toggle].group.empty())
+        if (on)
             for (size_t t = 0; t < tg.size(); ++t)
-                if (tg[t].group == tg[toggle].group)
+                if (std::ranges::any_of(tg[t].groups, [&](const std::string& g) { return std::ranges::find(tg[toggle].groups, g) != tg[toggle].groups.end(); }))
                     m_toggles[t] = 0;
         m_toggles[toggle] = on;
         outfit();
+    }
+
+    void CAvatarAnimator::setSlider(int slider, float value, float valueY) {
+        if (!m_model || slider < 0 || slider >= (int)m_sliders.size())
+            return;
+        const auto& sl = m_model->sliders[slider];
+        if (sl.grid) {
+            m_sliders[slider]  = std::isnan(value) ? sl.value : std::clamp(value, -1.f, 1.f);
+            m_slidersY[slider] = std::isnan(valueY) ? (std::isnan(value) ? sl.valueY : m_slidersY[slider]) : std::clamp(valueY, -1.f, 1.f);
+        } else
+            m_sliders[slider] = std::isnan(value) ? sl.value : std::clamp(value, 0.f, 1.f);
+        outfit();
+    }
+
+    float CAvatarAnimator::slider(int slider) const {
+        return slider >= 0 && slider < (int)m_sliders.size() ? m_sliders[slider] : 0.f;
+    }
+
+    float CAvatarAnimator::sliderY(int slider) const {
+        return slider >= 0 && slider < (int)m_slidersY.size() ? m_slidersY[slider] : 0.f;
     }
 
     void CAvatarAnimator::setPart(int part, int shown) {
@@ -4322,7 +4895,7 @@ namespace h3d {
         const STRS      body      = decompose(m.world * M4::translation({0, m_lift, 0}));
         for (size_t c = 0; c < md.springColliders.size(); ++c) {
             const auto& k      = md.springColliders[c];
-            m_colliderModel[c] = {m_global[k.node].point(k.offset), m_global[k.node].point(k.tail), k.radius};
+            m_colliderModel[c] = {m_global[k.node].point(k.offset), m_global[k.node].point(k.tail), k.radius, k.kind};
         }
         if (!m_springLive || m.dt > 0.25f || length(body.t - m_springBody.t) > 2.f + 20.f * m.dt) {
             // the first frame, or it jumped
@@ -4367,7 +4940,7 @@ namespace h3d {
             }
         if (pass == SP_STEP)
             for (size_t c = 0; c < m_colliderModel.size(); ++c)
-                m_colliderAt[c] = {world.point(m_colliderModel[c].a), world.point(m_colliderModel[c].b), m_colliderModel[c].radius};
+                m_colliderAt[c] = {world.point(m_colliderModel[c].a), world.point(m_colliderModel[c].b), m_colliderModel[c].radius, m_colliderModel[c].kind};
         for (size_t n = m_springFrom; n < md.nodes.size(); ++n) {
             const int j = m_springOf[n];
             if (j == -1)
@@ -4399,9 +4972,25 @@ namespace h3d {
                     for (int k : md.springs[J.spring].colliders) {
                         const auto& c  = m_colliderAt[k];
                         const V3    ab = c.b - c.a;
+                        if (c.kind == COLLIDER_PLANE) {
+                            // to its side, as far as the bone's radius
+                            const V3    n = normalize(ab);
+                            const float h = dot(next - c.a, n);
+                            if (h < J.radius)
+                                next = O + normalize(next + n * (J.radius - h) - O) * len;
+                            continue;
+                        }
                         const float ll = dot(ab, ab);
                         const V3    q  = ll > 1e-12f ? c.a + ab * std::clamp(dot(next - c.a, ab) / ll, 0.f, 1.f) : c.a;
-                        const float r  = J.radius + c.radius, d = length(next - q);
+                        const float d  = length(next - q);
+                        if (c.kind == COLLIDER_INSIDE) {
+                            // pulled back in, the bone's radius inside it
+                            const float r = std::max(c.radius - J.radius, 0.f);
+                            if (d > r)
+                                next = O + normalize(q + (next - q) * (r / d) - O) * len;
+                            continue;
+                        }
+                        const float r = J.radius + c.radius;
                         if (d < r && d > 1e-7f)
                             next = O + normalize(q + (next - q) * (r / d) - O) * len; // pushed out, the same length
                     }
@@ -4473,7 +5062,9 @@ namespace h3d {
         }
 
         for (size_t i = 0; i < md.nodes.size(); ++i)
-            m_target[i] = md.nodes[i].rest;
+            m_target[i] = m_nodePose.empty() ? md.nodes[i].rest : m_nodePose[i];
+        if (!m_loops.empty())
+            loopPoses(m_target);
         switch (m_source.kind) {
             case SRC_CLIP: {
                 const auto& clip = md.clips[m_source.clip];
@@ -4518,6 +5109,7 @@ namespace h3d {
             lift = lerpf(lift, m_emotes[m_emote]->grounded ? ground : 0.f, emoteW);
         m_lift += (lift - m_lift) * std::min(1.f, m.dt * 15.f);
         springs(m);
+        drops(m);
 
         for (size_t j = 0; j < md.joints.size(); ++j) {
             const M4 s = m_global[md.joints[j].node] * md.joints[j].inverseBind;
@@ -4601,7 +5193,7 @@ namespace h3d {
     void CAvatarAnimator::emotePose(float dt, std::vector<STRS>& pose) {
         const SAvatarEmote& em  = *m_emotes[m_emote];
         const float         dur = em.anim.duration;
-        m_emoteTime += dt;
+        m_emoteTime += dt * em.speed;
         if (m_emoteLoop && dur > 0)
             m_emoteTime = std::fmod(m_emoteTime, dur);
         else {

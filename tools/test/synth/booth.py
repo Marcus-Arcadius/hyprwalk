@@ -15,6 +15,10 @@
 # OUTDIR/SynthChan_Cardigan_VRCFury_v1.0.unitypackage: a cardigan set up for VRCFury (Armature Link, toggles, one of
 #   them saved by an old VRCFury in Unity 2019, and a Full Controller with its own FX, menu and parameters)
 # OUTDIR/Hairpin_v1.0.unitypackage: a hair pin put on the head by an Armature Link from VRCFury 1.x (version 5)
+# OUTDIR/SynthChan_Accessories_MA_v1.0.unitypackage: accessories set up with MA's Material Setter and Swap, Blendshape
+#   Sync, Replace Object, a radial puppet, Visible Head Accessory and Mesh Settings
+# OUTDIR/SynthChan_Gimmicks_VRCFury_v1.0.unitypackage: gimmicks set up with VRCFury's material actions, a slider, a
+#   Puppet, a Gesture Driver, Blinking, Visemes, exclusive tags, an FX float, menu moves, and two it does not carry
 # OUTDIR/シンセちゃん_v1.0.zip: the avatar package as Booth hands it out: a zip with Shift-JIS names and no UTF-8 flag
 import sys, os, math, shutil
 import numpy as np
@@ -882,12 +886,12 @@ def avatar_assets():
         FX_GUID, MENU, PARAMS, ['vrc.v_' + x for x in VISEMES], shapes.index('まばたき'),
         view=tuple(unity_point((0, -0.08, 1.262)))))
 
-    def col(bone, shape, r, h, a, b=None):
+    def col(bone, shape, r, h, a, b=None, inside=0):
         """a PhysBone collider on a bone: a sphere at a (Blender world), or a capsule from a to b"""
         pa = Vector(local(model, bone, a))
         if b is None:
             return v.component(model.fid(bone, 1), 114, 'MonoBehaviour', g.pb_collider(
-                shape, local_len(model, bone, r), 0, tuple(pa)))
+                shape, local_len(model, bone, r), 0, tuple(pa), inside=inside))
         pb = Vector(local(model, bone, b))
         axis = (pb - pa).normalized()
         rot = Vector((0, 1, 0)).rotation_difference(axis)
@@ -899,7 +903,13 @@ def avatar_assets():
     arms = [col('UpperArm_' + s, 1, 0.04, 0, (0.1 * x, 0, 1.05), (0.29 * x, 0, 1.05)) for s, x in SIDES]
     legs = [col('UpperLeg_' + s, 1, 0.065, 0, (0.07 * x, 0.0, 0.66), (0.07 * x, 0.005, 0.42)) for s, x in SIDES]
     hands = [col('Hand_' + s, 0, 0.045, 0, (0.54 * x, 0, 1.045)) for s, x in SIDES]
-    hair = [(114, 'MonoBehaviour', g.physbone(v.stub(model.fid('TwinTail_' + s, 4), 4), [head, chest] + arms,
+    # a floor the twin tails keep above (a plane on her root) and a sphere her skirt keeps inside (ids of their own:
+    # the others' stay as they were)
+    keep_ids, v.ids = v.ids, g.Ids(2476)
+    floor = v.gameobject('床のコライダー', ROOT_TF, [(114, 'MonoBehaviour', g.pb_collider(2, 0.5, 0, (0, 0, 0)))])[2][0]
+    skirt_in = col('Hips', 0, 0.32, 0, (0, 0.0, 0.7), inside=1)
+    v.ids = keep_ids
+    hair = [(114, 'MonoBehaviour', g.physbone(v.stub(model.fid('TwinTail_' + s, 4), 4), [head, chest, floor] + arms,
                                                radius=0.03, pull=0.15, spring=0.35, stiffness=0.1, gravity=0.15,
                                                immobile=0.3)) for s, x in SIDES]
     hair.append((114, 'MonoBehaviour', g.physbone(v.stub(model.fid('HairBack', 4), 4), [head, chest], radius=0.03,
@@ -910,7 +920,8 @@ def avatar_assets():
     tail_pb = v.component(model.fid('Tail', 1), 114, 'MonoBehaviour', g.physbone(
         0, legs, radius=0.025, pull=0.12, spring=0.45, stiffness=0.05, gravity=0.08, max_angle=0))
     v.component(model.fid('Skirt_Root', 1), 114, 'MonoBehaviour', g.physbone(
-        0, legs + hands, radius=0.02, pull=0.25, spring=0.2, stiffness=0.3, gravity=0.1, multi=0, max_angle=60))
+        0, legs + hands + [skirt_in], radius=0.02, pull=0.25, spring=0.2, stiffness=0.3, gravity=0.1, multi=0,
+        max_angle=60))
     v.gameobject('HeadPat', model.fid('Head', 4), [(114, 'MonoBehaviour', g.contact_receiver(
         'HeadPat', local_len(model, 'Head', 0.13)))], pos=local(model, 'Head', (0, 0.01, 1.42)))
     PC_GUID = G('prefab/pc')
@@ -1259,6 +1270,467 @@ def hairpin_assets():
     g.write_asset(P_(PIN + '/Prefab/ヘアピン.prefab'), HEAD + v.text(), G('prefab/hairpin'), 'PrefabImporter')
 
 
+# ---------------------------------------------------------------- accessories, with MA's other components
+
+ACC = SHOP + '/シンセちゃん用アクセサリー'
+
+
+def accessory_assets():
+    """accessories for her, set up for Modular Avatar with its components that change materials, follow shape keys
+    and replace objects: a beret (a menu toggle, and a Material Setter giving it another colour), round glasses that
+    take the place of hers (Replace Object: her glasses toggle shows these), a festival mask on the side of her head
+    whose shape keys follow her face (Blendshape Sync, one through a remap curve) and a radial puppet that makes it
+    bigger (a Merge Animator), a Material Swap that dresses her in navy, and a Material Setter with no menu item that
+    tints her tail at rest. The beret has a Visible Head Accessory and the root Mesh Settings, which hypr3d has no
+    use for, and a Scale Adjuster, which changes nothing there (no mesh is weighted to the beret's own object); a
+    keyring for another platform (a Platform Filter) is left out.
+    Thigh socks come in a menu of their own that a Menu Install Target puts in the accessories' menu: a toggle, on at
+    first, whose Mesh Cutter hides her legs inside them (two vertex filters by axis, both at once), and a slider of
+    how loose they are (a Merge Motion's blend tree). Their cuffs are on bones of their own, which Scale Adjusters widen.
+    A Mesh Cutter with no menu item takes her feet inside her shoes away for good, a Floor Adjuster says where the
+    floor is, and a Global Collider on her right hand pushes her hair and skirt. A second Merge Animator (its paths
+    from her root) has a slider for the size of her tail, a toggle that lifts it and a two-axis puppet that turns it
+    (a 2D blend tree): clips that scale and turn it."""
+    g.clear_scene()
+    rig = g.Rig('Armature')
+    skeleton(rig, own=False)
+    for s, x in SIDES:  # the socks' cuffs
+        rig.bone('Cuff_' + s, (0.07 * x, 0.002, 0.575), (0.07 * x, 0.002, 0.62), 'UpperLeg_' + s)
+    rig.done()
+    P = g.Parts()
+    P.add('beret', 'sphere', Matrix.Translation((0.0, 0.01, 1.425)) @ Matrix.Diagonal((1.25, 1.2, 0.35, 1)), r=0.1,
+          us=20, vs=10)
+    P.add('stalk', 'sphere', Matrix.Translation((0, 0.01, 1.462)), r=0.012, us=8, vs=6)
+    beret, _ = P.make('ベレー帽', mats('ベレー帽'))
+    rig.skin(beret, ['Head'])
+    P = g.Parts()
+    mc = Vector((0.118, -0.03, 1.33))
+    P.add('mask', 'sphere', Matrix.Translation(mc) @ Matrix.Rotation(math.radians(65), 4, 'Z') @ Matrix.Diagonal(
+        (1.0, 0.3, 1.1, 1)), r=0.045, us=16, vs=10)
+    mask, _ = P.make('お面', mats('お面'))
+    rig.skin(mask, ['Head'])
+    g.shape_key(mask, 'にっこり', lambda c: c + Vector((0, 0, 0.006)) if c.z > mc.z + 0.01 else None)
+    g.shape_key(mask, '怒り', lambda c: c + Vector((0, 0, -0.006)) if c.z > mc.z + 0.01 else None)
+    g.shape_key(mask, 'Big', lambda c: mc + (c - mc) * 1.5)
+    P = g.Parts()
+    for s, x in SIDES:
+        ex = 0.043 * x
+        P.add('lens_' + s, 'sphere', Matrix.Translation((ex, face_y(ex, 1.263) - 0.018, 1.263)) @ Matrix.Diagonal(
+            (1, 0.15, 1, 1)), r=0.027, us=16, vs=8)
+    M, d = g.along((0.016, face_y(0.016, 1.27) - 0.02, 1.27), (-0.016, face_y(-0.016, 1.27) - 0.02, 1.27))
+    P.add('bridge', 'cyl', M, r1=0.0025, depth=d, seg=6)
+    rglasses, _ = P.make('丸メガネ', mats('丸メガネ'))
+    rig.skin(rglasses, ['Head'])
+    P = g.Parts()  # a keyring at her hip, for another platform than VRChat
+    P.add('ring', 'sphere', Matrix.Translation((0.14, 0.02, 0.86)), r=0.02, us=10, vs=6)
+    keyring, _ = P.make('キーホルダー', mats('ベレー帽'))
+    rig.skin(keyring, ['Hips'])
+    P = g.Parts()  # thigh socks, a little wider than her legs, with a cuff each
+    for s, x in SIDES:
+        tube(P, 'sock_' + s, [(0.07 * x, 0.011, 0.20), (0.07 * x, 0.009, 0.30), (0.07 * x, 0.005, 0.39),
+                              (0.07 * x, 0.003, 0.48), (0.07 * x, 0.002, 0.57)], [0.043, 0.049, 0.05, 0.055, 0.06],
+             seg=16, caps=(False, False))
+        tube(P, 'cuff_' + s, [(0.07 * x, 0.002, 0.565), (0.07 * x, 0.002, 0.595)], [0.062, 0.062], seg=16,
+             caps=(False, False))
+    socks, sidx = P.make('ニーハイ', mats('ニーハイ'))
+    sb = {}
+    for s, x in SIDES:
+        sb['sock_' + s] = ['UpperLeg_' + s, 'LowerLeg_' + s]
+        sb['cuff_' + s] = ['Cuff_' + s]
+    rig.skin(socks, (sidx, sb), blend=0.03)
+
+    def loose(c):
+        ax = Vector((math.copysign(0.07, c.x), 0.006, c.z))
+        return ax + (c - ax) * 1.1
+    g.shape_key(socks, '緩い', loose)
+    fbx_rel = ACC + '/FBX/アクセサリー.fbx'
+    FBX_GUID = G('acc.fbx')
+    g.export_fbx(P_(fbx_rel), 'FBX_SCALE_ALL')
+    M = ACC + '/Materials/'
+    mats_ = {'ベレー帽': lil(P_(M + 'ベレー帽.mat'), G('mat/beret'), 'ベレー帽', color=(0.75, 0.12, 0.15, 1)),
+             'お面': lil(P_(M + 'お面.mat'), G('mat/mask'), 'お面', color=(0.97, 0.95, 0.9, 1)),
+             '丸メガネ': lil(P_(M + '丸メガネ.mat'), G('mat/round_glasses'), '丸メガネ', 'trans',
+                          color=(0.35, 0.2, 0.1, 0.55)),
+             'ニーハイ': lil(P_(M + 'ニーハイ.mat'), G('mat/socks'), 'ニーハイ', color=(0.12, 0.11, 0.14, 1))}
+    navy_beret = lil(P_(M + 'ベレー帽_紺.mat'), G('mat/beret_navy'), 'ベレー帽_紺', color=(0.1, 0.12, 0.35, 1))
+    navy_clothes = lil(P_(M + '服_紺.mat'), G('mat/clothes_navy'), '服_紺', tex=G('tex/clothes'), cull=0,
+                       color=(0.35, 0.4, 0.8, 1))
+    tail_tint = lil(P_(M + 'しっぽ_毛先.mat'), G('mat/tail_tint'), 'しっぽ_毛先', tex=G('tex/hair'), cull=0,
+                    color=(1.0, 0.72, 0.8, 1))
+    model = g.Model(P_(fbx_rel), fbx_rel, FBX_GUID)
+    imp = g.model_importer(mats_)
+    g.write_meta(P_(fbx_rel), FBX_GUID, 'ModelImporter', imp)
+    model.fileids(imp)
+
+    # the mask's size, a radial puppet: a Merge Animator's FX plays a clip at the time it gives
+    A = ACC + '/Animation/'
+    clips = {'お面_大きさ': G('acc/anim/mask_size')}
+    g.write_asset(P_(A + 'お面_大きさ.anim'), g.clip_yaml('お面_大きさ', [('お面', 137, 'blendShape.Big', [(0, 0), (1, 100)])]),
+                  clips['お面_大きさ'], 'NativeFormatImporter', g.native(7400000))
+    fx = g.Controller(ids, clips)
+    fx.param('MaskSize', 1, 0.25)
+    fx.motion_time('お面の大きさ', 'MaskSize', 'お面_大きさ')
+    FXG = G('acc/fx')
+    g.write_asset(P_(A + 'FX_アクセサリー.controller'), fx.yaml('FX_アクセサリー'), FXG, 'NativeFormatImporter',
+                  g.native(9100000))
+
+    v = g.Variant(ids, FBX_GUID)
+    ROOT_GO, ROOT_TF = model.fid('', 1), model.fid('', 4)
+    v.root(ROOT_GO, ROOT_TF, 'アクセサリー')
+    v.component(model.fid('Armature', 1), 114, 'MonoBehaviour', g.ma(
+        'MergeArmature', mergeTarget=g.ma_ref('Armature'), prefix='', suffix='', legacyLocked=0, LockMode=1,
+        mangleNames=1))
+    v.component(ROOT_GO, 114, 'MonoBehaviour', g.ma(
+        'MeshSettings', InheritProbeAnchor=1, ProbeAnchor=g.ma_ref('Armature/Hips'), InheritBounds=1,
+        RootBone=g.ma_ref('Armature/Hips'), Bounds={'m_Center': g.V(0, 0, 0), 'm_Extent': g.V(1, 1, 1)}))
+    v.component(model.fid('ベレー帽', 1), 114, 'MonoBehaviour', g.ma('VisibleHeadAccessory'))
+    v.component(model.fid('ベレー帽', 1), 114, 'MonoBehaviour', g.ma('ScaleAdjuster', m_Scale=g.V(1.1, 1.1, 1.1)))
+    v.component(model.fid('キーホルダー', 1), 114, 'MonoBehaviour', g.ma(
+        'PlatformFilter', m_excludePlatform=0, m_platform='nadena.dev.ndmf.resonite'))
+    v.component(ROOT_GO, 114, 'MonoBehaviour', g.ma(
+        'MergeAnimator', animator=R(9100000, FXG, 2), layerType=5, deleteAttachedAnimator=1, pathMode=0,
+        matchAvatarWriteDefaults=0, relativePathRoot=g.ma_ref(''), layerPriority=0, mergeAnimatorMode=0))
+    v.component(ROOT_GO, 114, 'MonoBehaviour', g.ma('Parameters', parameters=[
+        {'nameOrPrefix': 'MaskSize', 'remapTo': '', 'internalParameter': 0, 'isPrefix': 0, 'syncType': 2,
+         'localOnly': 0, 'defaultValue': 0.25, 'saved': 1, 'hasExplicitDefaultValue': 1,
+         'm_overrideAnimatorDefaults': 0}]))
+    # the round glasses take the place of hers; like hers, off at first
+    v.component(model.fid('丸メガネ', 1), 114, 'MonoBehaviour', g.ma('ReplaceObject', targetObject=g.ma_ref('メガネ')))
+    v.mod(model.fid('丸メガネ', 1), 'm_IsActive', 0)
+    # the mask follows her face's smile, and half her anger
+    v.component(model.fid('お面', 1), 114, 'MonoBehaviour', g.ma('BlendshapeSync', Bindings=[
+        {'ReferenceMesh': g.ma_ref('Body'), 'Blendshape': 'にっこり', 'LocalBlendshape': '', 'RemapCurveIsValid': 0,
+         'RemapCurve': {'serializedVersion': 2, 'm_Curve': [], 'm_PreInfinity': 2, 'm_PostInfinity': 2,
+                        'm_RotationOrder': 4}},
+        {'ReferenceMesh': g.ma_ref('Body'), 'Blendshape': '怒り', 'LocalBlendshape': '怒り', 'RemapCurveIsValid': 1,
+         'RemapCurve': {'serializedVersion': 2, 'm_Curve': [
+             {'serializedVersion': 3, 'time': 0, 'value': 0, 'inSlope': 0.5, 'outSlope': 0.5, 'tangentMode': 69,
+              'weightedMode': 0, 'inWeight': 0, 'outWeight': 0},
+             {'serializedVersion': 3, 'time': 100, 'value': 50, 'inSlope': 0.5, 'outSlope': 0.5, 'tangentMode': 69,
+              'weightedMode': 0, 'inWeight': 0, 'outWeight': 0}],
+             'm_PreInfinity': 2, 'm_PostInfinity': 2, 'm_RotationOrder': 4}}]))
+    # a Material Setter with no menu item: in effect at rest
+    v.gameobject('しっぽの色', ROOT_TF, [(114, 'MonoBehaviour', g.ma('MaterialSetter', m_inverted=0, m_objects=[
+        {'Object': g.ma_ref('しっぽ'), 'Material': R(2100000, tail_tint, 2), 'MaterialIndex': 0}]))])
+    # the menu
+    _, menu_tf, _ = v.gameobject('アクセサリー Menu', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma_item('アクセサリー', kind=103, auto=0)),
+        (114, 'MonoBehaviour', g.ma('MenuInstaller', menuToAppend=R(0), installTargetMenu=R(0)))])
+    v.gameobject('ベレー帽', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma_item('ベレー帽', default=1)),
+        (114, 'MonoBehaviour', g.ma('ObjectToggle', m_inverted=0, m_objects=[
+            {'Object': g.ma_ref('アクセサリー/ベレー帽', v.stub(model.fid('ベレー帽', 1), 1)), 'Active': 1}]))],
+        own_parent=menu_tf)
+    v.mod(model.fid('ベレー帽', 1), 'm_IsActive', 0)
+    v.gameobject('ベレー帽の色', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma_item('紺のベレー帽')),
+        (114, 'MonoBehaviour', g.ma('MaterialSetter', m_inverted=0, m_objects=[
+            {'Object': g.ma_ref('アクセサリー/ベレー帽', v.stub(model.fid('ベレー帽', 1), 1)),
+             'Material': R(2100000, navy_beret, 2), 'MaterialIndex': 0}]))], own_parent=menu_tf)
+    v.gameobject('紺の制服', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma_item('紺の制服')),
+        (114, 'MonoBehaviour', g.ma('MaterialSwap', m_root=g.ma_ref(''), m_quickSwapMode=0, m_swaps=[
+            {'From': R(2100000, G('mat/clothes'), 2), 'To': R(2100000, navy_clothes, 2)}]))], own_parent=menu_tf)
+    v.gameobject('お面', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma_item('お面', default=1)),
+        (114, 'MonoBehaviour', g.ma('ObjectToggle', m_inverted=0, m_objects=[
+            {'Object': g.ma_ref('アクセサリー/お面', v.stub(model.fid('お面', 1), 1)), 'Active': 1}]))], own_parent=menu_tf)
+    v.mod(model.fid('お面', 1), 'm_IsActive', 0)
+    v.gameobject('お面の大きさ', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma_item('お面の大きさ', kind=203, auto=0, subparams=['MaskSize']))], own_parent=menu_tf)
+
+    # what follows has fileIDs of its own, so that the packages made after this one keep theirs
+    v.ids, keep_ids = g.Ids(2471), v.ids
+    # how loose the socks are: a Merge Motion (Blend Tree) of their shape key, by a float a radial item sets
+    for nm, w in (('ニーハイ_ぴったり', 0), ('ニーハイ_緩い', 100)):
+        clips[nm] = G('acc/anim/' + nm)
+        g.write_asset(P_(A + nm + '.anim'), g.clip_yaml(nm, [('ニーハイ', 137, 'blendShape.緩い', w)]), clips[nm],
+                      'NativeFormatImporter', g.native(7400000))
+    BT = G('acc/blendtree/socks')
+    g.write_asset(P_(A + 'ニーハイの緩さ.asset'), g.blend_tree_yaml(
+        'ニーハイの緩さ', 'SockLength', [(clips['ニーハイ_ぴったり'], 0), (clips['ニーハイ_緩い'], 1)]), BT,
+        'NativeFormatImporter', g.native(20600000))
+    v.component(ROOT_GO, 114, 'MonoBehaviour', g.ma(
+        'MergeBlendTree', BlendTree=R(20600000, BT, 2), PathMode=0, RelativePathRoot=g.ma_ref('')))
+    v.component(ROOT_GO, 114, 'MonoBehaviour', g.ma('Parameters', parameters=[
+        {'nameOrPrefix': 'SockLength', 'remapTo': '', 'internalParameter': 0, 'isPrefix': 0, 'syncType': 2,
+         'localOnly': 0, 'defaultValue': 0, 'saved': 1, 'hasExplicitDefaultValue': 1,
+         'm_overrideAnimatorDefaults': 0}]))
+    # the socks' menu, which a Menu Install Target puts among the accessories' items
+    _, sock_tf, sock_c = v.gameobject('ニーハイ Menu', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma_item('ニーハイ', kind=103, auto=0)),
+        (114, 'MonoBehaviour', g.ma('MenuInstaller', menuToAppend=R(0), installTargetMenu=R(0)))])
+    v.gameobject('ニーハイ', ROOT_TF, [(114, 'MonoBehaviour', g.ma('MenuInstallTarget', installer=R(sock_c[1])))],
+                 own_parent=menu_tf)
+    _, on_tf, _ = v.gameobject('ニーハイ', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma_item('ニーハイ', default=1)),
+        (114, 'MonoBehaviour', g.ma('ObjectToggle', m_inverted=0, m_objects=[
+            {'Object': g.ma_ref('アクセサリー/ニーハイ', v.stub(model.fid('ニーハイ', 1), 1)), 'Active': 1}]))],
+        own_parent=sock_tf)
+    v.mod(model.fid('ニーハイ', 1), 'm_IsActive', 0)
+    body = avatar_model.node('Body')
+    Bw = avatar_model.world[body]
+    at = lambda p: local(avatar_model, 'Body', p)
+    along = lambda d: tuple(round(c, 6) for c in (Bw.to_3x3().inverted() @ unity_point(d)).normalized())
+    # her legs inside the socks: between their top and bottom, every corner of a triangle
+    v.gameobject('脚を隠す', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma('MeshCutter', m_inverted=0, m_object=g.ma_ref('Body'), m_multiMode=1)),
+        (114, 'MonoBehaviour', g.ma('VertexFilterByAxis', m_center=g.V(*at((0, 0, 0.565))),
+                                    m_axis=g.V(*along((0, 0, -1))), m_selectionMode=1)),
+        (114, 'MonoBehaviour', g.ma('VertexFilterByAxis', m_center=g.V(*at((0, 0, 0.225))),
+                                    m_axis=g.V(*along((0, 0, 1))), m_selectionMode=1))], own_parent=on_tf)
+    v.gameobject('ニーハイの緩さ', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma_item('ニーハイの緩さ', kind=203, auto=0, subparams=['SockLength']))],
+        own_parent=sock_tf)
+    for s in ('L', 'R'):  # the cuffs a little wider
+        v.component(model.fid('Cuff_' + s, 1), 114, 'MonoBehaviour', g.ma('ScaleAdjuster', m_Scale=g.V(1.12, 1.12, 1.12)))
+    # her feet inside her shoes, taken away for good (no menu item): a triangle with any corner below 10 cm
+    v.gameobject('つま先を隠す', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma('MeshCutter', m_inverted=0, m_object=g.ma_ref('Body'), m_multiMode=1)),
+        (114, 'MonoBehaviour', g.ma('VertexFilterByAxis', m_center=g.V(*at((0, 0, 0.10))),
+                                    m_axis=g.V(*along((0, 0, -1))), m_selectionMode=0))])
+    v.gameobject('床', ROOT_TF, [(114, 'MonoBehaviour', g.ma('FloorAdjuster'))])
+    # her tail: a slider of its size, and a toggle that lifts it, by a Merge Animator (paths from her root) whose clips
+    # scale and turn it
+    tail = 'Armature/Hips/Tail'
+    # (a clip's angles are the tail's own, not a turn from them: from where it is at rest, in Unity's order)
+    TL = avatar_model.world[avatar_model.node('Hips')].inverted() @ avatar_model.world[avatar_model.node('Tail')]
+    tex = [round(math.degrees(a), 3) for a in TL.to_quaternion().to_matrix().to_euler('ZXY')]
+    turned = lambda dx, dy: (tex[0] + dx, tex[1] + dy, tex[2])
+    for nm, vec in (('しっぽ_普通', [('scale', tail, [(0, (1, 1, 1))])]),
+                    ('しっぽ_大きい', [('scale', tail, [(0, (1.4, 1.4, 1.4))])]),
+                    ('しっぽ_上げる', [('euler', tail, [(0, turned(-35, 0))])]), ('しっぽ_そのまま', [])):
+        clips[nm] = G('acc/anim/' + nm)
+        g.write_asset(P_(A + nm + '.anim'), g.clip_yaml(nm, [], vectors=vec), clips[nm], 'NativeFormatImporter',
+                      g.native(7400000))
+    for nm, e in (('しっぽ_右', turned(0, 40)), ('しっぽ_左', turned(0, -40)), ('しっぽ_下げる', turned(25, 0))):
+        clips[nm] = G('acc/anim/' + nm)
+        g.write_asset(P_(A + nm + '.anim'), g.clip_yaml(nm, [], vectors=[('euler', tail, [(0, e)])]), clips[nm],
+                      'NativeFormatImporter', g.native(7400000))
+    fx2 = g.Controller(g.Ids(2473), clips)
+    fx2.param('TailSize', 1, 0.0)
+    fx2.param('TailUp', 4, 0)
+    fx2.param('TailX', 1, 0.0)
+    fx2.param('TailY', 1, 0.0)
+    dir_bt = G('acc/blendtree/tail_dir')
+    g.write_asset(P_(A + 'しっぽの向き.asset'), g.blend_tree_yaml('しっぽの向き', 'TailX', [
+        (clips['しっぽ_そのまま'], (0.0, 0.0)), (clips['しっぽ_右'], (1.0, 0.0)), (clips['しっぽ_左'], (-1.0, 0.0)),
+        (clips['しっぽ_上げる'], (0.0, 1.0)), (clips['しっぽ_下げる'], (0.0, -1.0))], typ=3, param_y='TailY'), dir_bt,
+        'NativeFormatImporter', g.native(20600000))
+    d_, db_ = fx2.state('しっぽの向き')
+    db_['m_Motion'] = R(20600000, dir_bt, 2)
+    fx2.layer('しっぽの向き', fx2.machine('しっぽの向き', [d_], d_))
+    size_bt = G('acc/blendtree/tail')
+    g.write_asset(P_(A + 'しっぽの大きさ.asset'), g.blend_tree_yaml(
+        'しっぽの大きさ', 'TailSize', [(clips['しっぽ_普通'], 0), (clips['しっぽ_大きい'], 1)]), size_bt,
+        'NativeFormatImporter', g.native(20600000))
+    s_, sb_ = fx2.state('しっぽの大きさ')
+    sb_['m_Motion'] = R(20600000, size_bt, 2)
+    fx2.layer('しっぽの大きさ', fx2.machine('しっぽの大きさ', [s_], s_))
+    fx2.toggle('しっぽを上げる', 'TailUp', 'しっぽ_上げる', 'しっぽ_そのまま')
+    FX2 = G('acc/fx2')
+    g.write_asset(P_(A + 'FX_しっぽ.controller'), fx2.yaml('FX_しっぽ'), FX2, 'NativeFormatImporter',
+                  g.native(9100000))
+    v.component(ROOT_GO, 114, 'MonoBehaviour', g.ma(
+        'MergeAnimator', animator=R(9100000, FX2, 2), layerType=5, deleteAttachedAnimator=1, pathMode=1,
+        matchAvatarWriteDefaults=0, relativePathRoot=g.ma_ref(''), layerPriority=1, mergeAnimatorMode=0))
+    v.component(ROOT_GO, 114, 'MonoBehaviour', g.ma('Parameters', parameters=[
+        {'nameOrPrefix': 'TailSize', 'remapTo': '', 'internalParameter': 0, 'isPrefix': 0, 'syncType': 2,
+         'localOnly': 0, 'defaultValue': 0, 'saved': 1, 'hasExplicitDefaultValue': 1, 'm_overrideAnimatorDefaults': 0},
+        {'nameOrPrefix': 'TailUp', 'remapTo': '', 'internalParameter': 0, 'isPrefix': 0, 'syncType': 3,
+         'localOnly': 0, 'defaultValue': 0, 'saved': 1, 'hasExplicitDefaultValue': 1, 'm_overrideAnimatorDefaults': 0}] + [
+        {'nameOrPrefix': pn, 'remapTo': '', 'internalParameter': 0, 'isPrefix': 0, 'syncType': 2, 'localOnly': 0,
+         'defaultValue': 0, 'saved': 1, 'hasExplicitDefaultValue': 1, 'm_overrideAnimatorDefaults': 0}
+        for pn in ('TailX', 'TailY')]))
+    v.gameobject('しっぽの大きさ', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma_item('しっぽの大きさ', kind=203, auto=0, subparams=['TailSize']))],
+        own_parent=menu_tf)
+    v.gameobject('しっぽを上げる', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma_item('しっぽを上げる', param='TailUp', auto=0))], own_parent=menu_tf)
+    v.gameobject('しっぽの向き', ROOT_TF, [
+        (114, 'MonoBehaviour', g.ma_item('しっぽの向き', kind=201, auto=0, subparams=['TailX', 'TailY']))],
+        own_parent=menu_tf)
+    v.gameobject('手のコライダー', model.fid('Hand_R', 4), [(114, 'MonoBehaviour', g.ma(
+        'GlobalCollider', m_manualRemap=0, m_colliderToHijack=14, m_lowPriority=0, m_rootTransform=g.ma_ref(''),
+        m_copyHijackedShape=0, m_visualizeGizmo=1, m_radius=0.045, m_height=0.14, m_position=g.V(0, 0, 0),
+        m_rotation=g.Q(0, 0, 0, 1)))], pos=local(model, 'Hand_R', (-0.53, 0, 1.05)))
+    v.ids = keep_ids
+    g.write_asset(P_(ACC + '/Prefab/アクセサリー_MA.prefab'), HEAD + v.text(), G('prefab/acc'), 'PrefabImporter')
+
+
+# ---------------------------------------------------------------- gimmicks, with VRCFury's other features
+
+GIM = SHOP + '/シンセちゃん用ギミック'
+
+
+def gimmick_assets():
+    """gimmicks for her, set up with VRCFury's features beyond outfits: a heart in her right hand (an Armature Link)
+    with a toggle, a Material Swap toggle (a golden heart) and a Material Property toggle (a pinker one); a slider
+    that sets her chest's size and a Puppet along one axis for her half-closed eyes; a Gesture Driver (her left hand
+    open winks, with blinking blocked; either thumb up smiles, with a lock toggle); Blinking and Visemes of her own
+    shape keys; three decorations whose toggles share exclusive tags (the star with both the moon and the sun); a
+    toggle that sets an FX float a Full Controller's FX shows an aura by; menu items moved and reordered; and a
+    toggle that scales the heart, one that leaves it in the world (World Drop) and an old Breathing (a Smooth Loop of
+    her chest's size). Both hands' victory signs make a face of their own (a Gesture Driver combo), and so do both fists
+    (an FX layer that tests both hands); a Full Controller brings a Gesture layer of hand poses, and a two-axis Puppet
+    mixes four faces."""
+    g.clear_scene()
+    P = g.Parts()
+    hc = Vector((-0.575, -0.035, 1.03))
+    for x in (1, -1):
+        P.add('lobe', 'sphere', Matrix.Translation(hc + Vector((0.012 * x, 0, 0.01))), r=0.016, us=12, vs=8)
+    P.add('tip', 'sphere', Matrix.Translation(hc + Vector((0, 0, -0.008))) @ Matrix.Diagonal((1.2, 0.6, 1.4, 1)),
+          r=0.014, us=12, vs=8)
+    heart, _ = P.make('ハート', mats('ハート'))
+    heart.data.transform(Matrix.Translation(-hc))  # its pivot at its middle, so that it scales where it is
+    heart.location = hc
+    deco = {}
+    for name, at, r in (('スター', (0.12, -0.05, 1.5), 0.02), ('ムーン', (-0.12, -0.05, 1.5), 0.02),
+                        ('サン', (0.0, -0.08, 1.56), 0.022), ('オーラ', (0.0, 0.0, 1.3), 0.19)):
+        P = g.Parts()
+        P.add(name, 'sphere', Matrix.Translation(at), r=r, us=12, vs=8)
+        deco[name] = P.make(name, mats('オーラ' if name == 'オーラ' else 'デコ'))[0]
+    fbx_rel = GIM + '/FBX/ギミック.fbx'
+    FBX_GUID = G('gim.fbx')
+    g.export_fbx(P_(fbx_rel), 'FBX_SCALE_ALL')
+    M = GIM + '/Materials/'
+    mats_ = {'ハート': lil(P_(M + 'ハート.mat'), G('mat/heart'), 'ハート', color=(0.95, 0.3, 0.45, 1)),
+             'デコ': lil(P_(M + 'デコ.mat'), G('mat/deco'), 'デコ', color=(1.0, 0.9, 0.4, 1)),
+             'オーラ': lil(P_(M + 'オーラ.mat'), G('mat/aura'), 'オーラ', 'trans', color=(0.6, 0.8, 1.0, 0.2),
+                        emission=(0.2, 0.3, 0.45))}
+    gold = lil(P_(M + 'ハート_金.mat'), G('mat/heart_gold'), 'ハート_金', color=(1.0, 0.78, 0.25, 1),
+               emission=(0.25, 0.18, 0.04))
+    model = g.Model(P_(fbx_rel), fbx_rel, FBX_GUID)
+    imp = g.model_importer(mats_)
+    g.write_meta(P_(fbx_rel), FBX_GUID, 'ModelImporter', imp)
+    model.fileids(imp)
+
+    # a Full Controller whose FX shows the aura while the FX float Glow is set
+    A = GIM + '/VRCFury/'
+    clips = {}
+    for name, val in (('オーラ_ON', 1), ('オーラ_OFF', 0)):
+        clips[name] = G('gim/anim/' + name)
+        g.write_asset(P_(A + name + '.anim'), g.clip_yaml(name, [('オーラ', 1, 'm_IsActive', val)]), clips[name],
+                      'NativeFormatImporter', g.native(7400000))
+    fx = g.Controller(ids, clips)
+    fx.param('Glow', 1, 0)
+    fx.toggle('オーラ', 'Glow', 'オーラ_ON', 'オーラ_OFF')
+    # both fists at once half close her eyes: a layer whose transition tests both hands (a combo)
+    clips['ジト目_両手'] = G('gim/anim/jito_both')
+    g.write_asset(P_(A + 'ジト目_両手.anim'), g.clip_yaml('ジト目_両手', [('Body', 137, 'blendShape.ジト目', 100)]),
+                  clips['ジト目_両手'], 'NativeFormatImporter', g.native(7400000))
+    fx.param('GestureLeft', 3, 0)
+    fx.param('GestureRight', 3, 0)
+    idle, _ = fx.state('Idle')
+    both, _ = fx.state('両手グー', 'ジト目_両手')
+    fx.layer('両手', fx.machine('両手', [idle, both], idle, [
+        fx.transition(both, [(6, 'GestureLeft', 1), (6, 'GestureRight', 1)], 0),
+        fx.transition(idle, [(7, 'GestureLeft', 1)], 0), fx.transition(idle, [(7, 'GestureRight', 1)], 0)]))
+    FXG = G('gim/fx')
+    g.write_asset(P_(A + 'FX_ギミック.controller'), fx.yaml('FX_ギミック'), FXG, 'NativeFormatImporter', g.native(9100000))
+    # a Gesture layer of her own hand poses (a fist and a victory sign), each hand's layer masked to its fingers with
+    # VRChat's SDK masks (which the package does not hold)
+    fingers = [('Thumb', 0.5), ('Index', 1.0), ('Middle', 1.0), ('Ring', 1.0), ('Little', 1.0)]
+
+    def hand_clip(name, straight):
+        curves = []
+        for side in ('Left', 'Right'):
+            for f, amount in fingers:
+                v = 0.8 if f in straight else -amount
+                for part in ('1 Stretched', '2 Stretched', '3 Stretched'):
+                    curves.append(('', 95, '%sHand.%s.%s' % (side, f, part), v))
+                if f in ('Index', 'Middle'):
+                    curves.append(('', 95, '%sHand.%s.Spread' % (side, f), (0.8 if f == 'Index' else -0.8)
+                                   if f in straight else 0.0))
+        clips[name] = G('gim/anim/' + name)
+        g.write_asset(P_(A + name + '.anim'), g.clip_yaml(name, curves), clips[name], 'NativeFormatImporter',
+                      g.native(7400000))
+    hand_clip('手_グー', ())
+    hand_clip('手_ピース', ('Index', 'Middle'))
+    gl = g.Controller(g.Ids(2474), clips)
+    for pn in ('GestureLeft', 'GestureRight'):
+        gl.param(pn, 3, 0)
+    for side, mask in (('Left', '7ff0199655202a04eb175de45a6e078a'), ('Right', '903ce375d5f609d44b9f00b425d6eda9')):
+        pn = 'Gesture' + side
+        sts = []
+        for st, clip, sign in (('Idle', None, 0), ('Fist', '手_グー', 1), ('Victory', '手_ピース', 4)):
+            sts.append((gl.state(st, clip)[0], sign))
+        gl.layer(side + ' Hand', gl.machine(side + ' Hand', [x for x, _ in sts], sts[0][0], [
+            gl.transition(x, [(6, pn, sign)], 0) for x, sign in sts]), mask=mask)
+    GLG = G('gim/gesture')
+    g.write_asset(P_(A + 'Gesture_ギミック.controller'), gl.yaml('Gesture_ギミック'), GLG, 'NativeFormatImporter',
+                  g.native(9100000))
+
+    v = g.Variant(ids, FBX_GUID)
+    ROOT_GO, ROOT_TF = model.fid('', 1), model.fid('', 4)
+    v.root(ROOT_GO, ROOT_TF, 'ギミック')
+    v.mod(model.fid('オーラ', 1), 'm_IsActive', 0)
+
+    def feature(cls, data):
+        refs = g.Refs(ids)
+        v.component(ROOT_GO, 114, 'MonoBehaviour', g.vrcfury(refs, refs.add(cls, data(refs))))
+
+    def obj(name, cls=1):
+        return R(v.stub(model.fid(name, cls), cls))
+
+    def shape(refs, key, value=100):
+        return refs.action('BlendShapeAction', blendShape=key, blendShapeValue=value, renderer=R(0), allRenderers=1)
+    feature('ArmatureLink', lambda refs: dict(g.vf_armature_link(v.stub(model.fid('ハート', 1), 1), bone=18,
+                                                                  recursive=0, align=0)))
+    feature('Toggle', lambda refs: g.vf_toggle('ギミック/ハート', [
+        refs.action('ObjectToggleAction', obj=obj('ハート'), mode=0)], on=1))
+    feature('Toggle', lambda refs: g.vf_toggle('ギミック/ハートの色', [
+        refs.action('MaterialAction', renderer=obj('ハート', 23), materialIndex=0,
+                    mat=g.guid_asset(gold, 2100000, M + 'ハート_金.mat'))]))
+    feature('Toggle', lambda refs: g.vf_toggle('ギミック/ピンクのハート', [
+        refs.action('MaterialPropertyAction', version=2, renderer2=obj('ハート'), affectAllMeshes=0,
+                    propertyName='_Color', propertyType=1, value=0, valueVector=g.Q(0, 0, 0, 0),
+                    valueColor=C(1.0, 0.55, 0.75, 1))]))
+    feature('Toggle', lambda refs: dict(g.vf_toggle('ギミック/胸', [shape(refs, 'Chest_Big')]), slider=1,
+                                        defaultSliderValue=0.3))
+    feature('Puppet', lambda refs: {'version': 0, 'name': 'ギミック/ジト目', 'saved': 1, 'slider': 1, 'stops': [
+        {'x': 0.5, 'y': 0, 'state': g.vf_state([shape(refs, 'ジト目', 50)])},
+        {'x': 1.0, 'y': 0, 'state': g.vf_state([shape(refs, 'ジト目', 100)])}], 'defaultX': 0, 'defaultY': 0,
+        'enableIcon': 0, 'icon': g.NO_ASSET})
+
+    def gesture(refs, hand, sign, actions, lock='', combo=0):
+        return {'version': 1, 'hand': hand, 'sign': sign, 'comboSign': combo, 'state': g.vf_state(actions),
+                'disableBlinking': 0, 'customTransitionTime': 0, 'transitionTime': 0, 'enableLockMenuItem': 1 if lock else 0,
+                'lockMenuItem': lock, 'enableExclusiveTag': 0, 'exclusiveTag': '', 'enableWeight': 0}
+    feature('GestureDriver', lambda refs: {'version': 0, 'gestures': [
+        gesture(refs, 1, 2, [shape(refs, 'ウィンク'), refs.action('BlockBlinkingAction')]),
+        gesture(refs, 0, 7, [shape(refs, 'にっこり')], lock='表情ロック/にっこり'),
+        gesture(refs, 3, 4, [shape(refs, 'びっくり')], combo=4)]})  # both hands' victory signs at once
+    feature('Blinking', lambda refs: {'version': 1, 'state': g.vf_state([shape(refs, 'まばたき')]),
+                                      'transitionTime': -1, 'holdTime': -1})
+    feature('Visemes', lambda refs: dict({'version': 1, 'instant': 0}, **{
+        'state_' + k: g.vf_state([shape(refs, 'vrc.v_' + x)] if x else [])
+        for k, x in (('PP', ''), ('FF', ''), ('TH', ''), ('DD', ''), ('kk', ''), ('CH', ''), ('SS', ''), ('nn', ''),
+                     ('RR', ''), ('aa', 'aa'), ('E', 'ee'), ('I', 'ih'), ('O', 'oh'), ('U', 'ou'))}))
+    for name, tags in (('スター', 'deco, left'), ('ムーン', 'deco'), ('サン', 'left')):
+        feature('Toggle', lambda refs, name=name, tags=tags: g.vf_toggle('ギミック/' + name, [
+            refs.action('ObjectToggleAction', obj=obj(name), mode=0)], tag=tags))
+    feature('Toggle', lambda refs: g.vf_toggle('ギミック/光る', [refs.action('FxFloatAction', name='Glow', value=1)]))
+    feature('FullController', lambda refs: g.vf_full_controller(
+        controllers=[(g.guid_asset(FXG, 9100000, A + 'FX_ギミック.controller'), 5)], global_params=['Glow']))
+    feature('Toggle', lambda refs: g.vf_toggle('ギミック/大きいハート', [
+        refs.action('ScaleAction', obj=obj('ハート'), scale=2)]))
+    feature('Toggle', lambda refs: g.vf_toggle('ギミック/ハートを置く', [refs.action('WorldDropAction', obj=obj('ハート'))]))
+    feature('Breathing', lambda refs: {'version': 0, 'inState': g.vf_state([]), 'outState': g.vf_state([]),
+                                       'obj': R(0), 'blendshape': 'Chest_Big', 'scaleMin': 0, 'scaleMax': 0})
+    feature('FullController', lambda refs: g.vf_full_controller(
+        controllers=[(g.guid_asset(GLG, 9100000, A + 'Gesture_ギミック.controller'), 3)]))
+    feature('Puppet', lambda refs: {'version': 0, 'name': 'ギミック/表情パペット', 'saved': 1, 'slider': 0, 'stops': [
+        {'x': 1, 'y': 0, 'state': g.vf_state([shape(refs, 'にっこり')])},
+        {'x': -1, 'y': 0, 'state': g.vf_state([shape(refs, '怒り')])},
+        {'x': 0, 'y': 1, 'state': g.vf_state([shape(refs, 'びっくり')])},
+        {'x': 0, 'y': -1, 'state': g.vf_state([shape(refs, 'ジト目')])}], 'defaultX': 0, 'defaultY': 0,
+        'enableIcon': 0, 'icon': g.NO_ASSET})
+    feature('MoveMenuItem', lambda refs: {'version': 3, 'fromPath': 'ギミック/ハートの色', 'toPath': 'ハートの色'})
+    feature('ReorderMenuItem', lambda refs: {'version': 0, 'path': 'ギミック/胸', 'position': 0})
+    g.write_asset(P_(GIM + '/Prefab/ギミック_VRCFury.prefab'), HEAD + v.text(), G('prefab/gim'), 'PrefabImporter')
+
+
 # ---------------------------------------------------------------- packing
 
 avatar_model, README = avatar_assets()
@@ -1266,13 +1738,17 @@ dress_assets()
 parka_assets()
 cardigan_assets()
 hairpin_assets()
+accessory_assets()
+gimmick_assets()
 g.folder_metas(PROJ, 'booth')
 packs = []
 for name, prefix, extra in (('SynthChan_v1.0.unitypackage', AV, ''),
                             ('SynthChan_OnePiece_v1.0.unitypackage', DRESS, '\n00'),
                             ('Parka_v1.0.unitypackage', PARKA, ''),
                             ('SynthChan_Cardigan_VRCFury_v1.0.unitypackage', CARD, ''),
-                            ('Hairpin_v1.0.unitypackage', PIN, '')):
+                            ('Hairpin_v1.0.unitypackage', PIN, ''),
+                            ('SynthChan_Accessories_MA_v1.0.unitypackage', ACC, ''),
+                            ('SynthChan_Gimmicks_VRCFury_v1.0.unitypackage', GIM, '')):
     n = g.unitypackage(PROJ, [prefix], os.path.join(OUT, name), pathname_extra=extra)
     packs.append('%s (%d entries)' % (name, n))
 terms = ('利用規約\n\n本データは VRChat 等での個人利用に限ります。再配布は禁止です。\n'

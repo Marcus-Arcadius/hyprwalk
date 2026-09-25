@@ -8,7 +8,10 @@
 // avatar loaded (plugin:hypr3d:avatar), V switches to a third person view of it,
 // and Tab opens the Action Menu: its emotes, expressions, gestures and outfit.
 
+#include "control.hpp"
 #include "globals.hpp"
+#include "lipsync.hpp"
+#include "mic.hpp"
 #include "gltf.hpp"
 #include "map.hpp"
 #include "math3d.hpp"
@@ -138,22 +141,6 @@ namespace {
         return {std::sin(yaw) * std::cos(pitch), std::sin(pitch), -std::cos(yaw) * std::cos(pitch)};
     }
 
-    std::string jsonEscape(const std::string& s) {
-        std::string out;
-        for (char c : s) {
-            switch (c) {
-                case '"': out += "\\\""; break;
-                case '\\': out += "\\\\"; break;
-                case '\n': out += "\\n"; break;
-                default:
-                    if ((unsigned char)c < 0x20)
-                        out += std::format("\\u{:04x}", (int)c);
-                    else
-                        out += c;
-            }
-        }
-        return out;
-    }
 }
 
 constexpr const char* C3D_PASS_NAME = "CHypr3DElement";
@@ -189,6 +176,7 @@ namespace {
     SP<Config::Values::CStringValue> g_cfgAvatar;
     SP<Config::Values::CFloatValue>  g_cfgAvatarHeight;
     SP<Config::Values::CBoolValue>   g_cfgAvatarPhysics;
+    SP<Config::Values::CBoolValue>   g_cfgLipSync;
     SP<Config::Values::CStringValue> g_cfgAvatarEmotes;
 
     // a file named in the config, "" when unset
@@ -304,6 +292,18 @@ class CDesktop3D {
     float                         m_avatarHeight = 0; // asked for, 0 = as it comes
     std::shared_ptr<SAvatarModel> m_avatar;
     CAvatarAnimator               m_anim;
+    CAvatarControl                m_ctl{m_anim}; // what hyprctl and the Action Menu do to it (control.cpp), and what was set by hand
+    // lip sync: asked for (the config, hyprctl, the menu); the microphone listens only while that's so and the 3D
+    // desktop is up with an avatar, and a badge says so
+    bool                          m_lipsync = false;
+    int                           m_lipsyncConfigured = -1; // the config's, last seen
+    CMicrophone                   m_mic;
+    CLipSync                      m_lip;
+    std::vector<float>            m_micSamples;
+    std::vector<uint32_t>         m_badge;
+    int                           m_badgeW = 0, m_badgeH = 0;
+    float                         m_badgeScale = 0;
+    uint64_t                      m_badgeSerial = 0;
     // emotes from files: the config's, and those hyprctl adds (made again for each avatar that loads)
     CEmoteLoader                  m_emoteLoader;
     wl_event_source*              m_emoteSource = nullptr;
@@ -312,13 +312,6 @@ class CDesktop3D {
     std::string                   m_emotesConfigured = "\n"; // last value seen in the config ("\n" = none seen)
     std::string                   m_emotePlay;              // a file whose first emote plays when it's made
     int                           m_emotePlayLoop = -1;
-    std::string                   m_expression; // held, by the name it was asked for (kept for the next avatar)
-    float                         m_expressionWeight = 1;
-    // outfit changes by name, kept while the same avatar is loaded again: toggles and parts (lower case: 1 on,
-    // 0 off, -1 as the settings file has it), shape keys by weight
-    std::string                                m_outfitFor; // the avatar they're for
-    std::vector<std::pair<std::string, int>>   m_outfitSet;
-    std::vector<std::pair<std::string, float>> m_shapesSet;
     float                         m_bodyYaw = 0;      // where the body faces
     bool                          m_bodyTurning = false;
     float                         m_lookYaw = 0, m_lookPitch = 0; // where its head turns, relative to the body
@@ -367,7 +360,10 @@ class CDesktop3D {
     std::array<double, 2>        m_scrollAcc{}; // unsent fractions of a wheel notch, in 1/120ths, per axis
 
     // the Action Menu (Tab), like VRChat's: while it's open the mouse moves its cursor, not the camera
-    CActionMenu m_menu{[this](const std::string& id) { return actionPage(id, {m_avatar.get(), &m_anim, m_avatarLoader.busy(), m_thirdPerson, m_fly}); }};
+    CActionMenu m_menu{[this](const std::string& id) {
+                           return actionPage(id, {m_avatar.get(), &m_anim, m_avatarLoader.busy(), m_thirdPerson, m_fly, m_lipsync, CMicrophone::available()});
+                       },
+                       [this](const SMenuItem& it, float v, float v2) { m_ctl.dial(it, v, v2); }}; // a slider's dial (a stick: both)
     float       m_menuWheel = 0; // a fraction of a notch
 
     // aiming
@@ -415,17 +411,15 @@ class CDesktop3D {
     std::string                      requestAvatar(const std::string& path, float height);
     void                             applyAvatar(SAvatarResult&& res);
     std::string                      avatarStatus() const;
-    std::string                      avatarFace(const std::vector<std::string>& args);
-    std::string                      avatarOutfit(const std::vector<std::string>& args);
-    std::string                      avatarEmote(const std::vector<std::string>& args, std::string rest);
+    std::string                      loadEmoteFile(const std::string& file, int loop); // hyprctl's: made, then played
+    std::string                      setLipSync(bool on);
+    void                             lipSync(); // every frame: the microphone on or off, what it heard to the mouth
+    std::string                      lipSyncStatus() const;
     std::vector<std::string>         emoteFiles() const; // the config's, then those added
     void                             loadEmoteFiles(std::vector<std::string> files);
     void                             applyEmotes(SEmoteResult&& res);
-    std::string                      setOutfit(const std::string& name, int& state);
-    std::string                      changeOutfit(const std::string& name, int state); // setOutfit, kept for the next load
     std::string                      menuAction(const SMenuItem& item);
     void                             menuPick(const std::optional<SMenuItem>& item);
-    std::string                      menuStatus() const;
     std::string                      setView(bool third);
     void                             animateAvatar(float dt);
     void                             measureAvatarLight();
@@ -854,6 +848,12 @@ void CDesktop3D::checkAvatarConfig() {
         m_physicsConfigured = physics;
         m_anim.setPhysics(physics);
     }
+    if (const int lip = g_cfgLipSync && g_cfgLipSync->value(); lip != m_lipsyncConfigured) {
+        const bool first    = m_lipsyncConfigured < 0;
+        m_lipsyncConfigured = lip;
+        if (!first || lip)
+            setLipSync(lip);
+    }
 
     // other emotes: the avatar that's there again with them
     std::string emotes;
@@ -890,6 +890,7 @@ std::string CDesktop3D::requestAvatar(const std::string& path, float height) {
         if (!m_avatar)
             return "ok";
         m_avatar.reset();
+        m_ctl.avatar.reset();
         m_anim.reset(nullptr);
         m_thirdPerson = false;
         notify("avatar removed");
@@ -932,18 +933,8 @@ void CDesktop3D::applyAvatar(SAvatarResult&& res) {
     m_avatar         = std::move(res.model);
     m_avatarHeight   = res.req.height;
     m_anim.reset(m_avatar);
-    if (!m_expression.empty())
-        m_anim.setExpression(m_avatar->findExpression(m_expression), m_expressionWeight);
-    if (m_outfitFor != m_avatar->path) {
-        m_outfitFor = m_avatar->path;
-        m_outfitSet.clear();
-        m_shapesSet.clear();
-    }
-    for (auto [name, state] : m_outfitSet)
-        setOutfit(name, state);
-    for (const auto& [name, w] : m_shapesSet)
-        for (const int m : m_avatar->findMorphs(name))
-            m_anim.setShape(m, w);
+    m_ctl.avatar = m_avatar;
+    m_ctl.loaded(); // what was set by hand, again
     m_bodyYaw          = m_yaw;
     m_lookYaw          = m_lookPitch = 0;
     m_avatarLight.full = false;
@@ -1034,239 +1025,23 @@ std::string CDesktop3D::avatarStatus() const {
     static constexpr const char* EYES[] = {"still", "bones", "expressions"};
     const int                    held   = m_anim.expression();
     const int emote = m_anim.emote();
-    return std::format(R"({{"path": "{}", "loading": {}, "name": "{}", "triangles": {}, "joints": {}, "height": {:.3f}, "humanoid": {}, "rig": "{}", "clips": {}, "playing": "{}", "view": "{}", "distance": {:.2f}, "bodyYaw": {:.1f}, "light": [{:.2f}, {:.2f}], "expressions": {}, "expressionsFrom": "{}", "expression": "{}", "gestures": ["{}", "{}"], "eyes": "{}", "parts": {}, "toggles": {}, "settings": "{}", "physics": {}, "springs": {}, "springBones": {}, "springsFrom": "{}", "constraints": {}, "emote": "{}", "emotes": {}}})",
+    return std::format(R"({{"path": "{}", "loading": {}, "name": "{}", "triangles": {}, "joints": {}, "height": {:.3f}, "humanoid": {}, "rig": "{}", "clips": {}, "playing": "{}", "view": "{}", "distance": {:.2f}, "bodyYaw": {:.1f}, "light": [{:.2f}, {:.2f}], "expressions": {}, "expressionsFrom": "{}", "expression": "{}", "gestures": ["{}", "{}"], "eyes": "{}", "parts": {}, "toggles": {}, "sliders": {}, "variants": {}, "settings": "{}", "physics": {}, "springs": {}, "springBones": {}, "springsFrom": "{}", "constraints": {}, "emote": "{}", "emotes": {}}})",
                        jsonEscape(m_avatarPath), m_avatarLoader.busy(), jsonEscape(a.name), a.triangles, a.joints.size(), a.height, a.humanoid, jsonEscape(a.humanFrom),
                        a.clips.size(), jsonEscape(m_anim.playing()), m_thirdPerson ? "third" : "first", m_camBoom, m_bodyYaw * 180.f / F_PI, m_avatarLight.skyAvg,
                        m_avatarLight.bounceAvg, a.expressions.size(), jsonEscape(a.expressionsFrom), held >= 0 ? jsonEscape(a.expressions[held].name) : "",
-                       gestureName(m_anim.gesture(0)), gestureName(m_anim.gesture(1)), EYES[a.lookAt.type], a.parts.size(), a.toggles.size(), jsonEscape(a.settings),
+                       gestureName(m_anim.gesture(0)), gestureName(m_anim.gesture(1)), EYES[a.lookAt.type], a.parts.size(), a.toggles.size(), a.sliders.size(), a.variants.size(), jsonEscape(a.settings),
                        m_anim.physics(), a.springs.size(), a.springJoints.size(), jsonEscape(a.springsFrom), a.constraints.size(),
                        emote >= 0 ? jsonEscape(m_anim.emotes()[emote]->name) : "", m_anim.emotes().size());
 }
 
-// avatar emote [name|number|file|folder [once|loop]|stop]
-std::string CDesktop3D::avatarEmote(const std::vector<std::string>& args, std::string rest) {
-    if (!m_avatar)
-        return m_avatarLoader.busy() ? "error: the avatar is still loading" : "error: no avatar loaded";
-    const auto& a   = *m_avatar;
-    const auto& all = m_anim.emotes();
-    if (args.size() < 3) {
-        std::string list;
-        for (size_t i = 0; i < all.size(); ++i)
-            list += std::format(R"({}{{"name": "{}", "from": "{}", "loop": {}, "hold": {}, "duration": {:.2f}}})", i ? ", " : "", jsonEscape(all[i]->name),
-                                jsonEscape(all[i]->from), all[i]->loop, all[i]->hold, all[i]->anim.duration);
-        const int e = m_anim.emote();
-        return std::format(R"({{"playing": "{}", "loading": {}, "emotes": [{}]}})", e >= 0 ? jsonEscape(all[e]->name) : "", !m_emoteLoading.empty(), list);
-    }
-    if (args.size() == 3 && (args[2] == "stop" || args[2] == "none" || args[2] == "off")) {
-        m_anim.stopEmote();
-        return "ok";
-    }
-    // once or over and over, else as the emote has it
-    int loop = -1;
-    if (args.size() > 3 && (args.back() == "once" || args.back() == "loop")) {
-        loop = args.back() == "loop";
-        rest.resize(rest.find_last_not_of(" \t\n", rest.rfind(args.back()) - 1) + 1);
-    }
-    rest = unquote(rest);
-    if (rest.find('/') == std::string::npos && !isEmoteFile(rest)) {
-        const int e = m_anim.findEmote(rest);
-        if (e < 0)
-            return std::format("error: {} has no emote \"{}\" (hyprctl hypr3d avatar emote lists them)", a.name, rest);
-        m_anim.playEmote(e, loop);
-        return all[e]->name;
-    }
-    std::error_code ec;
-    const auto      abs = std::filesystem::absolute(rest, ec);
-    if (ec || !std::filesystem::exists(abs, ec))
-        return "error: no such file or folder: " + rest;
-    const std::string file = abs.string();
+// hyprctl hypr3d avatar emote FILE|FOLDER: made for the avatar there, then its first emote plays
+std::string CDesktop3D::loadEmoteFile(const std::string& file, int loop) {
     if (std::ranges::find(m_emoteFiles, file) == m_emoteFiles.end())
         m_emoteFiles.push_back(file);
     m_emotePlay     = file;
     m_emotePlayLoop = loop;
     loadEmoteFiles({file});
     return "loading";
-}
-
-// avatar expression [name [weight]|none], avatar gesture [left|right|both <gesture>]
-std::string CDesktop3D::avatarFace(const std::vector<std::string>& args) {
-    if (!m_avatar)
-        return m_avatarLoader.busy() ? "error: the avatar is still loading" : "error: no avatar loaded";
-    const auto& a = *m_avatar;
-
-    if (args[1] == "gesture") {
-        if (args.size() < 3)
-            return std::format(R"({{"left": "{}", "right": "{}"}})", gestureName(m_anim.gesture(0)), gestureName(m_anim.gesture(1)));
-        const std::string& hand = args[2];
-        if (hand != "left" && hand != "right" && hand != "both")
-            return "error: which hand: left, right or both";
-        const int g = args.size() > 3 ? gestureFromName(args[3]) : (int)GESTURE_NEUTRAL;
-        if (g < 0)
-            return "error: the gestures are neutral, fist, open, point, victory, rocknroll, handgun and thumbsup (or 0-7)";
-        if (hand != "right")
-            m_anim.setGesture(0, g);
-        if (hand != "left")
-            m_anim.setGesture(1, g);
-        const int face = a.gestureFace[hand == "left" ? 0 : 1][g];
-        return face >= 0 ? std::format("{} ({})", gestureName(g), a.expressions[face].name) : gestureName(g);
-    }
-
-    if (args.size() < 3) {
-        std::string own, keys, presets;
-        for (const auto& e : a.expressions) {
-            std::string& list = e.shapeKey ? keys : own;
-            list += std::format(R"({}"{}")", list.empty() ? "" : ", ", jsonEscape(e.name));
-        }
-        for (int p = 0; p < EX_COUNT; ++p)
-            if (a.preset[p] >= 0)
-                presets += std::format(R"({}"{}": "{}")", presets.empty() ? "" : ", ", expressionPresetName(p), jsonEscape(a.expressions[a.preset[p]].name));
-        const int held = m_anim.expression();
-        return std::format(R"({{"expression": "{}", "weight": {:.2f}, "from": "{}", "presets": {{{}}}, "expressions": [{}], "shapeKeys": [{}]}})",
-                           held >= 0 ? jsonEscape(a.expressions[held].name) : "", m_expressionWeight, jsonEscape(a.expressionsFrom), presets, own, keys);
-    }
-    // the name can have spaces; a number at the end is the weight
-    std::vector<std::string> words(args.begin() + 2, args.end());
-    float                    weight = 1;
-    if (words.size() > 1) {
-        char*       end = nullptr;
-        const float w   = std::strtof(words.back().c_str(), &end);
-        if (end && *end == 0) {
-            weight = std::clamp(w, 0.f, 1.f);
-            words.pop_back();
-        }
-    }
-    std::string name;
-    for (const auto& w : words)
-        name += (name.empty() ? "" : " ") + w;
-    if (name == "none" || name == "off" || name == "clear") {
-        m_expression.clear();
-        m_anim.setExpression(-1);
-        return "ok";
-    }
-    const int e = a.findExpression(name);
-    if (e < 0)
-        return std::format("error: {} has no expression \"{}\" (hyprctl hypr3d avatar expression lists them)", a.name, name);
-    m_expression       = name;
-    m_expressionWeight = weight;
-    m_anim.setExpression(e, weight);
-    return a.expressions[e].name;
-}
-
-// a toggle, else the parts of that name; state 1 on (shown), 0 off (hidden), -1 as the settings file has it,
-// 2 the other way (then it's what it came to)
-std::string CDesktop3D::setOutfit(const std::string& name, int& state) {
-    const auto& a = *m_avatar;
-    if (const int t = a.findToggle(name); t >= 0) {
-        const bool on = state == 2 ? !m_anim.toggle(t) : state < 0 ? a.toggles[t].on : state == 1;
-        if (state == 2)
-            state = on;
-        m_anim.setToggle(t, on);
-        return std::format("{}: {}", a.toggles[t].name, on ? "on" : "off");
-    }
-    const std::vector<int> parts = a.findParts(name);
-    if (parts.empty())
-        return std::format("error: {} has no toggle or part \"{}\" (hyprctl hypr3d avatar parts lists them)", a.name, name);
-    if (state == 2)
-        state = !m_anim.partsShown()[parts[0]];
-    for (const int p : parts)
-        m_anim.setPart(p, state);
-    return std::format("{}: {}{}", parts.size() == 1 ? a.parts[parts[0]].name : std::format("{} ({} parts)", name, parts.size()),
-                       m_anim.partsShown()[parts[0]] ? "shown" : "hidden", state < 0 ? " (as the toggles have it)" : "");
-}
-
-std::string CDesktop3D::changeOutfit(const std::string& name, int state) {
-    const std::string r = setOutfit(name, state);
-    if (!r.starts_with("error")) { // for when the avatar is loaded again
-        const std::string low = gltf::lower(name);
-        std::erase_if(m_outfitSet, [&](const auto& o) { return o.first == low; });
-        m_outfitSet.emplace_back(low, state);
-    }
-    return r;
-}
-
-// avatar parts [reset], avatar toggle <name> [on|off|reset], avatar shape <shape key> [weight|reset]
-std::string CDesktop3D::avatarOutfit(const std::vector<std::string>& args) {
-    if (!m_avatar)
-        return m_avatarLoader.busy() ? "error: the avatar is still loading" : "error: no avatar loaded";
-    const auto&              a = *m_avatar;
-    std::vector<std::string> words(args.begin() + 2, args.end());
-    auto                     joined = [&] {
-        std::string name;
-        for (const auto& w : words)
-            name += (name.empty() ? "" : " ") + w;
-        return name;
-    };
-    auto low = [](std::string s) {
-        std::ranges::transform(s, s.begin(), [](unsigned char c) { return (char)std::tolower(c); });
-        return s;
-    };
-
-    if (args[1] == "parts") {
-        if (!words.empty() && words[0] == "reset") {
-            m_outfitSet.clear();
-            m_shapesSet.clear();
-            m_anim.resetOutfit();
-            return "ok";
-        }
-        std::string toggles, parts, shapes;
-        for (size_t t = 0; t < a.toggles.size(); ++t)
-            toggles += std::format(R"({}{{"name": "{}", "group": "{}", "on": {}}})", t ? ", " : "", jsonEscape(a.toggles[t].name), jsonEscape(a.toggles[t].group),
-                                   m_anim.toggle((int)t));
-        const auto& shown = m_anim.partsShown();
-        for (size_t p = 0; p < a.parts.size(); ++p)
-            parts += std::format(R"({}{{"name": "{}", "shown": {}, "triangles": {}}})", p ? ", " : "", jsonEscape(a.parts[p].name), p < shown.size() && shown[p],
-                                 a.parts[p].triangles);
-        for (const auto& [name, w] : m_shapesSet)
-            shapes += std::format(R"({}"{}": {:.2f})", shapes.empty() ? "" : ", ", jsonEscape(name), w);
-        return std::format(R"({{"settings": "{}", "toggles": [{}], "parts": [{}], "shapes": {{{}}}}})", jsonEscape(a.settings), toggles, parts, shapes);
-    }
-
-    if (args[1] == "toggle") {
-        static constexpr std::pair<std::string_view, int> STATES[] = {{"on", 1},     {"show", 1},  {"shown", 1},   {"off", 0},    {"hide", 0},
-                                                                      {"hidden", 0}, {"reset", -1}, {"default", -1}, {"toggle", 2}, {"flip", 2}};
-        int state = 2;
-        if (words.size() > 1)
-            for (const auto& [word, st] : STATES)
-                if (words.back() == word) {
-                    state = st;
-                    words.pop_back();
-                    break;
-                }
-        const std::string name = joined();
-        if (name.empty())
-            return "error: toggle what (hyprctl hypr3d avatar parts lists them)";
-        return changeOutfit(name, state);
-    }
-
-    // shape: the name can have spaces (and "mesh/"); a number at the end is the weight
-    float w   = NAN;
-    bool  set = false;
-    if (words.size() > 1) {
-        char* end = nullptr;
-        const float v = std::strtof(words.back().c_str(), &end);
-        if (words.back() == "reset" || words.back() == "default")
-            set = true;
-        else if (end && end != words.back().c_str() && *end == 0) {
-            w   = std::clamp(v, 0.f, 1.f);
-            set = true;
-        }
-        if (set)
-            words.pop_back();
-    }
-    const std::string name = joined();
-    if (name.empty())
-        return "error: which shape key (hyprctl hypr3d avatar expression lists them)";
-    const std::vector<int> morphs = a.findMorphs(name);
-    if (morphs.empty())
-        return std::format("error: {} has no shape key \"{}\" (hyprctl hypr3d avatar expression lists them)", a.name, name);
-    if (set) {
-        for (const int m : morphs)
-            m_anim.setShape(m, w);
-        std::erase_if(m_shapesSet, [&](const auto& o) { return low(o.first) == low(name); });
-        if (!std::isnan(w))
-            m_shapesSet.emplace_back(name, w);
-    }
-    return std::format("{}: {:.2f}{}", name, m_anim.shape(morphs[0]), morphs.size() > 1 ? std::format(" ({} shape keys)", morphs.size()) : "");
 }
 
 std::string CDesktop3D::setView(bool third) {
@@ -1495,6 +1270,7 @@ void CDesktop3D::exitNow() {
     m_mode = MODE_OFF;
     m_t    = 0;
     m_menu.hide();
+    lipSync(); // out of 3D: the microphone closes (update() no longer runs)
     if (!m_restoreLater)
         m_restoreLater = g_pEventLoopManager->doLaterLock([this] {
             m_restoreLater.reset(); // safe: the queue already moved this callback out
@@ -1698,6 +1474,7 @@ void CDesktop3D::update() {
     }
 
     adaptExposure(dt);
+    lipSync();
     animateAvatar(dt);
     m_menu.update(dt, (int)std::round(mon->m_transformedSize.x), (int)std::round(mon->m_transformedSize.y), (float)mon->m_scale);
 
@@ -2368,23 +2145,8 @@ void CDesktop3D::onKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info
             m_menu.show();
         return;
     }
-    if (m_menu.open()) {
-        switch (k) {
-            case K_ESC: m_menu.hide(); return;
-            case K_BACKSPACE: m_menu.back(); return;
-            case K_ENTER:
-            case K_KPENTER: menuPick(m_menu.pick()); return;
-            case K_E:
-            case K_G:
-            case K_X: return; // they're for what the crosshair points at, and it's hidden
-            default:
-                if (k >= K_1 && k <= K_8) {
-                    menuPick(m_menu.pick((int)(k - K_1)));
-                    return;
-                }
-                break; // walking still works
-        }
-    }
+    if (menuKey(m_menu, k, [this](const std::optional<SMenuItem>& it) { menuPick(it); }))
+        return; // (else walking still works)
 
     switch (k) {
         case K_ESC:
@@ -2448,12 +2210,8 @@ void CDesktop3D::onButton(uint32_t timeMs, uint32_t button, bool pressed, Event:
 
     // the Action Menu: a click picks, the right button goes back, the middle one closes it
     if (m_mode == MODE_ACTIVE && m_menu.open()) {
-        if (pressed && button == BTN_LEFT_)
-            menuPick(m_menu.pick());
-        else if (pressed && button == BTN_RIGHT_)
-            m_menu.back();
-        else if (pressed && button == BTN_MIDDLE_)
-            m_menu.hide();
+        if (pressed)
+            menuButton(m_menu, button, [this](const std::optional<SMenuItem>& it) { menuPick(it); });
         return;
     }
 
@@ -2505,15 +2263,8 @@ void CDesktop3D::onAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& inf
 
     // the Action Menu: the wheel goes round it, a notch an item
     if (m_mode == MODE_ACTIVE && m_menu.open()) {
-        if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL) {
-            const float notches = e.deltaDiscrete != 0 ? e.deltaDiscrete / 120.f : (float)e.delta / 15.f;
-            if (std::signbit(notches) != std::signbit(m_menuWheel))
-                m_menuWheel = 0;
-            m_menuWheel += notches;
-            const int steps = (int)m_menuWheel;
-            m_menuWheel -= steps;
-            m_menu.scroll(steps);
-        }
+        if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
+            menuWheel(m_menu, m_menuWheel, e.deltaDiscrete != 0 ? e.deltaDiscrete / 120.f : (float)e.delta / 15.f);
         return;
     }
 
@@ -2629,6 +2380,7 @@ std::vector<UP<IPassElement>> CDesktop3D::drawFrame() {
         f.avatar.morphs    = &m_anim.morphWeights();
         f.avatar.materials = m_anim.materials();
         f.avatar.shown     = &m_anim.partsShown();
+        f.avatar.batchMaterials = m_anim.batchMaterials();
         f.avatar.transform = avatarTransform();
         // not from inside its head
         f.avatar.visible = m_thirdPerson && (m_mode != MODE_ACTIVE || m_camBoom > 0.35f);
@@ -2638,6 +2390,17 @@ std::vector<UP<IPassElement>> CDesktop3D::drawFrame() {
 
     f.menu = m_menu.hud();
     f.menu.alpha *= f.hudAlpha;
+    if (m_mic.on()) { // while it listens, a badge says so
+        const float scale = (float)mon->m_scale;
+        if (scale != m_badgeScale || m_badge.empty()) {
+            drawBadge(m_badge, m_badgeW, m_badgeH, "lip sync: listening", scale);
+            m_badgeScale = scale;
+            ++m_badgeSerial;
+        }
+        const float margin = 12.f * scale;
+        f.badge            = {.pixels = &m_badge, .w = m_badgeW, .h = m_badgeH, .serial = m_badgeSerial, .x = f.width - margin - m_badgeW / 2.f,
+                              .y = margin + m_badgeH / 2.f, .scale = 1, .alpha = 1};
+    }
 
     m_renderer.render(f, m_outTex->m_texID);
 
@@ -2652,6 +2415,54 @@ std::vector<UP<IPassElement>> CDesktop3D::drawFrame() {
 // ------------------------------------------------------------ action menu
 
 // what's picked in the Action Menu
+// ------------------------------------------------------------------ lip sync
+
+std::string CDesktop3D::setLipSync(bool on) {
+    if (on == m_lipsync)
+        return lipSyncStatus();
+    if (on && !CMicrophone::available()) {
+        std::string error;
+        m_mic.start(error);
+        notify("lip sync: " + error, true);
+        return "error: " + error;
+    }
+    m_lipsync = on;
+    notify(on ? "lip sync on: the microphone moves the avatar's mouth while you're in 3D; nothing it hears is kept or sent" : "lip sync off");
+    lipSync();
+    return lipSyncStatus();
+}
+
+void CDesktop3D::lipSync() {
+    const bool want = m_lipsync && m_mode != MODE_OFF && m_avatar;
+    if (want && !m_mic.on()) {
+        std::string error;
+        if (!m_mic.start(error)) {
+            m_lipsync = false;
+            notify("lip sync: " + error, true);
+            return;
+        }
+        m_lip.reset();
+    } else if (!want && m_mic.on()) {
+        m_mic.stop();
+        m_lip.reset();
+        m_anim.setVisemes({});
+        m_badge.clear();
+    }
+    if (!m_mic.on())
+        return;
+    m_micSamples.clear();
+    int rate = 0;
+    m_mic.read(m_micSamples, rate);
+    m_lip.feed(m_micSamples.data(), m_micSamples.size(), rate);
+    m_anim.setVisemes(m_lip.visemes());
+}
+
+std::string CDesktop3D::lipSyncStatus() const {
+    const auto& v = m_lip.visemes();
+    return std::format(R"({{"on": {}, "listening": {}, "microphone": {}, "level": {:.1f}, "formants": [{:.0f}, {:.0f}], "visemes": {{"aa": {:.2f}, "ih": {:.2f}, "ou": {:.2f}, "ee": {:.2f}, "oh": {:.2f}}}}})",
+                       m_lipsync, m_mic.on(), CMicrophone::available(), m_lip.level(), m_lip.f1(), m_lip.f2(), v[0], v[1], v[2], v[3], v[4]);
+}
+
 std::string CDesktop3D::menuAction(const SMenuItem& it) {
     switch (it.action) {
         case MA_VIEW: return setView(!m_thirdPerson);
@@ -2660,77 +2471,12 @@ std::string CDesktop3D::menuAction(const SMenuItem& it) {
             m_vel = {};
             return m_fly ? "flying" : "walking";
         case MA_RESPAWN: resetPlayer(); return "ok";
+        case MA_LIPSYNC: return setLipSync(!m_lipsync);
         default: break;
     }
-    if (!m_avatar)
-        return m_avatarLoader.busy() ? "error: the avatar is still loading" : "error: no avatar loaded";
-    const auto& a = *m_avatar;
-    switch (it.action) {
-        case MA_EMOTE: // again: it stops
-            if (it.arg < 0 || it.arg >= (int)m_anim.emotes().size())
-                return "error: no such emote";
-            if (m_anim.emote() == it.arg) {
-                m_anim.stopEmote();
-                return "stopped";
-            }
-            m_anim.playEmote(it.arg);
-            return m_anim.emotes()[it.arg]->name;
-        case MA_EMOTE_STOP: m_anim.stopEmote(); return "ok";
-        case MA_EXPRESSION: { // held till it's picked again
-            if (it.arg < 0 || it.arg >= (int)a.expressions.size())
-                return "error: no such expression";
-            if (m_anim.expression() == it.arg) {
-                m_expression.clear();
-                m_anim.setExpression(-1);
-                return "none";
-            }
-            const SExpression& x = a.expressions[it.arg];
-            m_expression         = x.preset >= 0 ? expressionPresetName(x.preset) : x.name; // a preset for the next avatar too
-            m_expressionWeight   = 1;
-            m_anim.setExpression(it.arg, 1);
-            return x.name;
-        }
-        case MA_GESTURE: {
-            const int g = std::clamp(it.arg2, 0, GESTURE_COUNT - 1);
-            if (it.arg != 1)
-                m_anim.setGesture(0, g);
-            if (it.arg != 0)
-                m_anim.setGesture(1, g);
-            return gestureName(g);
-        }
-        case MA_TOGGLE:
-            if (it.arg < 0 || it.arg >= (int)a.toggles.size())
-                return "error: no such toggle";
-            return changeOutfit(a.toggles[it.arg].name, 2);
-        case MA_PART: { // as the page shows it: on when any of that name is
-            if (it.arg < 0 || it.arg >= (int)a.parts.size())
-                return "error: no such part";
-            const std::string& name  = a.parts[it.arg].name;
-            const auto&        shown = m_anim.partsShown();
-            bool               on    = false;
-            for (size_t p = 0; p < a.parts.size(); ++p)
-                on |= (name.empty() ? (int)p == it.arg : a.parts[p].name == name) && (p >= shown.size() || shown[p]);
-            if (!name.empty() && a.findToggle(name) < 0)
-                return changeOutfit(name, on ? 0 : 1); // and again when it's loaded again
-            // unnamed, or a toggle has its name (and "avatar toggle" would find that): just the parts
-            for (const int p : name.empty() ? std::vector<int>{it.arg} : a.findParts(name))
-                m_anim.setPart(p, on ? 0 : 1);
-            return on ? "hidden" : "shown";
-        }
-        case MA_OUTFIT_RESET:
-            m_outfitSet.clear();
-            m_shapesSet.clear();
-            m_anim.resetOutfit();
-            return "ok";
-        case MA_PHYSICS: m_anim.setPhysics(!m_anim.physics()); return m_anim.physics() ? "on" : "off";
-        case MA_FACE_RESET:
-            m_expression.clear();
-            m_anim.setExpression(-1);
-            m_anim.setGesture(0, GESTURE_NEUTRAL);
-            m_anim.setGesture(1, GESTURE_NEUTRAL);
-            return "ok";
-        default: return "error: nothing to do";
-    }
+    m_ctl.loading = m_avatarLoader.busy();
+    const std::string r = m_ctl.action(it);
+    return r.empty() ? "error: nothing to do" : r;
 }
 
 void CDesktop3D::menuPick(const std::optional<SMenuItem>& item) {
@@ -2740,81 +2486,15 @@ void CDesktop3D::menuPick(const std::optional<SMenuItem>& item) {
         notify(r.substr(7), true);
 }
 
-std::string CDesktop3D::menuStatus() const {
-    if (!m_menu.open())
-        return R"({"open": false})";
-    const SMenuPage& p = m_menu.page();
-    std::string      items;
-    for (size_t i = 0; i < p.items.size(); ++i) {
-        const auto& it = p.items[i];
-        items += std::format(R"({}{{"slot": {}, "label": "{}", "hint": "{}", "on": {}, "disabled": {}, "submenu": {}}})", i ? ", " : "", i + 1, jsonEscape(it.label),
-                             jsonEscape(it.hint), it.on, it.disabled, !it.page.empty());
-    }
-    // the slot the cursor points at, 0 = the middle, -1 = nothing
-    const int h = m_menu.highlighted();
-    return std::format(R"({{"open": true, "path": "{}", "title": "{}", "highlight": {}, "items": [{}]}})", jsonEscape(m_menu.path()), jsonEscape(p.title),
-                       h >= 0 ? h + 1 : h == -1 ? 0 : -1, items);
-}
-
 // menu [open [page]|close|toggle|back|pick [n]|move dx dy|scroll n]
 std::string CDesktop3D::menuCommand(const std::vector<std::string>& args) {
     if (args.empty())
-        return menuStatus();
+        return menuStatus(m_menu);
     if (m_mode != MODE_ACTIVE)
         return "error: not in 3D";
-    const std::string& verb = args[0];
-    auto               num  = [&](size_t i, float def) {
-        try {
-            return i < args.size() ? std::stof(args[i]) : def;
-        } catch (...) { return def; }
-    };
-    auto where = [&] { return m_menu.open() ? m_menu.path() : std::string("closed"); };
-
-    if (verb == "open" || verb == "toggle") {
-        if (verb == "toggle" && m_menu.open()) {
-            m_menu.hide();
-            return "closed";
-        }
-        const std::string page = args.size() > 1 ? args[1] : CActionMenu::ROOT;
+    if (args[0] == "open" || (args[0] == "toggle" && !m_menu.open()))
         setTyping(false);
-        if (!m_menu.show(page))
-            return "error: no such page: " + page + " (main, emotes, expressions, gestures, left, right, both, outfit, parts, options; or a path: gestures/left)";
-        return where();
-    }
-    if (verb == "close") {
-        m_menu.hide();
-        return "closed";
-    }
-    if (verb != "back" && verb != "pick" && verb != "move" && verb != "scroll")
-        return "error: menu [open [page]|close|toggle|back|pick [n]|move dx dy|scroll n]";
-    if (!m_menu.open())
-        return "error: the menu isn't open (hyprctl hypr3d menu open)";
-    if (verb == "back") {
-        m_menu.back();
-        return where();
-    }
-    if (verb == "pick") { // pick n: slot n, 0 = the middle; pick: what the cursor points at
-        const auto& items = m_menu.page().items;
-        int         slot  = m_menu.highlighted();
-        if (args.size() > 1) {
-            const float n = num(1, -1);
-            if (n < 0 || n > items.size() || n != std::floor(n))
-                return std::format("error: pick 1-{}, or 0 for the middle", items.size());
-            slot = (int)n - 1;
-        }
-        if (slot == -2)
-            return "error: the cursor isn't on anything";
-        if (slot >= 0 && items[slot].disabled)
-            return std::format("error: {} can't be picked{}", items[slot].label, items[slot].hint.empty() ? "" : " (" + items[slot].hint + ")");
-        const auto item = m_menu.pick(slot);
-        return item ? menuAction(*item) : where();
-    }
-    if (verb == "move") { // logical pixels, as the mouse moves it
-        m_menu.move(num(1, 0), num(2, 0));
-        return "ok";
-    }
-    m_menu.scroll((int)num(1, 1));
-    return "ok";
+    return h3d::menuCommand(m_menu, args, [this](const SMenuItem& it) { return menuAction(it); });
 }
 
 std::string CDesktop3D::menuDispatch(const std::string& arg) {
@@ -2978,27 +2658,26 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         return requestMap(rest, g_cfgMapScale ? g_cfgMapScale->value() : 0.f);
     }
     // avatar [path|none|reload|height <meters>|expression [name [weight]|none]|gesture [left|right|both <gesture>]|parts [reset]|
-    //         toggle <name> [on|off|reset]|shape <shape key> [weight|reset]|physics [on|off|toggle]|
+    //         toggle <name> [on|off|reset]|shape <shape key> [weight|reset]|slider <name> [0..1|NN%|reset]|physics [on|off|toggle]|
     //         emote [name|number|file|folder [once|loop]|stop]]
     if (cmd == "avatar") {
         const std::string rest = pathArg();
         const std::string sub  = args.size() > 1 ? args[1] : "";
         if (rest.empty())
             return avatarStatus();
-        if (sub == "expression" || sub == "gesture")
-            return avatarFace(args);
-        if (sub == "emote" || sub == "emotes")
-            return avatarEmote(args, afterWords(3));
-        if (sub == "parts" || sub == "toggle" || sub == "shape")
-            return avatarOutfit(args);
-        if (sub == "physics") { // hair, skirts and the like swing (spring bones), or hang as the animation has them
+        if (sub == "lipsync") { // avatar lipsync [on|off|toggle]
             const std::string v = args.size() > 2 ? args[2] : "";
-            if (v == "on" || v == "off" || v == "toggle")
-                m_anim.setPhysics(v == "on" || (v == "toggle" && !m_anim.physics()));
-            else if (!v.empty())
-                return "error: avatar physics [on|off|toggle]";
-            return m_anim.physics() ? "on" : "off";
+            if (v == "on" || v == "off" || v == "toggle") {
+                if (const std::string r = setLipSync(v == "on" || (v == "toggle" && !m_lipsync)); r.starts_with("error"))
+                    return r;
+            } else if (!v.empty())
+                return "error: avatar lipsync [on|off|toggle]";
+            return lipSyncStatus();
         }
+        m_ctl.loading       = m_avatarLoader.busy();
+        m_ctl.emotesLoading = !m_emoteLoading.empty();
+        if (const std::string r = m_ctl.command(args, afterWords(3), [this](const std::string& file, int loop) { return loadEmoteFile(file, loop); }); !r.empty())
+            return r;
         if (sub == "none" || sub == "off")
             return requestAvatar("", 0);
         if (sub == "reload" || sub == "height") {
@@ -3140,6 +2819,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_cfgAvatarHeight = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:avatar_height", "the avatar's height in meters, 0 = as it comes", 0.f,
                                                                 Config::Values::SFloatValueOptions{.min = 0.f, .max = 20.f});
     g_cfgAvatarPhysics = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:avatar_physics", "the avatar's hair, skirt and the like swing as it moves", true);
+    // plugin { hypr3d { lipsync = false } }: off unless asked for; nothing heard is kept or sent
+    g_cfgLipSync = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:lipsync", "lip sync: the microphone moves the avatar's mouth while in 3D", false);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgLipSync);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAvatar);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAvatarHeight);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAvatarPhysics);

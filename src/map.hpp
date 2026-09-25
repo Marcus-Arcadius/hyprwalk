@@ -78,6 +78,43 @@ namespace h3d {
         DETAIL_OVERLAY, // Photoshop's overlay
     };
 
+    // Unity's stencil test and write (unity2hypr3d's "hypr3d_stencil": UnlitWF's stencil masks, lilToon's, Poiyomi's)
+    enum eStencilComp : uint8_t { SC_NEVER, SC_LESS, SC_EQUAL, SC_LEQUAL, SC_GREATER, SC_NOTEQUAL, SC_GEQUAL, SC_ALWAYS };
+    enum eStencilOp : uint8_t { SO_KEEP, SO_ZERO, SO_REPLACE, SO_INCR, SO_DECR, SO_INVERT, SO_INCR_WRAP, SO_DECR_WRAP };
+    struct SStencil {
+        bool         on  = false;
+        uint8_t      ref = 0, read = 255, write = 255;
+        eStencilComp comp = SC_ALWAYS;
+        eStencilOp   pass = SO_KEEP, fail = SO_KEEP, zfail = SO_KEEP;
+        // drawn again with another test, this much as opaque (UnlitWF's MaskOut_Blend: fainter where its mask is);
+        // < 0: not
+        eStencilComp againComp = SC_ALWAYS;
+        float        again     = -1;
+        bool         reads() const {
+            return on && comp != SC_ALWAYS;
+        }
+    };
+
+    // a toon outline: the mesh drawn again pushed out along its normals, its front faces culled (an inverted hull)
+    enum eOutlineSpace : uint8_t {
+        OUTLINE_WORLD,  // width in metres
+        OUTLINE_OBJECT, // metres at the model's scale
+        OUTLINE_SCREEN, // width in NDC units (2 = the screen's height) up to maxW away, then thinner
+    };
+    struct SOutline {
+        float         width = 0; // 0: none
+        eOutlineSpace space = OUTLINE_WORLD;
+        float         color[4] = {0, 0, 0, 1}; // linear
+        float         base = 0, tint = 0;      // mixed towards the base color (UnlitWF), multiplied by it (Poiyomi)
+        int           maskTex     = -1; // width times one of its channels
+        uint8_t       maskChannel = 0;
+        bool          maskInvert  = false;
+        float         shift = 0;              // metres towards the eye (< 0: away)
+        float         fix = 0, fixMax = 1;    // thinner up close: width * mix(1, min(distance, fixMax), fix)
+        float         lit = 1;                // how much it's shaded (0: its color as it is)
+        float         maxW = 1;               // screen space: the distance it stops staying as wide at
+    };
+
     struct SMapMaterial {
         std::string name;
         float       baseColor[4] = {1, 1, 1, 1};
@@ -126,6 +163,19 @@ namespace h3d {
         float       effectFade[4]    = {1, 1, 0, 1};     // distance (m), falloff, min, max
         float       effectFresnel[4] = {0.001f, 1, 0, 1}; // exponent, falloff, min, max
         bool        effectFog = true;
+        // the avatar's (unity2hypr3d's "hypr3d_*" extras; MToon's outline and queue in VRMs): Unity's render queue,
+        // -1 its alpha mode's (2000, 2450, 3000); its stencil; an outline; UnlitWF's back faces and light clamp
+        int         queue = -1;
+        SStencil    stencil;
+        SOutline    outline;
+        int         back = 0; // 1: back faces take backColor, 2: backTex times backColor (in place of the base color's rgb)
+        int         backTex      = -1;
+        float       backColor[4] = {1, 1, 1, 1};
+        float       backXf[6]    = {1, 0, 0, 1, 0, 0};
+        float       lightClamp[3] = {0, 0, 1}; // the light's brightness between min and max (0: not clamped), its chroma
+        int         renderQueue() const {
+            return queue >= 0 ? queue : alphaMode == ALPHA_BLEND ? 3000 : alphaMode == ALPHA_MASK ? 2450 : 2000;
+        }
     };
 
     // HDR pixels, shared exponent (GL_RGB9_E5), each mip level after the other

@@ -4,6 +4,8 @@
 // Arguments run in order, each changing the state; --out renders a picture:
 //   shot --avatar a.vrm --frames 30 --view 0 --out front.png --view 180 --out back.png
 #include "avatar.hpp"
+#include "control.hpp"
+#include "lipsync.hpp"
 #include "menu.hpp"
 #include "renderer.hpp"
 #include "world.hpp"
@@ -23,6 +25,7 @@
 #include <cstring>
 #include <format>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -196,52 +199,41 @@ int main(int argc, char** argv) {
     bool autoExp = false;
     bool plainTextures = false; // --plain: no block compression (before --map)
     int  bench   = 0; // --bench n: time n more renders of each --out
+    bool outlines = true; // --outlines 0: none of the avatar's toon outlines
     GLuint outTex = 0;
     int    texW = 0, texH = 0;
 
     // the Action Menu, as the plugin has it (view, fly and respawn only change what it shows)
     bool        third = true, fly = false;
     float       menuDt = 0.2f; // the time it's had at the next --out: 0.2 = all faded in, the flash gone
-    CActionMenu menu([&](const std::string& id) { return actionPage(id, {model.get(), &anim, false, third, fly}); });
-    auto        menuDo = [&](const SMenuItem& it) {
-        switch (it.action) {
-            case MA_EMOTE:
-                if (anim.emote() == it.arg)
-                    anim.stopEmote();
-                else
-                    anim.playEmote(it.arg);
+    // what the plugin's hyprctl, menu items and dials do to the avatar: the same code (control.cpp)
+    CAvatarControl ctl(anim);
+    CActionMenu    menu([&](const std::string& id) { return actionPage(id, {model.get(), &anim, false, third, fly}); },
+                        [&](const SMenuItem& it, float v, float v2) { ctl.dial(it, v, v2); });
+    float          wheel  = 0; // a fraction of a notch
+    auto           menuDo = [&](const SMenuItem& it) {
+        std::string r;
+        switch (it.action) { // (main.cpp's own)
+            case MA_VIEW:
+                third = !third;
+                r     = third ? "third" : "first";
                 break;
-            case MA_EXPRESSION: anim.setExpression(anim.expression() == it.arg ? -1 : it.arg, 1); break;
-            case MA_GESTURE:
-                if (it.arg != 1)
-                    anim.setGesture(0, it.arg2);
-                if (it.arg != 0)
-                    anim.setGesture(1, it.arg2);
+            case MA_FLY:
+                fly = !fly;
+                r   = fly ? "flying" : "walking";
                 break;
-            case MA_TOGGLE: anim.setToggle(it.arg, !anim.toggle(it.arg)); break;
-            case MA_PART: { // as main.cpp has it
-                const std::string& name  = model->parts[it.arg].name;
-                const auto&        shown = anim.partsShown();
-                bool               on    = false;
-                for (size_t p = 0; p < model->parts.size(); ++p)
-                    on |= (name.empty() ? (int)p == it.arg : model->parts[p].name == name) && (p >= shown.size() || shown[p]);
-                for (const int p : name.empty() ? std::vector<int>{it.arg} : model->findParts(name))
-                    anim.setPart(p, on ? 0 : 1);
-                break;
-            }
-            case MA_OUTFIT_RESET: anim.resetOutfit(); break;
-            case MA_VIEW: third = !third; break;
-            case MA_PHYSICS: anim.setPhysics(!anim.physics()); break;
-            case MA_FLY: fly = !fly; break;
-            case MA_FACE_RESET:
-                anim.setExpression(-1);
-                anim.setGesture(0, 0);
-                anim.setGesture(1, 0);
-                break;
-            case MA_EMOTE_STOP: anim.stopEmote(); break;
-            default: break;
+            case MA_RESPAWN: r = "ok"; break;
+            default:
+                r = ctl.action(it);
+                if (r.empty())
+                    r = "error: nothing to do";
         }
-        fprintf(stderr, "menu picked %s (action %d, %d, %d)\n", it.label.c_str(), it.action, it.arg, it.arg2);
+        fprintf(stderr, "menu picked %s (action %d, %d, %d): %s\n", it.label.c_str(), it.action, it.arg, it.arg2, r.c_str());
+        return r;
+    };
+    const auto menuPick = [&](const std::optional<SMenuItem>& it) {
+        if (it)
+            menuDo(*it);
     };
 
     auto need = [&](int i, int k) {
@@ -251,10 +243,28 @@ int main(int argc, char** argv) {
         }
     };
     float frameDt = 1.f / 60;
+    // lip sync from a WAV file (--audio), a frame's worth of it each frame, as the plugin does with the microphone
+    CLipSync           lip;
+    std::string           badgeText; // --badge
+    std::vector<uint32_t> badgePixels;
+    int                   badgeW = 0, badgeH = 0;
+    uint64_t              badgeSerial = 0;
+    std::vector<float> audio;
+    int                audioRate = 0;
+    size_t             audioAt   = 0;
     auto  step    = [&](int frames) {
         for (int i = 0; i < frames; ++i) {
             mo.dt = frameDt;
             time += mo.dt;
+            if (!audio.empty() && audioAt < audio.size()) {
+                const size_t n = std::min(audio.size() - audioAt, (size_t)std::lround(frameDt * audioRate));
+                lip.feed(audio.data() + audioAt, n, audioRate);
+                audioAt += n;
+                anim.setVisemes(lip.visemes());
+            } else if (!audio.empty()) {
+                audio.clear();
+                anim.setVisemes({});
+            }
             if (accel > 0) {
                 V3          d  = V3{move.x, 0, move.z} - V3{vel.x, 0, vel.z};
                 const float dl = length(d), maxD = accel * mo.dt;
@@ -357,6 +367,8 @@ int main(int argc, char** argv) {
             }
             model = res.model;
             anim.reset(model);
+            ctl.avatar = model;
+            ctl.loaded();
             still.setPhysics(false);
             still.reset(model);
             fprintf(stderr, "avatar %s: %zu triangles, %zu joints, %.2f m, rig %s\n", model->name.c_str(), model->triangles, model->joints.size(), model->height,
@@ -479,6 +491,18 @@ int main(int argc, char** argv) {
                 fprintf(stderr, "no toggle %s\n", name.c_str());
             else
                 anim.setToggle(t, st == "flip" ? !anim.toggle(t) : st == "on");
+        } else if (a == "--slider") { // name 0..1|reset; a 2D one: name x y (-1..1 each)
+            need(i, 2);
+            const int sl = model->findSlider(argv[i + 1]);
+            if (sl < 0)
+                fprintf(stderr, "no slider %s\n", argv[i + 1]);
+            else if (model->sliders[sl].grid && std::string(argv[i + 2]) != "reset") {
+                need(i, 3);
+                anim.setSlider(sl, (float)atof(argv[i + 2]), (float)atof(argv[i + 3]));
+                ++i;
+            } else
+                anim.setSlider(sl, std::string(argv[i + 2]) == "reset" ? NAN : (float)atof(argv[i + 2]));
+            i += 2;
         } else if (a == "--part") { // name 1|0|-1
             need(i, 2);
             const auto found = model->findParts(argv[i + 1]);
@@ -503,9 +527,31 @@ int main(int argc, char** argv) {
                 line += " " + model->parts[p].name + (anim.partsShown()[p] ? "" : "(hidden)") + "/" + std::to_string(model->parts[p].triangles);
             fprintf(stderr, "parts:%s\n", line.c_str());
             line.clear();
-            for (size_t t = 0; t < model->toggles.size(); ++t)
-                line += " " + model->toggles[t].name + (model->toggles[t].group.empty() ? "" : "[" + model->toggles[t].group + "]") + "=" + (anim.toggle((int)t) ? "on" : "off");
+            for (size_t t = 0; t < model->toggles.size(); ++t) {
+                std::string gs;
+                for (const auto& g : model->toggles[t].groups)
+                    gs += (gs.empty() ? "" : ",") + g;
+                line += " " + model->toggles[t].name + (gs.empty() ? "" : "[" + gs + "]") + "=" + (anim.toggle((int)t) ? "on" : "off");
+            }
             fprintf(stderr, "toggles:%s\n", line.empty() ? " none" : line.c_str());
+            line.clear();
+            for (size_t s = 0; s < model->sliders.size(); ++s)
+                line += model->sliders[s].grid ? std::format(" {}=({:.3f},{:.3f})[2D {}x{}]", model->sliders[s].name, anim.slider((int)s), anim.sliderY((int)s),
+                                                             model->sliders[s].grid, model->sliders[s].grid)
+                                               : std::format(" {}={:.3f}", model->sliders[s].name, anim.slider((int)s));
+            fprintf(stderr, "sliders:%s\n", line.empty() ? " none" : line.c_str());
+            line.clear();
+            for (size_t v = 0; v < model->variants.size(); ++v)
+                line += " " + model->variants[v] + "=" + (anim.variant((int)v) ? "on" : "off");
+            fprintf(stderr, "variants:%s\n", line.empty() ? " none" : line.c_str());
+            if (const auto* bm = anim.batchMaterials()) {
+                line.clear();
+                for (size_t b = 0; b < model->batches.size(); ++b)
+                    if ((*bm)[b] != model->batches[b].material)
+                        line += std::format(" {}:{}->{}", model->parts[model->batches[b].part].name, model->materials[model->batches[b].material].name,
+                                            model->materials[(*bm)[b]].name);
+                fprintf(stderr, "materials:%s\n", line.empty() ? " as they are" : line.c_str());
+            }
         } else if (a == "--blink") {
             need(i, 1);
             anim.setAutoBlink(atoi(argv[++i]) != 0);
@@ -688,9 +734,9 @@ int main(int argc, char** argv) {
         } else if (a == "--emotes") { // the avatar's
             for (size_t k = 0; k < anim.emotes().size(); ++k) {
                 const auto& em = *anim.emotes()[k];
-                fprintf(stderr, "emote %zu: %s (%s) %.2f s%s%s%s, %zu channels, %zu faces%s, gestures %d %d\n", k + 1, em.name.c_str(), em.from.c_str(), em.anim.duration,
-                        em.loop ? " loop" : "", em.hold ? " hold" : "", em.grounded ? " grounded" : "", em.anim.channels.size(), em.faces.size(), em.eyes.empty() ? "" : ", eyes", em.gesture[0],
-                        em.gesture[1]);
+                fprintf(stderr, "emote %zu: %s (%s) %.2f s%s%s%s%s, %zu channels, %zu faces%s, gestures %d %d\n", k + 1, em.name.c_str(), em.from.c_str(), em.anim.duration,
+                        em.loop ? " loop" : "", em.hold ? " hold" : "", em.grounded ? " grounded" : "", em.speed != 1 ? std::format(" at {:g}x", em.speed).c_str() : "",
+                        em.anim.channels.size(), em.faces.size(), em.eyes.empty() ? "" : ", eyes", em.gesture[0], em.gesture[1]);
             }
         } else if (a == "--menu") { // page, or a path: "gestures/left", "emotes:2"
             need(i, 1);
@@ -713,6 +759,45 @@ int main(int argc, char** argv) {
                 fprintf(stderr, "menu at %s\n", menu.open() ? menu.path().c_str() : "(closed)");
         } else if (a == "--menu-close") {
             menu.hide();
+        } else if (a == "--ctl") { // "avatar ..." or "menu ...": a hyprctl hypr3d request, as the plugin does it
+            need(i, 1);
+            const std::string        req = argv[++i];
+            std::istringstream       in(req);
+            std::vector<std::string> words;
+            for (std::string w; in >> w;)
+                words.push_back(w);
+            std::string rest = req; // after "avatar emote"
+            for (int w = 0; w < 2; ++w) {
+                const size_t b = rest.find_first_not_of(" \t"), e = b == std::string::npos ? b : rest.find_first_of(" \t", b);
+                rest           = e == std::string::npos ? "" : rest.substr(e);
+            }
+            std::string r;
+            if (!words.empty() && words[0] == "avatar")
+                r = ctl.command(words, rest, nullptr);
+            else if (!words.empty() && words[0] == "menu")
+                r = menuCommand(menu, {words.begin() + 1, words.end()}, menuDo);
+            fprintf(stderr, "ctl %s -> %s\n", req.c_str(), r.empty() ? "(not a command here)" : r.c_str());
+        } else if (a == "--key") { // tab, esc, backspace, enter, 1-8 or an evdev code, as the plugin takes them
+            need(i, 1);
+            const std::string k    = argv[++i];
+            const uint32_t    code = k == "tab" ? 15 : k == "esc" ? 1 : k == "backspace" ? 14 : k == "enter" ? 28 : k.size() == 1 && k[0] >= '1' && k[0] <= '8' ? (uint32_t)(k[0] - '1' + 2) : (uint32_t)atoi(k.c_str());
+            if (code == 15) // Tab opens and closes it
+                menu.open() ? menu.hide() : (void)menu.show();
+            else if (!menuKey(menu, code, menuPick))
+                fprintf(stderr, "key %s: not the menu's\n", k.c_str());
+        } else if (a == "--click") { // left|right|middle, while the menu is open
+            need(i, 1);
+            const std::string b = argv[++i];
+            if (!menuButton(menu, b == "right" ? 0x111 : b == "middle" ? 0x112 : 0x110, menuPick))
+                fprintf(stderr, "click %s: the menu isn't open\n", b.c_str());
+        } else if (a == "--wheel") { // notches (down > 0), while the menu is open
+            need(i, 1);
+            menuWheel(menu, wheel, (float)atof(argv[++i]));
+        } else if (a == "--mouse") { // dx dy: the mouse moved (the menu's cursor, while it's open)
+            need(i, 2);
+            if (menu.open())
+                menu.move(atof(argv[i + 1]), atof(argv[i + 2]));
+            i += 2;
         } else if (a == "--menu-dt") {
             need(i, 1);
             menuDt = atof(argv[++i]);
@@ -725,6 +810,29 @@ int main(int argc, char** argv) {
                         ws += std::format(" {}={:.2f}", model->morphs[k].name, anim.morphWeights()[k]);
                 fprintf(stderr, "morphs:%s\n", ws.c_str());
             }
+        } else if (a == "--where") { // node: where in the world it is (its joint's bind point, skinned)
+            need(i, 1);
+            const std::string nm = argv[++i];
+            int               node = -1;
+            for (size_t k = 0; model && k < model->nodes.size() && node < 0; ++k)
+                if (model->nodes[k].name == nm)
+                    node = (int)k;
+            bool said = false;
+            for (size_t j = 0; node >= 0 && j < model->joints.size() && !said; ++j)
+                if (model->joints[j].node == node) {
+                    const auto& J    = anim.joints();
+                    M4          skin = M4::identity();
+                    for (int r = 0; r < 3; ++r)
+                        for (int c = 0; c < 4; ++c)
+                            skin.m[c * 4 + r] = J[j * 12 + r * 4 + c];
+                    const M4 ib = model->joints[j].inverseBind.inverse();
+                    const M4 toWorld = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1}) * model->fix;
+                    const V3 p       = toWorld.point(skin.point({ib.m[12], ib.m[13], ib.m[14]}));
+                    fprintf(stderr, "where %s: %.4f %.4f %.4f (feet %.3f %.3f %.3f)\n", nm.c_str(), p.x, p.y, p.z, feet.x, feet.y, feet.z);
+                    said = true;
+                }
+            if (!said)
+                fprintf(stderr, "where %s: no such node with a joint\n", nm.c_str());
         } else if (a == "--map") { // path [scale]: a glTF map instead of the courtyard; the feet go to its start
             need(i, 1);
             SMapRequest req;
@@ -921,6 +1029,62 @@ int main(int argc, char** argv) {
         } else if (a == "--bench") {
             need(i, 1);
             bench = atoi(argv[++i]);
+        } else if (a == "--audio") { // file.wav [start seconds]: lip sync from it, mono or its channels mixed
+            need(i, 1);
+            const std::string file  = argv[++i];
+            const float       start = i + 1 < argc && argv[i + 1][0] != '-' ? (float)atof(argv[++i]) : 0.f;
+            std::ifstream     in(file, std::ios::binary);
+            std::vector<char> d((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            auto              u16 = [&](size_t o) { return (uint32_t)(uint8_t)d[o] | (uint32_t)(uint8_t)d[o + 1] << 8; };
+            auto              u32 = [&](size_t o) { return u16(o) | u16(o + 2) << 16; };
+            int               fmt = 0, ch = 0, bits = 0;
+            audio.clear();
+            for (size_t o = 12; d.size() >= 12 && o + 8 <= d.size();) {
+                const std::string id(d.data() + o, 4);
+                const size_t      len = u32(o + 4), body = o + 8;
+                if (id == "fmt " && body + 16 <= d.size()) {
+                    fmt       = (int)u16(body);
+                    ch        = (int)u16(body + 2);
+                    audioRate = (int)u32(body + 4);
+                    bits      = (int)u16(body + 14);
+                    if (fmt == 0xFFFE && body + 26 <= d.size())
+                        fmt = (int)u16(body + 24); // WAVE_FORMAT_EXTENSIBLE: its sub format
+                } else if (id == "data" && ch > 0 && bits > 0) {
+                    const size_t bytes = (size_t)bits / 8, frames = std::min(len, d.size() - body) / (bytes * ch);
+                    for (size_t k = 0; k < frames; ++k) {
+                        float sum = 0;
+                        for (int c = 0; c < ch; ++c) {
+                            const char* q = d.data() + body + (k * ch + c) * bytes;
+                            float       v = 0;
+                            if (fmt == 3 && bits == 32)
+                                std::memcpy(&v, q, 4);
+                            else if (fmt == 1 && bits == 16)
+                                v = (int16_t)((uint8_t)q[0] | (uint8_t)q[1] << 8) / 32768.f;
+                            else if (fmt == 1 && bits == 24)
+                                v = (float)((int32_t)((uint32_t)(uint8_t)q[0] << 8 | (uint32_t)(uint8_t)q[1] << 16 | (uint32_t)(uint8_t)q[2] << 24) >> 8) / 8388608.f;
+                            else if (fmt == 1 && bits == 32)
+                                v = (float)((int32_t)((uint32_t)(uint8_t)q[0] | (uint32_t)(uint8_t)q[1] << 8 | (uint32_t)(uint8_t)q[2] << 16 | (uint32_t)(uint8_t)q[3] << 24) / 2147483648.0);
+                            sum += v;
+                        }
+                        audio.push_back(sum / ch);
+                    }
+                }
+                o = body + len + (len & 1);
+            }
+            audioAt = std::min(audio.size(), (size_t)(start * audioRate));
+            lip.reset();
+            fprintf(stderr, "audio %s: %.2f s at %d Hz%s\n", file.c_str(), audioRate ? (double)audio.size() / audioRate : 0.0, audioRate,
+                    audio.empty() ? " (no samples: PCM 16/24/32-bit or 32-bit float WAV)" : "");
+        } else if (a == "--badge") { // text: the plugin's corner badge (lip sync's "lip sync: listening")
+            need(i, 1);
+            badgeText = argv[++i];
+        } else if (a == "--visemes") { // what lip sync heard last: aa ih ou ee oh, the level, the formants
+            const auto& v = lip.visemes();
+            fprintf(stderr, "visemes aa %.2f ih %.2f ou %.2f ee %.2f oh %.2f, level %.1f dBFS, F1 %.0f F2 %.0f Hz\n", v[0], v[1], v[2], v[3], v[4], lip.level(),
+                    lip.f1(), lip.f2());
+        } else if (a == "--outlines") { // 1|0: the avatar's toon outlines
+            need(i, 1);
+            outlines = atoi(argv[++i]) != 0;
         } else if (a == "--autoexp") { // 1|0: set the exposure like the plugin does, at each --out
             need(i, 1);
             autoExp = atoi(argv[++i]) != 0;
@@ -987,6 +1151,10 @@ int main(int argc, char** argv) {
             f.exposure  = exposure;
             menu.update(menuDt, W, H, 1);
             f.menu = menu.hud();
+            if (!badgeText.empty()) { // as the plugin shows it while lip sync listens
+                drawBadge(badgePixels, badgeW, badgeH, badgeText, 1);
+                f.badge = {.pixels = &badgePixels, .w = badgeW, .h = badgeH, .serial = ++badgeSerial, .x = W - 12.f - badgeW / 2.f, .y = 12.f + badgeH / 2.f};
+            }
             if (menu.visible()) {
                 std::string items;
                 for (const auto& it : menu.page().items)
@@ -999,8 +1167,10 @@ int main(int argc, char** argv) {
                 f.avatar.morphs    = &anim.morphWeights();
                 f.avatar.materials = anim.materials();
                 f.avatar.shown     = &anim.partsShown();
+                f.avatar.batchMaterials = anim.batchMaterials();
                 f.avatar.transform = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1});
                 f.avatar.visible   = true;
+                f.avatar.outlines  = outlines;
                 f.avatar.sky       = sky;
                 f.avatar.bounce    = bounce;
             }

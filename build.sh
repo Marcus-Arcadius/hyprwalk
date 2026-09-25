@@ -31,8 +31,22 @@ echo ":: deriver:  $DRV"
 DEV="$(nix build --no-link --print-out-paths "$DRV^dev")"
 echo ":: headers:  $DEV"
 
+# PipeWire, for lip sync's microphone (src/mic.cpp): the headers of the one that runs, as for Hyprland. Without
+# them hypr3d builds without a microphone
+PW_PC=""
+if pw="$(pgrep -x pipewire | head -n1)" && [[ -n "$pw" ]]; then
+    PW_BIN="$(readlink -f "/proc/$pw/exe" 2>/dev/null || true)"
+    [[ -z "$PW_BIN" ]] && PW_BIN="$(tr '\0' '\n' < "/proc/$pw/cmdline" | head -n1)"
+    PW_DRV="$(nix-store --query --deriver "${PW_BIN%/bin/*}" 2>/dev/null || true)"
+    if [[ -n "$PW_DRV" && -e "$PW_DRV" ]] && PW_DEV="$(nix build --no-link --print-out-paths "$PW_DRV^dev" 2>/dev/null)"; then
+        PW_PC="$PW_DEV/lib/pkgconfig"
+        echo ":: pipewire: $PW_DEV"
+    fi
+fi
+[[ -z "$PW_PC" ]] && echo ":: pipewire: not found, so lip sync has no microphone"
+
 nix develop "$DRV^*" --command bash -c "
-    export PKG_CONFIG_PATH='$DEV/share/pkgconfig':\"\$PKG_CONFIG_PATH\"
+    export PKG_CONFIG_PATH='$DEV/share/pkgconfig':'$PW_PC':\"\$PKG_CONFIG_PATH\"
     make -j\$(nproc) $*
 "
 if [[ $# -eq 0 ]]; then

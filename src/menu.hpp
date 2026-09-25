@@ -18,6 +18,10 @@ namespace h3d {
         std::string page;                          // the page it opens, "" = an action
         int         action = 0, arg = 0, arg2 = 0; // the owner's
         bool        on = false, disabled = false;
+        bool        dial  = false; // a slider: picking it opens a dial (VRChat's radial puppet) that sets value
+        int         axes  = 1;     // 2: the dial is a stick (a two-axis puppet) that sets value and value2, -1..1 each
+        float       value = 0;     // 0..1
+        float       value2 = 0;    // a stick's y, up > 0
         bool        operator==(const SMenuItem&) const = default;
     };
 
@@ -34,10 +38,11 @@ namespace h3d {
     class CActionMenu {
       public:
         using FPages = std::function<SMenuPage(const std::string& id)>;
+        using FDial  = std::function<void(const SMenuItem& item, float value, float value2)>; // a slider's dial moved
         static constexpr int  SLOTS = 8;
         static constexpr auto ROOT  = "main";
 
-        explicit CActionMenu(FPages pages) : m_pages(std::move(pages)) {}
+        explicit CActionMenu(FPages pages, FDial dial = {}) : m_pages(std::move(pages)), m_onDial(std::move(dial)) {}
 
         bool open() const { // taking input
             return !m_stack.empty();
@@ -47,18 +52,23 @@ namespace h3d {
         }
         bool show(const std::string& page = ROOT); // a page other than the root goes back to it; false = no such page
         void hide();
-        void back();                   // on the root it closes
-        void move(float dx, float dy); // the cursor, logical pixels
-        void scroll(int steps);        // to the next item round that can be picked, or back
+        void back();                   // on the root it closes; on a dial, back to its page
+        void move(float dx, float dy); // the cursor, logical pixels; on a dial, where it points round sets the value, on
+                                       // a stick where it is
+        void scroll(int steps);        // to the next item round that can be picked, or back; on a dial, 5% a step
         // Pages, "More" and the middle are dealt with here; something for the owner to do comes back. The slot
-        // counts from 0 clockwise from the top, -1 = the middle.
+        // counts from 0 clockwise from the top, -1 = the middle. A slider opens its dial; on the dial, a pick goes
+        // back to the page, and a slot sets the value (the first 0%, the last 100%).
         std::optional<SMenuItem> pick(); // what the cursor points at
         std::optional<SMenuItem> pick(int slot);
         int                      highlighted() const; // the slot the cursor points at, -1 = the middle, -2 = nothing
         const SMenuPage&         page() const {       // as shown: up to eight items
             return m_page;
         }
-        std::string path() const; // "main/emotes", a later part of a long page as "emotes:2"
+        std::string path() const; // "main/emotes", a later part of a long page as "emotes:2", a dial "outfit/~Hue"
+        const SMenuItem* dial() const { // the slider being set, null = none
+            return m_dial ? &*m_dial : nullptr;
+        }
 
         // every frame: fades, asks for the page again and draws it anew when it looks different
         void      update(float dt, int outW, int outH, float scale);
@@ -70,7 +80,10 @@ namespace h3d {
             int         chunk = 0; // of a page with more than fits
         };
 
-        FPages                m_pages;
+        FPages                   m_pages;
+        FDial                    m_onDial;
+        std::optional<SMenuItem> m_dial; // a slider's dial over the page
+        float                    m_drawnValue = -1, m_drawnValue2 = 0;
         std::vector<SLevel>   m_stack; // empty = closed
         SMenuPage             m_page;
         float                 m_cx = 0, m_cy = 0; // the cursor, in radii from the middle, y down
@@ -90,6 +103,7 @@ namespace h3d {
         void refresh(); // m_page from the top of the stack
         void aimAt(int slot);
         void draw(int R, int highlight, int flash);
+        void setDial(float value, float value2 = 0); // the dial's value (a stick's two), and the owner told
     };
 
     // the plugin's actions
@@ -107,6 +121,8 @@ namespace h3d {
         MA_RESPAWN,
         MA_FACE_RESET,
         MA_EMOTE_STOP,
+        MA_SLIDER, // arg: the model's slider; its dial sets it
+        MA_LIPSYNC, // the microphone moves the mouth, or not
     };
 
     // what the pages show
@@ -115,8 +131,13 @@ namespace h3d {
         const CAvatarAnimator* anim    = nullptr;
         bool                   loading = false; // an avatar is on its way
         bool                   third = false, fly = false;
+        bool                   lipsync = false, microphone = true; // on; there is a microphone to have it on with
     };
 
     // main, emotes, expressions, gestures, left, right, both, outfit, parts, options
     SMenuPage actionPage(const std::string& id, const SActionState& s);
+
+    // a badge for a corner of the screen: a red dot and a few words on a dark rounded box, in cairo's premultiplied
+    // ARGB (the menu's), `scale` pixels a logical one; w and h what it came to
+    void drawBadge(std::vector<uint32_t>& pixels, int& w, int& h, const std::string& text, float scale);
 }

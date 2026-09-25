@@ -569,32 +569,89 @@ def model_importer(materials, human=None, internal=()):
 
 # ---------------------------------------------------------------- animation clips and controllers
 
-def clip_yaml(name, curves):
-    """a clip holding values for a frame: curves [(path, class id, attribute, value)]"""
+def clip_yaml(name, curves, pptr=(), vectors=()):
+    """a clip holding values for a frame: curves [(path, class id, attribute, value)], a value may be keys [(time,
+    value)] instead (straight lines between them); pptr [(path, class id, attribute, [(time, reference)])], the
+    object curves that put materials in slots; vectors [(kind, path, [(time, (x, y, z[, w]))])], a Transform's
+    'position', 'rotation' (a quaternion), 'euler' (degrees) or 'scale' curves, which Unity keeps as vectors and as
+    floats among the editor curves"""
     fc = []
+    stop = 0.016666668
+    vec = {'position': [], 'rotation': [], 'euler': [], 'scale': []}
+    editor = []
+    for kind, path, ks in vectors:
+        axes = 'xyzw' if kind == 'rotation' else 'xyz'
+        zero = {a: 0 for a in axes}
+        keys = [{'serializedVersion': 3, 'time': t, 'value': {a: v[i] for i, a in enumerate(axes)}, 'inSlope': zero,
+                 'outSlope': zero, 'tangentMode': 0, 'weightedMode': 0, 'inWeight': zero, 'outWeight': zero}
+                for t, v in ks]
+        vec[kind].append({'curve': {'serializedVersion': 2, 'm_Curve': keys, 'm_PreInfinity': 2, 'm_PostInfinity': 2,
+                                    'm_RotationOrder': 4}, 'path': path})
+        attr = {'position': 'm_LocalPosition', 'rotation': 'm_LocalRotation', 'euler': 'localEulerAnglesRaw',
+                'scale': 'm_LocalScale'}[kind]
+        for i, a in enumerate(axes):
+            editor.append({'curve': {'serializedVersion': 2, 'm_Curve': [
+                {'serializedVersion': 3, 'time': t, 'value': v[i], 'inSlope': 0, 'outSlope': 0, 'tangentMode': 0,
+                 'weightedMode': 0, 'inWeight': 0.33333334, 'outWeight': 0.33333334} for t, v in ks],
+                'm_PreInfinity': 2, 'm_PostInfinity': 2, 'm_RotationOrder': 4}, 'attribute': '%s.%s' % (attr, a),
+                'path': path, 'classID': 4, 'script': R(0), 'flags': 0})
+        stop = max(stop, ks[-1][0])
     for path, cid, attr, val in curves:
-        keys = [{'serializedVersion': 3, 'time': t, 'value': val, 'inSlope': 0, 'outSlope': 0,
-                 'tangentMode': 136 if cid == 137 else 103, 'weightedMode': 0,
-                 'inWeight': 0.33333334, 'outWeight': 0.33333334} for t in (0.0, 0.016666668)]
+        if isinstance(val, (list, tuple)):
+            ks = list(val)
+            keys = []
+            for i, (t, v) in enumerate(ks):
+                a = ks[max(i - 1, 0)]
+                b = ks[min(i + 1, len(ks) - 1)]
+                sin = (v - a[1]) / (t - a[0]) if t > a[0] else 0
+                sout = (b[1] - v) / (b[0] - t) if b[0] > t else 0
+                keys.append({'serializedVersion': 3, 'time': t, 'value': v, 'inSlope': sin, 'outSlope': sout,
+                             'tangentMode': 69, 'weightedMode': 0, 'inWeight': 0.33333334, 'outWeight': 0.33333334})
+            stop = max(stop, ks[-1][0])
+        else:
+            keys = [{'serializedVersion': 3, 'time': t, 'value': val, 'inSlope': 0, 'outSlope': 0,
+                     'tangentMode': 136 if cid == 137 else 103, 'weightedMode': 0,
+                     'inWeight': 0.33333334, 'outWeight': 0.33333334} for t in (0.0, 0.016666668)]
         fc.append({'curve': {'serializedVersion': 2, 'm_Curve': keys, 'm_PreInfinity': 2, 'm_PostInfinity': 2,
                              'm_RotationOrder': 4},
                    'attribute': attr, 'path': path, 'classID': cid, 'script': R(0), 'flags': 0})
+    pc = [{'curve': [{'time': t, 'value': r} for t, r in keys], 'attribute': attr, 'path': path, 'classID': cid,
+           'script': R(0), 'flags': 2} for path, cid, attr, keys in pptr]
     body = base(m_Name=name, serializedVersion=7, m_Legacy=0, m_Compressed=0, m_UseHighQualityCurve=1,
-                m_RotationCurves=[], m_CompressedRotationCurves=[], m_EulerCurves=[], m_PositionCurves=[],
-                m_ScaleCurves=[], m_FloatCurves=fc, m_PPtrCurves=[], m_SampleRate=60, m_WrapMode=0,
+                m_RotationCurves=vec['rotation'], m_CompressedRotationCurves=[], m_EulerCurves=vec['euler'],
+                m_PositionCurves=vec['position'], m_ScaleCurves=vec['scale'], m_FloatCurves=fc, m_PPtrCurves=pc,
+                m_SampleRate=60, m_WrapMode=0,
                 m_Bounds={'m_Center': V(0, 0, 0), 'm_Extent': V(0, 0, 0)},
                 m_ClipBindingConstant={'genericBindings': [], 'pptrCurveMapping': []},
                 m_AnimationClipSettings={'serializedVersion': 2, 'm_AdditiveReferencePoseClip': R(0),
                                          'm_AdditiveReferencePoseTime': 0, 'm_StartTime': 0,
-                                         'm_StopTime': 0.016666668, 'm_OrientationOffsetY': 0, 'm_Level': 0,
+                                         'm_StopTime': stop, 'm_OrientationOffsetY': 0, 'm_Level': 0,
                                          'm_CycleOffset': 0, 'm_HasAdditiveReferencePose': 0, 'm_LoopTime': 0,
                                          'm_LoopBlend': 0, 'm_LoopBlendOrientation': 0,
                                          'm_LoopBlendPositionY': 0, 'm_LoopBlendPositionXZ': 0,
                                          'm_KeepOriginalOrientation': 0, 'm_KeepOriginalPositionY': 1,
                                          'm_KeepOriginalPositionXZ': 0, 'm_HeightFromFeet': 0, 'm_Mirror': 0},
-                m_EditorCurves=fc, m_EulerEditorCurves=[], m_HasGenericRootTransform=0,
+                m_EditorCurves=fc + [e for e in editor if not e['attribute'].startswith('localEuler')],
+                m_EulerEditorCurves=[e for e in editor if e['attribute'].startswith('localEuler')],
+                m_HasGenericRootTransform=0,
                 m_HasMotionFloatCurves=0, m_Events=[])
     return HEAD + doc(74, 7400000, 'AnimationClip', body)
+
+
+def blend_tree_yaml(name, param, children, typ=0, param_y=''):
+    """a blend tree asset: children [(clip guid, threshold, or (x, y) in a 2D tree)]; typ 0 1D, 1 2D simple
+    directional, 2 2D freeform directional, 3 2D freeform cartesian, 4 direct (param: the children's parameter)"""
+    kids = []
+    for guid, at in children:
+        pos = at if isinstance(at, tuple) else (0, 0)
+        kids.append({'serializedVersion': 2, 'm_Motion': R(7400000, guid, 2),
+                     'm_Threshold': 0 if isinstance(at, tuple) else at, 'm_Position': {'x': pos[0], 'y': pos[1]},
+                     'm_TimeScale': 1, 'm_CycleOffset': 0, 'm_DirectBlendParameter': param, 'm_Mirror': 0})
+    th = [k['m_Threshold'] for k in kids] or [0]
+    body = base(m_Name=name, m_Childs=kids, m_BlendParameter=param, m_BlendParameterY=param_y or param,
+                m_MinThreshold=min(th), m_MaxThreshold=max(th), m_UseAutomaticThresholds=0,
+                m_NormalizedBlendValues=0, m_BlendType=typ)
+    return HEAD + doc(206, 20600000, 'BlendTree', body)
 
 
 GESTURE_STATES = ['Fist', 'Open', 'Point', 'Victory', 'RockNRoll', 'HandGun', 'ThumbsUp']
@@ -660,8 +717,10 @@ class Controller:
         self.docs.append((114, tid, 'MonoBehaviour', body))
         return tid
 
-    def layer(self, name, sm, weight=1.0):
-        self.layers.append({'serializedVersion': 5, 'm_Name': name, 'm_StateMachine': R(sm), 'm_Mask': R(0),
+    def layer(self, name, sm, weight=1.0, mask=None):
+        """mask: an AvatarMask's guid (VRChat's SDK's, say)"""
+        self.layers.append({'serializedVersion': 5, 'm_Name': name, 'm_StateMachine': R(sm),
+                            'm_Mask': R(31900000, mask, 2) if mask else R(0),
                             'm_Motions': [], 'm_Behaviours': [], 'm_BlendingMode': 0, 'm_SyncedLayerIndex': -1,
                             'm_DefaultWeight': weight, 'm_IKPass': 0, 'm_SyncedLayerAffectsTiming': 0,
                             'm_Controller': R(9100000)})
@@ -677,6 +736,13 @@ class Controller:
             sts.append(s)
             anys.append(self.transition(s, [(6, p, g)], self_ok))
         self.layer(side + ' Hand', self.machine(side + ' Hand', sts, idle, anys))
+
+    def motion_time(self, name, param, clip):
+        """a layer playing a clip at the time a float parameter gives (a radial puppet's)"""
+        s, b = self.state(name, clip)
+        b['m_TimeParameterActive'] = 1
+        b['m_TimeParameter'] = param
+        self.layer(name, self.machine(name, [s], s))
 
     def toggle(self, name, param, on_clip, off_clip):
         off, offb = self.state(name + ' Off', off_clip)
@@ -766,10 +832,10 @@ def physbone(root_tf, colliders, radius=0.0, pull=0.2, spring=0.2, stiffness=0.2
                 resetWhenDisabled=0)
 
 
-def pb_collider(shape, radius, height, pos, rot=(0, 0, 0, 1)):
-    """a VRC PhysBone Collider: shape 0 sphere, 1 capsule, 2 plane"""
+def pb_collider(shape, radius, height, pos, rot=(0, 0, 0, 1), inside=0):
+    """a VRC PhysBone Collider: shape 0 sphere, 1 capsule, 2 plane (its normal its Y); inside 1: it keeps bones in"""
     return dict(m_Enabled=1, m_EditorHideFlags=0, m_Script=R(u.COLLIDER_FID, u.DYN_GUID, 3), m_Name='',
-                m_EditorClassIdentifier='', rootTransform=R(0), shapeType=shape, insideBounds=0, radius=radius,
+                m_EditorClassIdentifier='', rootTransform=R(0), shapeType=shape, insideBounds=inside, radius=radius,
                 height=height, position=V(*pos), rotation=Q(*rot), bonesAsSpheres=0)
 
 
@@ -789,7 +855,17 @@ MA_GUID = {'MergeArmature': '2df373bf91cf30b4bbd495e11cb1a2ec', 'BoneProxy': '42
            'MoveTo': '4e6bb6a99e499d2489ccf296662fa3cd', 'MenuItem': '3b29d45007c5493d926d2cd45a489529',
            'ObjectToggle': 'a162bb8ec7e24a5abcf457887f1df3fa', 'MergeAnimator': '1bb122659f724ebf85fe095ac02dc339',
            'MenuInstaller': '7ef83cb0c23d4d7c9d41021e544a1978', 'Parameters': '71a96d4ea0c344f39e277d82035bf9bd',
-           'ShapeChanger': '2db441f589c3407bb6fb5f02ff8ab541', 'MenuGroup': '97e46a47dd8a425eb4ce9411defe313d'}
+           'ShapeChanger': '2db441f589c3407bb6fb5f02ff8ab541', 'MenuGroup': '97e46a47dd8a425eb4ce9411defe313d',
+           'MaterialSetter': '0adf335711644e34b6c635e94ae61fa7', 'MaterialSwap': 'b259b73280ead4e4fbbdafc5e29175d1',
+           'BlendshapeSync': '6fd7cab7d93b403280f2f9da978d8a4f', 'ReplaceObject': '7e949680c0864ee7b441d9b2c93b890b',
+           'VisibleHeadAccessory': '33dac8cfeaeb4c399ddd90597f849f70',
+           'MeshSettings': '560fdafd46c74b2db6422fdf0e7f2363', 'PlatformFilter': '8c8a67d5c01849629fa90c3b2eded93f',
+           'ScaleAdjuster': '09a660aa9d4e47d992adcac5a05dd808', 'MeshCutter': '762726b8618cac7419e39bdc2b572b3d',
+           'VertexFilterByAxis': '660848d04d7443b5b6fcfb627e6be5ea', 'VertexFilterByBone': 'f8e2c9a1b3d44c6d9a7e5f2c1b8d3e4f',
+           'VertexFilterByMask': '96a7b00b1dae4a02b61b29bf02241063', 'VertexFilterByShape': 'da7788c69fae9ff4abae088a0dc92c5b',
+           'VertexFilterByUVTile': '8c38d6a064dbe9b91f24ee30e85c3c4f', 'MergeBlendTree': '229dd561ca024a6588e388160921a70f',
+           'MenuInstallTarget': '1fad1419b52a42ae89b0df52eb861e47', 'FloorAdjuster': 'ba18e6eae93342fd8774b3f3f132928a',
+           'GlobalCollider': '49bb23f95a7baca4186efa68bc5891b6', 'WorldFixedObject': '0e2d9f1d69e34b92a96e6cc162770fad'}
 
 
 def ma(kind, script_guid=None, **kw):
@@ -802,11 +878,12 @@ def ma_ref(path, target=0):
     return {'referencePath': path, 'targetObject': R(target)}
 
 
-def ma_item(name='', param='', value=1, default=0, auto=1, kind=102, saved=1, synced=1):
-    """an MA Menu Item: kind 102 toggle, 101 button, 103 sub menu (of its children: MenuSource 1)"""
+def ma_item(name='', param='', value=1, default=0, auto=1, kind=102, saved=1, synced=1, subparams=()):
+    """an MA Menu Item: kind 102 toggle, 101 button, 103 sub menu (of its children: MenuSource 1), 203 a radial
+    puppet (of the float subparams[0])"""
     return ma('MenuItem', Control={
         'name': name, 'icon': R(0), 'type': kind, 'parameter': {'name': param}, 'value': value, 'style': 0,
-        'subMenu': R(0), 'subParameters': [], 'labels': []}, MenuSource=1,
+        'subMenu': R(0), 'subParameters': [{'name': p} for p in subparams], 'labels': []}, MenuSource=1,
         menuSource_otherObjectChildren=R(0), isSynced=synced, isSaved=saved, isDefault=default,
         automaticValue=auto, label='')
 

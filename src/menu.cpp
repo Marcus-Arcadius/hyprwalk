@@ -126,6 +126,7 @@ namespace h3d {
                 stack.push_back({part, chunk});
         }
         m_stack = std::move(stack);
+        m_dial.reset();
         m_cx = m_cy = 0;
         m_flash     = 0;
         refresh();
@@ -134,11 +135,30 @@ namespace h3d {
 
     void CActionMenu::hide() {
         m_stack.clear();
+        m_dial.reset();
+    }
+
+    void CActionMenu::setDial(float value, float value2) {
+        if (!m_dial)
+            return;
+        if (m_dial->axes == 2) { // a stick: in the circle
+            const float r = std::hypot(value, value2);
+            m_dial->value  = r > 1 ? value / r : value;
+            m_dial->value2 = r > 1 ? value2 / r : value2;
+        } else
+            m_dial->value = std::clamp(value, 0.f, 1.f);
+        if (m_onDial)
+            m_onDial(*m_dial, m_dial->value, m_dial->value2);
     }
 
     void CActionMenu::back() {
         if (m_stack.empty())
             return;
+        if (m_dial) { // the dial closes, its page stays
+            m_dial.reset();
+            m_cx = m_cy = 0;
+            return;
+        }
         if (m_stack.back().chunk > 0)
             --m_stack.back().chunk;
         else
@@ -158,6 +178,22 @@ namespace h3d {
             m_cx *= CURSOR_MAX / r;
             m_cy *= CURSOR_MAX / r;
         }
+        // a stick is where the cursor is, all the way out at the edge; a dial follows the cursor round from the top,
+        // clockwise, and stops at the ends rather than jump across the top
+        if (m_dial && m_dial->axes == 2) {
+            const float x = m_cx / CURSOR_MAX, y = -m_cy / CURSOR_MAX;
+            if (x != m_dial->value || y != m_dial->value2)
+                setDial(x, y);
+        } else if (m_dial && std::hypot(m_cx, m_cy) >= INNER) {
+            float a = std::atan2(m_cx, -m_cy);
+            if (a < 0)
+                a += TAU;
+            float v = a / TAU;
+            if (std::abs(v - m_dial->value) > 0.5f)
+                v = m_dial->value < 0.5f ? 0.f : 1.f;
+            if (v != m_dial->value)
+                setDial(v);
+        }
     }
 
     int CActionMenu::highlighted() const {
@@ -165,6 +201,8 @@ namespace h3d {
             return -2;
         if (std::hypot(m_cx, m_cy) < INNER)
             return -1;
+        if (m_dial)
+            return -2;
         const int n = (int)m_page.items.size();
         if (n == 0)
             return -2;
@@ -186,6 +224,11 @@ namespace h3d {
     }
 
     void CActionMenu::scroll(int steps) {
+        if (open() && m_dial) {
+            if (m_dial->axes != 2) // (a stick has nothing to go round)
+                setDial(std::round((m_dial->value + 0.05f * steps) * 20.f) / 20.f);
+            return;
+        }
         const int n = (int)m_page.items.size();
         if (!open() || n == 0 || steps == 0 || std::ranges::all_of(m_page.items, &SMenuItem::disabled))
             return;
@@ -205,6 +248,10 @@ namespace h3d {
         if (!open())
             return std::nullopt;
         refresh();
+        if (m_dial) { // done with it
+            back();
+            return std::nullopt;
+        }
         return pick(highlighted());
     }
 
@@ -216,9 +263,34 @@ namespace h3d {
             back();
             return std::nullopt;
         }
+        if (m_dial) { // the keys set it in steps: the first 0%, the last 100%; a stick all the way out, round from the top
+            if (slot >= 0 && slot < SLOTS) {
+                if (m_dial->axes == 2) {
+                    const float t = slot * TAU / SLOTS;
+                    setDial(std::sin(t), std::cos(t));
+                    m_cx = CURSOR_MAX * m_dial->value;
+                    m_cy = -CURSOR_MAX * m_dial->value2;
+                } else
+                    setDial((float)slot / (SLOTS - 1));
+            }
+            return std::nullopt;
+        }
         if (slot < 0 || slot >= (int)m_page.items.size() || m_page.items[slot].disabled)
             return std::nullopt;
         const SMenuItem item = m_page.items[slot];
+        if (item.dial) { // its dial, the cursor where its value is
+            m_dial = item;
+            if (item.axes == 2) {
+                m_cx = CURSOR_MAX * item.value;
+                m_cy = -CURSOR_MAX * item.value2;
+            } else {
+                const float t = item.value * TAU, r = 0.66f;
+                m_cx          = r * std::sin(t);
+                m_cy          = -r * std::cos(t);
+            }
+            m_flash = 0;
+            return std::nullopt;
+        }
         if (item.page == MORE)
             ++m_stack.back().chunk;
         else if (!item.page.empty()) {
@@ -246,7 +318,15 @@ namespace h3d {
             m_stack.pop_back();
         if (m_stack.empty()) {
             m_page = {};
+            m_dial.reset();
             return;
+        }
+        if (m_dial) { // the slider as the owner has it now; gone, the dial goes
+            const auto it = std::ranges::find_if(page.items, [&](const SMenuItem& i) { return i.dial && i.action == m_dial->action && i.arg == m_dial->arg; });
+            if (it == page.items.end())
+                m_dial.reset();
+            else
+                m_dial = *it;
         }
         SLevel&   top = m_stack.back();
         const int n   = (int)page.items.size();
@@ -277,6 +357,8 @@ namespace h3d {
             if (l.chunk > 0)
                 out += std::format(":{}", l.chunk + 1);
         }
+        if (m_dial)
+            out += "/~" + m_dial->label;
         return out;
     }
 
@@ -297,9 +379,11 @@ namespace h3d {
         if (open())
             refresh();
         // closing, it fades out as it was
-        const int highlight = open() ? highlighted() : m_drawnHighlight;
-        const int flash     = open() && m_flash > 0 ? (int)std::ceil(m_flash * 4) : 0;
-        if (R != m_drawnR || highlight != m_drawnHighlight || flash != m_drawnFlash || m_page != m_drawnPage)
+        const int   highlight = open() ? highlighted() : m_drawnHighlight;
+        const int   flash     = open() && m_flash > 0 ? (int)std::ceil(m_flash * 4) : 0;
+        const float dial      = m_dial ? m_dial->value : -1.f, dial2 = m_dial ? m_dial->value2 : 0.f;
+        if (R != m_drawnR || highlight != m_drawnHighlight || flash != m_drawnFlash || m_page != m_drawnPage ||
+            (open() && (dial != m_drawnValue || dial2 != m_drawnValue2)))
             draw(R, highlight, flash);
     }
 
@@ -327,7 +411,7 @@ namespace h3d {
     void CActionMenu::draw(int R, int highlight, int flash) {
         const int    M = (int)std::ceil(0.12f * R), size = 2 * (R + M); // M: room for the shadow
         const double C = R + M, Ro = R, Ri = INNER * R, gap = std::max(2.0, 0.02 * R), Rin = Ri + gap;
-        const int    n = (int)m_page.items.size();
+        const int    n = m_dial ? 0 : (int)m_page.items.size(); // a dial: one ring
 
         m_pixels.assign((size_t)size * size, 0);
         cairo_surface_t* surface = cairo_image_surface_create_for_data((unsigned char*)m_pixels.data(), CAIRO_FORMAT_ARGB32, size, size, size * 4);
@@ -398,6 +482,51 @@ namespace h3d {
                 cairo_new_path(cr);
             }
 
+            // a stick: a cross through the middle, the circle it goes out to, and a knob where it is
+            if (m_dial && m_dial->axes == 2) {
+                const double rs = CURSOR_MAX * Ro, kx = C + rs * m_dial->value, ky = C - rs * m_dial->value2;
+                cairo_set_line_width(cr, std::max(1.0, 0.008 * R));
+                cairo_move_to(cr, C - rs, C);
+                cairo_line_to(cr, C + rs, C);
+                cairo_move_to(cr, C, C - rs);
+                cairo_line_to(cr, C, C + rs);
+                cairo_set_source_rgba(cr, 1, 1, 1, 0.3);
+                cairo_stroke(cr);
+                cairo_arc(cr, C, C, rs, 0, TAU);
+                cairo_set_source_rgba(cr, ACCENT.r, ACCENT.g, ACCENT.b, 0.5);
+                cairo_stroke(cr);
+                cairo_move_to(cr, C, C);
+                cairo_line_to(cr, kx, ky);
+                cairo_set_source_rgba(cr, ACCENT.r, ACCENT.g, ACCENT.b, 0.8);
+                cairo_set_line_width(cr, std::max(1.5, 0.014 * R));
+                cairo_stroke(cr);
+            } else if (m_dial) { // a slider's dial: filled clockwise from the top as far as its value, with a knob there and a tick a quarter
+                const double v = std::clamp(m_dial->value, 0.f, 1.f), top = -HALF_TURN / 2, end = top + v * TAU;
+                if (v > 0) {
+                    cairo_new_path(cr);
+                    cairo_arc(cr, C, C, Ro, top, end);
+                    cairo_arc_negative(cr, C, C, Rin, end, top);
+                    cairo_close_path(cr);
+                    cairo_set_source_rgba(cr, ACCENT.r, ACCENT.g, ACCENT.b, 0.42);
+                    cairo_fill(cr);
+                }
+                cairo_set_line_width(cr, std::max(1.0, 0.008 * R));
+                for (int q = 0; q < 4; ++q) {
+                    const double a = top + q * TAU / 4;
+                    cairo_move_to(cr, C + (Ro - 0.06 * R) * std::cos(a), C + (Ro - 0.06 * R) * std::sin(a));
+                    cairo_line_to(cr, C + Ro * std::cos(a), C + Ro * std::sin(a));
+                }
+                cairo_set_source_rgba(cr, 1, 1, 1, 0.35);
+                cairo_stroke(cr);
+                const double rk = (Ro + Rin) / 2;
+                cairo_arc(cr, C + rk * std::cos(end), C + rk * std::sin(end), 0.045 * R, 0, TAU);
+                cairo_set_source_rgba(cr, 1, 1, 1, 0.95);
+                cairo_fill_preserve(cr);
+                cairo_set_source_rgba(cr, ACCENT.r, ACCENT.g, ACCENT.b, 1);
+                cairo_set_line_width(cr, std::max(1.5, 0.012 * R));
+                cairo_stroke(cr);
+            }
+
             // the middle: where it is, and back
             cairo_arc(cr, C, C, Ri, 0, TAU);
             cairo_set_source_rgba(cr, 0.04, 0.05, 0.06, 0.90);
@@ -410,13 +539,27 @@ namespace h3d {
             cairo_set_line_width(cr, std::max(1.0, 0.006 * R));
             cairo_stroke(cr);
             {
-                const bool   root  = m_stack.size() <= 1 && (m_stack.empty() || m_stack[0].chunk == 0);
-                const SBlock title = block(ctx.get(), m_page.title, "Sans", 0.072 * R, true, 1.7 * Ri, 2);
-                const SBlock sub   = block(ctx.get(), root ? "× Close" : "‹ Back", "Sans", 0.055 * R, false, 1.7 * Ri, 1);
+                const bool        root = m_stack.size() <= 1 && (m_stack.empty() || m_stack[0].chunk == 0);
+                const std::string head = !m_dial              ? m_page.title
+                                         : m_dial->axes == 2 ? std::format("{}\n{:+d} {:+d}", m_dial->label, (int)std::lround(m_dial->value * 100), (int)std::lround(m_dial->value2 * 100))
+                                                             : std::format("{}\n{}%", m_dial->label, (int)std::lround(m_dial->value * 100));
+                const SBlock      title = block(ctx.get(), head, "Sans", 0.072 * R, true, 1.7 * Ri, 2);
+                const SBlock      sub   = block(ctx.get(), root && !m_dial ? "× Close" : "‹ Back", "Sans", 0.055 * R, false, 1.7 * Ri, 1);
                 // the cursor rests in the middle: between the two, not on them
                 const double g = cursorRadius(R) + std::max(2.0, 0.014 * R);
                 paint(cr, title, C, C - g - (title.ink.y + title.ink.height), WHITE, 0.96);
                 paint(cr, sub, C, C + g - sub.ink.y, WHITE, 0.7);
+            }
+
+            if (m_dial && m_dial->axes == 2) { // the stick's knob, over the middle too
+                const double rs = CURSOR_MAX * Ro;
+                cairo_new_path(cr); // (not from where the text ended)
+                cairo_arc(cr, C + rs * m_dial->value, C - rs * m_dial->value2, 0.05 * R, 0, TAU);
+                cairo_set_source_rgba(cr, 1, 1, 1, 0.95);
+                cairo_fill_preserve(cr);
+                cairo_set_source_rgba(cr, ACCENT.r, ACCENT.g, ACCENT.b, 1);
+                cairo_set_line_width(cr, std::max(1.5, 0.012 * R));
+                cairo_stroke(cr);
             }
 
             // the items: an icon, the label and what it's set to, in the middle of the wedge
@@ -451,7 +594,7 @@ namespace h3d {
                 const SBlock num = block(ctx.get(), std::to_string(i + 1), "Sans", 0.046 * R, true, 0.12 * R, 1);
                 paint(cr, num, C + nr * std::sin(na), C - nr * std::cos(na) - num.height / 2, WHITE, 0.4 * a);
             }
-            if (n == 0) {
+            if (n == 0 && !m_dial) {
                 const SBlock b = block(ctx.get(), "Nothing here", "Sans", 0.06 * R, false, 0.6 * R, 1);
                 paint(cr, b, C, C - rm - b.height / 2, WHITE, 0.5);
             }
@@ -465,6 +608,8 @@ namespace h3d {
         m_drawnHighlight = highlight;
         m_drawnFlash     = flash;
         m_drawnPage      = m_page;
+        m_drawnValue     = m_dial ? m_dial->value : -1.f;
+        m_drawnValue2    = m_dial ? m_dial->value2 : 0.f;
         ++m_serial;
     }
 
@@ -618,7 +763,7 @@ namespace h3d {
                     faces.disabled = true;
                 }
                 hands.hint = gesturesHint(*a);
-                if (m->toggles.empty() && m->parts.size() < 2) {
+                if (m->toggles.empty() && m->sliders.empty() && m->parts.size() < 2) {
                     outfit.hint     = "nothing to change";
                     outfit.disabled = true;
                 }
@@ -683,7 +828,21 @@ namespace h3d {
                                        .arg    = (int)i,
                                        .on     = a->toggle((int)i)});
                 }
-                if (m->toggles.empty())
+                for (size_t i = 0; i < m->sliders.size(); ++i) {
+                    const float v = a->slider((int)i), v2 = a->sliderY((int)i);
+                    const bool  two = m->sliders[i].grid > 0;
+                    p.items.push_back({.label  = pretty(m->sliders[i].name),
+                                       .hint   = two ? std::format("{:+d} {:+d}", (int)std::lround(v * 100), (int)std::lround(v2 * 100))
+                                                     : std::format("{}%", (int)std::lround(v * 100)),
+                                       .icon   = iconFor(m->sliders[i].name, OUTFIT_ICONS, two ? "🕹️" : "🎚️"),
+                                       .action = MA_SLIDER,
+                                       .arg    = (int)i,
+                                       .dial   = true,
+                                       .axes   = two ? 2 : 1,
+                                       .value  = v,
+                                       .value2 = v2});
+                }
+                if (m->toggles.empty() && m->sliders.empty())
                     addParts(p, *m, *a);
                 else if (m->parts.size() > 1)
                     p.items.push_back({.label = "Parts", .icon = "🧩", .page = "parts"});
@@ -704,11 +863,64 @@ namespace h3d {
                  .on       = a && !m->springs.empty() && a->physics(),
                  .disabled = !a || m->springs.empty()},
                 {.label = "Fly", .hint = s.fly ? "on" : "off", .icon = "🕊️", .action = MA_FLY, .on = s.fly},
+                {.label    = "Lip sync",
+                 .hint     = !s.microphone ? "no microphone" : s.lipsync ? "listening" : "off",
+                 .icon     = "🎤",
+                 .action   = MA_LIPSYNC,
+                 .on       = s.lipsync,
+                 .disabled = !s.microphone && !s.lipsync},
                 {.label = "Respawn", .icon = "📍", .action = MA_RESPAWN},
                 {.label = "Reset face", .hint = "and hands", .icon = "😶", .action = MA_FACE_RESET, .disabled = !a},
                 {.label = "Stop emote", .icon = "⏹️", .action = MA_EMOTE_STOP, .disabled = !a || a->emote() < 0},
             };
         }
         return p;
+    }
+
+    void drawBadge(std::vector<uint32_t>& pixels, int& w, int& h, const std::string& text, float scale) {
+        const double px = 15.0 * scale, pad = 7.0 * scale, dot = 5.0 * scale;
+        // measured first, on a scratch surface
+        cairo_surface_t* scratch = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+        cairo_t*         mcr     = cairo_create(scratch);
+        double           tw = 0, th = 0;
+        {
+            std::unique_ptr<PangoContext, SUnref> ctx(pango_cairo_create_context(mcr));
+            const SBlock                          b = block(ctx.get(), text, "sans", px, true, 4000, 1);
+            tw                                      = b.layout ? b.ink.width : 0;
+            th                                      = b.height;
+        }
+        cairo_destroy(mcr);
+        cairo_surface_destroy(scratch);
+        w = (int)std::ceil(pad * 3 + dot * 2 + tw);
+        h = (int)std::ceil(std::max(th, dot * 2) + pad * 2);
+        pixels.assign((size_t)w * h, 0);
+        cairo_surface_t* surface = cairo_image_surface_create_for_data((unsigned char*)pixels.data(), CAIRO_FORMAT_ARGB32, w, h, w * 4);
+        cairo_t*         cr      = cairo_create(surface);
+        {
+            std::unique_ptr<PangoContext, SUnref> ctx(pango_cairo_create_context(cr));
+            cairo_font_options_t*                 fo = cairo_font_options_create();
+            cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_GRAY);
+            pango_cairo_context_set_font_options(ctx.get(), fo);
+            cairo_font_options_destroy(fo);
+            const double r = h / 2.0;
+            cairo_new_path(cr);
+            cairo_arc(cr, r, r, r, HALF_TURN / 2, 3 * HALF_TURN / 2);
+            cairo_arc(cr, w - r, r, r, -HALF_TURN / 2, HALF_TURN / 2);
+            cairo_close_path(cr);
+            cairo_set_source_rgba(cr, 0.06, 0.07, 0.09, 0.72);
+            cairo_fill(cr);
+            cairo_new_path(cr);
+            cairo_arc(cr, pad + dot, h / 2.0, dot, 0, TAU);
+            cairo_set_source_rgb(cr, 0.93, 0.22, 0.2);
+            cairo_fill(cr);
+            const SBlock b = block(ctx.get(), text, "sans", px, true, tw + 2, 1);
+            if (b.layout) {
+                cairo_set_source_rgb(cr, WHITE.r, WHITE.g, WHITE.b);
+                cairo_move_to(cr, pad * 2 + dot * 2 - b.ink.x, (h - b.height) / 2.0);
+                pango_cairo_show_layout(cr, b.layout.get());
+            }
+        }
+        cairo_destroy(cr);
+        cairo_surface_destroy(surface);
     }
 }

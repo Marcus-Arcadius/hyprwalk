@@ -2,14 +2,21 @@
 # regress.sh: converts the test avatars with the working copy's tools/unity2hypr3d.py and with
 # another version of it (HEAD's by default), and compares what the two write.
 #
-#   tools/test/regress.sh [--base REV|FILE] [--robot PATH] [--proj DIR] [--booth DIR] [--out DIR] [--keep]
-#                         [--shots] [CASE...]
+#   tools/test/regress.sh [--base REV|FILE] [--robot PATH] [--items DIR] [--proj DIR] [--booth DIR]
+#                         [--out DIR] [--keep] [--shots] [CASE...]
 #
 #   --base REV|FILE  the converter to compare against: a git revision (default HEAD) or a file
 #   --robot PATH     also convert the VRChat SDK's robot sample, "Avatar Dynamics Robot Avatar
 #                    PC.unity" in the SDK's Samples/Dynamics/Robot Avatar (or set HYPR3D_ROBOT).
 #                    It is VRChat's, so it isn't in this repo; it's in com.vrchat.avatars-*.zip
 #                    from https://github.com/vrchat/packages/releases
+#   --items DIR      also convert three free Booth items, as downloaded into DIR (or set
+#                    HYPR3D_ITEMS): 止丸式初音ミクNT_ver1.1.2.zip (booth.pm/items/3226395) alone
+#                    (MikuNT) and with the dances VRSuya_Doodle_Dance_Released_260709.zip
+#                    (booth.pm/items/6249275) and VRSuya_Loli_Kami_Requiem_Released_260709.zip
+#                    (booth.pm/items/5157852) as emotes (MikuDances), and the dances on SynthChan
+#                    (SynthDances). They are their makers' under their terms, so they aren't in
+#                    this repo; a missing one leaves out its cases
 #   --proj DIR       the synthetic Unity project to use; synth/make.py makes it there if it's missing
 #   --booth DIR      the Booth-style test packages to use; synth/booth.py makes them there if missing
 #   --out DIR        where everything goes (default: a new temporary directory, removed when
@@ -29,11 +36,12 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 SYN="$REPO/tools/test/synth"
 BLENDER=(blender -b --factory-startup --python-exit-code 1)
-BASE=HEAD ROBOT="${HYPR3D_ROBOT:-}" PROJ="" BOOTH="" OUT="" KEEP=0 SHOTS=0 ONLY=()
+BASE=HEAD ROBOT="${HYPR3D_ROBOT:-}" ITEMS="${HYPR3D_ITEMS:-}" PROJ="" BOOTH="" OUT="" KEEP=0 SHOTS=0 ONLY=()
 while (($#)); do
     case "$1" in
         --base) BASE="$2"; shift 2 ;;
         --robot) ROBOT="$2"; shift 2 ;;
+        --items) ITEMS="$2"; shift 2 ;;
         --proj) PROJ="$2"; shift 2 ;;
         --booth) BOOTH="$2"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
@@ -73,7 +81,7 @@ A="$PROJ/Assets/Synth"
 
 # the Booth-style packages
 BOOTH="${BOOTH:-$W/booth}"
-if [[ ! -f "$BOOTH/Hairpin_v1.0.unitypackage" ]]; then
+if [[ ! -f "$BOOTH/SynthChan_Gimmicks_VRCFury_v1.0.unitypackage" ]]; then
     echo "making the Booth-style packages in $BOOTH"
     mkdir -p "$BOOTH"
     "${BLENDER[@]}" -P "$SYN/booth.py" -- "$BOOTH" > "$W/booth.log" 2>&1 || { tail -n 30 "$W/booth.log"; die "booth.py failed"; }
@@ -102,11 +110,29 @@ add BoothCardigan VRCF "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_C
 add BoothHairpin VRCF "$B/SynthChan_v1.0.unitypackage" --outfit "$B/Hairpin_v1.0.unitypackage"
 add BoothMix VRCF "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_OnePiece_v1.0.unitypackage" \
     --outfit "$B/SynthChan_Cardigan_VRCFury_v1.0.unitypackage" --outfit "$B/Hairpin_v1.0.unitypackage"
+add BoothAccessories MA "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_Accessories_MA_v1.0.unitypackage"
+add BoothGimmicks VRCF "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_Gimmicks_VRCFury_v1.0.unitypackage"
 # pairs of cases whose GLBs must be the same (the zip holds the package)
 SAME=("BoothZip BoothChan")
 if [[ -n "$ROBOT" ]]; then
     [[ -f "$ROBOT" ]] || die "no robot sample at $ROBOT"
     add robot strict "$ROBOT"
+fi
+if [[ -n "$ITEMS" ]]; then
+    [[ -d "$ITEMS" ]] || die "no folder $ITEMS"
+    I="$(cd "$ITEMS" && pwd)"
+    MIKU="$I/止丸式初音ミクNT_ver1.1.2.zip"
+    DANCES=()
+    for d in VRSuya_Doodle_Dance_Released_260709.zip VRSuya_Loli_Kami_Requiem_Released_260709.zip; do
+        if [[ -f "$I/$d" ]]; then DANCES+=(--outfit "$I/$d"); else echo "note: no $d in $I"; fi
+    done
+    if [[ -f "$MIKU" ]]; then
+        add MikuNT strict "$MIKU"
+        ((${#DANCES[@]})) && add MikuDances MA "$MIKU" "${DANCES[@]}"
+    else
+        echo "note: no ${MIKU##*/} in $I"
+    fi
+    ((${#DANCES[@]})) && add SynthDances MA "$B/SynthChan_v1.0.unitypackage" "${DANCES[@]}"
 fi
 
 picked() {
@@ -183,6 +209,11 @@ for d in (a, b):
 sys.exit(a != b)
 PY
     cmp -s "$W/base/$n.glb" "$W/new/$n.glb" || what+=("GLB bytes")
+    # the emote files the converter writes next to the GLB
+    for e in "$W"/base/"$n".*.vrma "$W"/new/"$n".*.vrma; do
+        [[ -f "$e" ]] || continue
+        cmp -s "$W/base/${e##*/}" "$W/new/${e##*/}" || { what+=("emote files"); break; }
+    done
     if ((${#what[@]} == 0)); then
         printf '%-14s %-6s same\n' "$n" "$kind"
         continue

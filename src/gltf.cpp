@@ -360,6 +360,180 @@ namespace h3d::gltf {
                 d->numbers("transform", m.detailXf, 6);
             }
 
+            static eStencilComp stencilComp(const SJson* v, eStencilComp fallback) {
+                static constexpr std::pair<std::string_view, eStencilComp> NAMES[] = {
+                    {"never", SC_NEVER},     {"less", SC_LESS},   {"equal", SC_EQUAL},   {"lequal", SC_LEQUAL},
+                    {"greater", SC_GREATER}, {"notequal", SC_NOTEQUAL}, {"gequal", SC_GEQUAL}, {"always", SC_ALWAYS}};
+                if (v && v->type == SJson::STRING)
+                    for (const auto& [n, c] : NAMES)
+                        if (v->str == n)
+                            return c;
+                return fallback;
+            }
+            static eStencilOp stencilOp(const SJson* v) {
+                static constexpr std::pair<std::string_view, eStencilOp> NAMES[] = {
+                    {"keep", SO_KEEP},     {"zero", SO_ZERO},   {"replace", SO_REPLACE},   {"incrsat", SO_INCR},
+                    {"decrsat", SO_DECR}, {"invert", SO_INVERT}, {"incrwrap", SO_INCR_WRAP}, {"decrwrap", SO_DECR_WRAP}};
+                if (v && v->type == SJson::STRING)
+                    for (const auto& [n, o] : NAMES)
+                        if (v->str == n)
+                            return o;
+                return SO_KEEP;
+            }
+
+            // unity2hypr3d's material extras: what Unity's toon shaders do that glTF has no place for
+            //   "hypr3d_queue": Unity's render queue
+            //   "hypr3d_stencil": {"ref", "read", "write", "comp", "pass", "fail", "zfail", "again": {"comp", "alpha"}}
+            //   "hypr3d_outline": {"width", "space": "world"|"object"|"screen", "color", "base", "tint",
+            //                      "mask": {"index", "channel", "invert"}, "shift", "fix": [amount, max], "lit", "max"}
+            //   "hypr3d_back": {"color", "texture": {"index", "transform": {"offset", "scale"}}}
+            //   "hypr3d_light": {"min", "max", "chroma"}
+            void hypr3d(const cgltf_material& cm, SMapMaterial& m) {
+                if (!cm.extras.data)
+                    return;
+                const auto j = SJson::parse(cm.extras.data);
+                if (!j || j->type != SJson::OBJECT)
+                    return;
+                m.queue = (int)j->number("hypr3d_queue", -1);
+                if (const SJson* s = j->get("hypr3d_stencil"); s && s->type == SJson::OBJECT) {
+                    auto& st = m.stencil;
+                    st.on    = true;
+                    st.ref   = (uint8_t)std::clamp(s->number("ref", 0), 0., 255.);
+                    st.read  = (uint8_t)std::clamp(s->number("read", 255), 0., 255.);
+                    st.write = (uint8_t)std::clamp(s->number("write", 255), 0., 255.);
+                    st.comp  = stencilComp(s->get("comp"), SC_ALWAYS);
+                    st.pass  = stencilOp(s->get("pass"));
+                    st.fail  = stencilOp(s->get("fail"));
+                    st.zfail = stencilOp(s->get("zfail"));
+                    if (const SJson* a = s->get("again"); a && a->type == SJson::OBJECT) {
+                        st.againComp = stencilComp(a->get("comp"), SC_ALWAYS);
+                        st.again     = std::clamp((float)a->number("alpha", 1), 0.f, 1.f);
+                    }
+                }
+                if (const SJson* o = j->get("hypr3d_outline"); o && o->type == SJson::OBJECT) {
+                    auto& ol = m.outline;
+                    ol.width = std::max(0.f, (float)o->number("width", 0));
+                    if (const SJson* sp = o->get("space"); sp && sp->type == SJson::STRING)
+                        ol.space = sp->str == "object" ? OUTLINE_OBJECT : sp->str == "screen" ? OUTLINE_SCREEN : OUTLINE_WORLD;
+                    o->numbers("color", ol.color, 4);
+                    ol.base  = (float)o->number("base", 0);
+                    ol.tint  = (float)o->number("tint", 0);
+                    ol.shift = (float)o->number("shift", 0);
+                    ol.lit   = (float)o->number("lit", 1);
+                    ol.maxW  = (float)o->number("max", 1);
+                    float fix[2] = {0, 1};
+                    o->numbers("fix", fix, 2);
+                    ol.fix    = fix[0];
+                    ol.fixMax = fix[1];
+                    if (const SJson* mk = o->get("mask"); mk && mk->type == SJson::OBJECT) {
+                        ol.maskTex     = textureRef(mk, false);
+                        ol.maskChannel = (uint8_t)std::clamp(mk->number("channel", 0), 0., 3.);
+                        const SJson* inv = mk->get("invert");
+                        ol.maskInvert    = inv && inv->type == SJson::BOOL && inv->num != 0;
+                    }
+                }
+                if (const SJson* b = j->get("hypr3d_back"); b && b->type == SJson::OBJECT) {
+                    b->numbers("color", m.backColor, 4);
+                    m.back = 1;
+                    if (const SJson* t = b->get("texture"); t && t->type == SJson::OBJECT) {
+                        m.backTex = textureRef(t, true);
+                        if (m.backTex >= 0)
+                            m.back = 2;
+                        if (const SJson* x = t->get("transform"); x && x->type == SJson::OBJECT) {
+                            float scale[2] = {1, 1}, offset[2] = {0, 0};
+                            x->numbers("scale", scale, 2);
+                            x->numbers("offset", offset, 2);
+                            m.backXf[0] = scale[0];
+                            m.backXf[3] = scale[1];
+                            m.backXf[4] = offset[0];
+                            m.backXf[5] = offset[1];
+                        }
+                    }
+                }
+                if (const SJson* l = j->get("hypr3d_light"); l && l->type == SJson::OBJECT) {
+                    m.lightClamp[0] = std::clamp((float)l->number("min", 0), 0.f, 1.f);
+                    m.lightClamp[1] = std::clamp((float)l->number("max", 1), 0.001f, 1.f);
+                    m.lightClamp[2] = std::clamp((float)l->number("chroma", 1), 0.f, 1.f);
+                }
+            }
+
+            // VRM 1.0's MToon (VRMC_materials_mtoon): its outline and render queue offset
+            void mtoon(const cgltf_material& cm, SMapMaterial& m) {
+                const auto j = extension(cm, "VRMC_materials_mtoon");
+                if (!j)
+                    return;
+                const SJson* mode = j->get("outlineWidthMode");
+                const float  w    = (float)j->number("outlineWidthFactor", 0);
+                if (mode && mode->type == SJson::STRING && mode->str != "none" && w > 0) {
+                    auto& ol = m.outline;
+                    ol.space = mode->str == "screenCoordinates" ? OUTLINE_SCREEN : OUTLINE_WORLD;
+                    ol.width = ol.space == OUTLINE_SCREEN ? w * 2 : w; // screen: of its height
+                    ol.maxW  = 1e9f;
+                    j->numbers("outlineColorFactor", ol.color, 3);
+                    ol.lit = (float)j->number("outlineLightingMixFactor", 1);
+                    if (const SJson* t = j->get("outlineWidthMultiplyTexture"); t && t->type == SJson::OBJECT) {
+                        ol.maskTex     = textureRef(t, false);
+                        ol.maskChannel = 1; // green
+                    }
+                }
+                if (const double off = j->number("renderQueueOffsetNumber", 0); off != 0)
+                    m.queue = (m.alphaMode == ALPHA_BLEND ? 3000 : m.alphaMode == ALPHA_MASK ? 2450 : 2000) + (int)off;
+            }
+
+            // VRM 0.x's MToon (extensions.VRM.materialProperties, by material): its outline and render queue
+            void vrm0() {
+                std::optional<SJson> j;
+                for (size_t e = 0; e < data->data_extensions_count && !j; ++e)
+                    if (const auto& ext = data->data_extensions[e]; ext.name && ext.data && std::strcmp(ext.name, "VRM") == 0)
+                        j = SJson::parse(ext.data);
+                const SJson* props = j && j->type == SJson::OBJECT ? j->get("materialProperties") : nullptr;
+                if (!props || props->type != SJson::ARRAY)
+                    return;
+                const auto linear = [](float c) { return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); };
+                for (size_t k = 0; k < props->items.size(); ++k) {
+                    const SJson& p  = props->items[k];
+                    const SJson* nm = p.get("name");
+                    // one per material, in their order; by name when another has its name
+                    size_t i = k;
+                    if (nm && nm->type == SJson::STRING && (i >= data->materials_count || !data->materials[i].name || nm->str != data->materials[i].name))
+                        for (size_t n = 0; n < data->materials_count; ++n)
+                            if (data->materials[n].name && nm->str == data->materials[n].name) {
+                                i = n;
+                                break;
+                            }
+                    const SJson* sh = p.get("shader");
+                    if (i >= data->materials_count || !sh || sh->type != SJson::STRING || sh->str != "VRM/MToon")
+                        continue;
+                    SMapMaterial& m  = out.materials[i];
+                    const int     rq = (int)p.number("renderQueue", -1);
+                    if (rq >= 0 && rq != m.renderQueue())
+                        m.queue = rq;
+                    const SJson* fl  = p.get("floatProperties");
+                    const SJson* vec = p.get("vectorProperties");
+                    const SJson* tex = p.get("textureProperties");
+                    if (!fl || fl->type != SJson::OBJECT)
+                        continue;
+                    const int   mode = (int)fl->number("_OutlineWidthMode", 0);
+                    const float w    = (float)fl->number("_OutlineWidth", 0) * 0.01f; // cm
+                    if ((mode != 1 && mode != 2) || w <= 0)
+                        continue;
+                    auto& ol = m.outline;
+                    ol.width = w;
+                    ol.space = mode == 2 ? OUTLINE_SCREEN : OUTLINE_WORLD;
+                    ol.maxW  = (float)fl->number("_OutlineScaledMaxDistance", 1);
+                    ol.lit   = fl->number("_OutlineColorMode", 0) == 1 ? (float)fl->number("_OutlineLightingMix", 1) : 0.f;
+                    if (vec && vec->type == SJson::OBJECT) {
+                        float c[4] = {0, 0, 0, 1};
+                        vec->numbers("_OutlineColor", c, 4);
+                        for (int ch = 0; ch < 3; ++ch)
+                            ol.color[ch] = linear(std::clamp(c[ch], 0.f, 1.f));
+                        ol.color[3] = c[3];
+                    }
+                    if (const double t = tex && tex->type == SJson::OBJECT ? tex->number("_OutlineWidthTexture", -1) : -1; t >= 0 && t < (double)data->textures_count)
+                        ol.maskTex = texture(&data->textures[(size_t)t], false);
+                }
+            }
+
             void read() {
                 out.materials.resize(data->materials_count + 1);
                 out.baseUV.assign(data->materials_count + 1, 0);
@@ -422,7 +596,10 @@ namespace h3d::gltf {
                     m.unlit       = cm.unlit;
                     layer(cm, m);
                     source2(cm, m);
+                    mtoon(cm, m);
+                    hypr3d(cm, m);
                 }
+                vrm0();
             }
         };
     }

@@ -72,10 +72,16 @@ print('== colliders, world')
 for c in st.get('colliders', []):
     M = world(by[c['node']])
     p = M @ np.array(list(c['offset']) + [1.0])
+    if 'normal' in c:  # a plane
+        n = M[:3, :3] @ np.array(c['normal'])
+        print('  %-12s plane at %s facing %s' % (c['name'], np.round(p[:3], 4), np.round(n / np.linalg.norm(n), 3)))
+        continue
     s = '  %-12s at %s r %.3f' % (c['name'], np.round(p[:3], 4), c['radius'] * np.linalg.norm(M[:3, 0]))
     if 'tail' in c:
         q = M @ np.array(list(c['tail']) + [1.0])
         s += ' to %s' % np.round(q[:3], 4)
+    if c.get('inside'):
+        s += ', keeping bones inside'
     print(s)
 
 print('== meshes')

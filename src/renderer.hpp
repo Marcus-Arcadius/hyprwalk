@@ -50,12 +50,17 @@ namespace h3d {
         const std::vector<float>*     morphs = nullptr; // CAvatarAnimator::morphWeights(), null = at rest
         const std::vector<SMapMaterial>* materials = nullptr; // CAvatarAnimator::materials(), null = the model's
         const std::vector<uint8_t>*   shown = nullptr;  // CAvatarAnimator::partsShown(), null = all of it
+        const std::vector<int>*       batchMaterials = nullptr; // CAvatarAnimator::batchMaterials(), null = the batches' own
         M4                            transform = M4::identity(); // avatar space -> world
         bool                          visible = false;  // drawn (third person); it casts its shadow either way
+        bool                          outlines = true;  // its materials' toon outlines (an inverted hull each)
         float                         sky = 1, bounce = 0; // light around it, like the map's baked values
 
         bool                          drawn(const SAvatarBatch& b) const {
             return !shown || (size_t)b.part >= shown->size() || (*shown)[b.part];
+        }
+        int                           material(const SAvatarBatch& b, size_t i) const { // what batch i is drawn with
+            return batchMaterials && i < batchMaterials->size() ? (*batchMaterials)[i] : b.material;
         }
     };
 
@@ -83,6 +88,7 @@ namespace h3d {
         float                exposure  = 1; // brightens the world (not the windows) in dark places
         SAvatarFrame         avatar;
         SHudImage            menu;
+        SHudImage            badge; // in a corner: the microphone's, while lip sync listens
     };
 
     class CRenderer {
@@ -167,9 +173,12 @@ namespace h3d {
 
         std::unordered_map<uintptr_t, SPanelGL> m_panelGL;
 
-        GLuint                                   m_hudTex = 0;
-        int                                      m_hudW = 0, m_hudH = 0;
-        uint64_t                                 m_hudSerial = 0; // what m_hudTex holds
+        struct SHudGL {
+            GLuint   tex = 0;
+            int      w = 0, h = 0;
+            uint64_t serial = 0; // what tex holds
+        };
+        SHudGL                                   m_hudGL[2]; // the menu's, the badge's
 
         void                                     destroyBase();
         void                                     destroyMap();
@@ -199,11 +208,12 @@ namespace h3d {
         // binds the game's lighting (set 0: the map, 1: its backdrop) and sets its uniforms, or turns it off
         void                                     setBakedLighting(GLuint prog, const SFrameParams& f, size_t set);
         void                                     drawBackdrop(const SFrameParams& f, int lightCount, const float* lights);
-        void                                     drawAvatar(const SFrameParams& f, const M4& viewProj, int lightCount, const float* lights, bool blended);
+        void                                     drawAvatar(const SFrameParams& f, const M4& viewProj, int lightCount, const float* lights, bool late);
         void                                     drawAvatarDepth(const SFrameParams& f);
         void                                     drawPanels(const SFrameParams& f, const M4& viewProj);
         void                                     drawCrosshair(const SFrameParams& f);
         void                                     drawHud(const SFrameParams& f);
+        void                                     drawHudImage(const SFrameParams& f, const SHudImage& m, SHudGL& g);
         void                                     setPanelUniforms(GLuint prog, const SPanel& p, const SPanelGL& g);
     };
 }

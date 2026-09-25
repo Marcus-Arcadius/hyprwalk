@@ -355,7 +355,7 @@ feats = [toggle('Clothes/Coat', [turn(coat, 0), {'@class': 'BlendShapeAction', '
          toggle('Big', [turn(extra, 0)], slider='1', defaultSliderValue='0.5'),
          {'@class': 'ApplyDuringUpload', 'action': {'actions': [
              {'@class': 'BlendShapeAction', 'blendShape': 'Smile', 'blendShapeValue': '30', 'allRenderers': '1'}]}},
-         {'@class': 'Puppet', 'name': 'x'}]
+         {'@class': 'ZawooIntegration'}]
 comp = component({}, sc.root)
 u._VRCF_FEATURES[id(comp)] = feats
 
@@ -373,11 +373,13 @@ check('resting state: what a toggle turns on is off, what one turns off is on',
 check('Apply During Upload set the shape key', bsmr.data['m_BlendShapeWeights'], ['0', 30.0])
 check('menu entries: path, name, group', [(p, c['name'], c.get('group', '')) for p, c in vf.menu],
       [(('Clothes',), 'Coat', 'top'), (('Clothes',), 'Jacket', 'top'), (('Clothes',), 'Nothing', 'top'),
-       ((), 'Hide Hat', '')])
-check('parameters: bool, on as defaultOn; the off state stays off (Coat is on at first)',
-      [vf.declared[c['parameter']['name']] for p, c in vf.menu], [(2, 1.0), (2, 0.0), (2, 0.0), (2, 0.0)])
-check('a slider: not in the menu', vf.skipped, [('Big', 'a slider')])
-check('a feature it does not convert: said', any('Puppet' in w for w in u.WARNINGS[before:]), True)
+       ((), 'Hide Hat', ''), ((), 'Big', '')])
+check('parameters: bool, on as defaultOn; the off state stays off (Coat is on at first); the slider a float',
+      [vf.declared[c['parameter']['name'] or c['subParameters'][0]['name']] for p, c in vf.menu],
+      [(2, 1.0), (2, 0.0), (2, 0.0), (2, 0.0), (1, 0.5)])
+check('a slider: a radial puppet in the menu, of its float', (vf.menu[-1][1]['type'], vf.skipped), (203, []))
+check('a feature it does not convert: said, with why', any('Zawoo' in w and 'contacts' in w
+                                                            for w in u.WARNINGS[before:]), True)
 params = {k: v for k, (t, v) in vf.declared.items()}
 vals = vf.apply(params, {})
 check('with the defaults: the coat and the nameless toggle\'s object on, the shape key set',
@@ -423,6 +425,247 @@ an = AN()
 an.av, an.db = sc.av(), None
 vf = u.VRCFury(an, [comp])
 check('the off state is on at first', [vf.declared[c['parameter']['name']][1] for p, c in vf.menu], [0.0, 1.0])
+
+def vrcf(sc, feats, names=None):
+    comp = component({}, sc.root)
+    u._VRCF_FEATURES[id(comp)] = [x for f in feats for x in u.vrcf_upgrade(f)]  # as vrcf_features() upgrades them
+    an = AN()
+    an.av, an.db = sc.av(), None
+    if names:
+        an.av.shape_names = lambda r: names.get(id(r), [])
+    return u.VRCFury(an, [comp])
+
+
+def bs(key, value=100):
+    return {'@class': 'BlendShapeAction', 'blendShape': key, 'blendShapeValue': value, 'allRenderers': '1'}
+
+
+print('== sliders: from where the property rests to the state\'s, smoothly as VRCFury\'s flat keys go; a puppet')
+sc = Scene()
+body = sc.go('Body', sc.root, (0, 0, 0))
+b1 = sc.smr(body, [], names=['Chest', 'Squint'])
+b1.data['m_BlendShapeWeights'] = ['40', '0']
+vf = vrcf(sc, [dict(toggle('Menu/Chest', [bs('Chest')]), slider='1', defaultSliderValue='0.3'),
+               {'@class': 'Puppet', 'name': 'Menu/Squint', 'slider': '1', 'defaultX': '0', 'stops': [
+                   {'x': '0.5', 'y': '0', 'state': {'actions': [bs('Squint', 50)]}},
+                   {'x': '1', 'y': '0', 'state': {'actions': [bs('Squint', 100)]}}]},
+               {'@class': 'Puppet', 'name': 'Two axes', 'slider': '0', 'stops': [
+                   {'x': '0', 'y': '1', 'state': {'actions': [bs('Squint', 100)]}}]}])
+radials = [(p, c) for p, c in vf.menu if c['type'] == 203]
+check('radials in the menu, of their floats', [(p, c['name'], c['type'], c['subParameters'][0]['name']) for p, c in radials],
+      [(('Menu',), 'Chest', 203, 'VF0_Menu/Chest'), (('Menu',), 'Squint', 203, 'Menu/Squint_x')])
+check('the floats\' defaults', [vf.declared[c['subParameters'][0]['name']] for p, c in radials], [(1, 0.3), (1, 0.0)])
+check('a puppet with two axes (y only): a two-axis puppet in the menu', [(c['name'], c['type'], [
+    x['name'] for x in c['subParameters']]) for p, c in vf.menu if c['type'] == 201], [('Two axes', 201, ['', 'Two axes_y'])])
+check('... a 2D freeform directional tree: all of the stop at it, half of it half way, none at the middle',
+      [round(vf.apply({'Two axes_y': y}, {}).get(('s', b1, 'Squint'), -1), 3) for y in (1.0, 0.5, 0.0)], [100.0, 50.0, 0.0])
+at = lambda x, key='Chest', pn='VF0_Menu/Chest': round(vf.apply({pn: x}, {})[('s', b1, key)], 3)
+check('the slider at 0, 0.25, 0.5, 1: 40 to 100 along smoothstep', [at(x) for x in (0.001, 0.25, 0.5, 1)],
+      [40.0, 49.375, 70.0, 100.0])
+check('the puppet between its stops (0 where it rests)', [at(x, 'Squint', 'Menu/Squint_x') for x in (0.25, 0.5, 0.75, 1)],
+      [25.0, 50.0, 75.0, 100.0])
+
+print('== Gesture Drivers (and Senky\'s): a hand\'s sign shows a state, a lock toggle too; faces blocking blinks')
+sc = Scene()
+body = sc.go('Body', sc.root, (0, 0, 0))
+b1 = sc.smr(body, [], names=['Wink', 'Smile', 'Grr', 'Blep'])
+b1.data['m_BlendShapeWeights'] = ['0', '0', '0', '0']
+vf = vrcf(sc, [{'@class': 'GestureDriver', 'version': '0', 'gestures': [
+    {'hand': '1', 'sign': '2', 'comboSign': '0', 'state': {'actions': [bs('Wink')]}, 'disableBlinking': '1'},
+    {'hand': '0', 'sign': '7', 'comboSign': '0', 'state': {'actions': [bs('Smile')]}, 'enableLockMenuItem': '1',
+     'lockMenuItem': 'Faces/Smile'},
+    {'hand': '3', 'sign': '1', 'comboSign': '1', 'state': {'actions': [bs('Grr')]}}]}])
+check('the lock toggle in the menu', [(p, c['name'], c['type']) for p, c in vf.menu], [(('Faces',), 'Smile', 102)])
+lock = vf.menu[0][1]['parameter']['name']
+names, track = {}, {}
+v = vf.apply({'GestureLeft': 2.0}, {}, names, track)
+check('left open: the wink, blinking blocked (an old save\'s disableBlinking)', (v.get(('s', b1, 'Wink')), track.get('eyes')),
+      (100.0, 2))
+check('... not by the right hand', ('s', b1, 'Wink') in vf.apply({'GestureRight': 2.0}, {}), False)
+check('thumbs up on either hand smiles, named for its lock item', ([('s', b1, 'Smile') in vf.apply({h: 7.0}, {}) for h in (
+    'GestureLeft', 'GestureRight')], names.get(('s', b1, 'Smile')) or vf.apply({'GestureLeft': 7.0}, {}, names) and
+    names.get(('s', b1, 'Smile'))), ([True, True], 'Smile'))
+check('the lock toggle shows it with the hands neutral', vf.apply({lock: 1.0}, {}).get(('s', b1, 'Smile')), 100.0)
+check('a combo of both hands: the left\'s sign and the right\'s combo sign, not one of them alone',
+      [('s', b1, 'Grr') in vf.apply(p, {}) for p in ({'GestureLeft': 1.0, 'GestureRight': 1.0}, {'GestureLeft': 1.0},
+                                                     {'GestureRight': 1.0})], [True, False, False])
+sen = u.vrcf_upgrade({'@class': 'SenkyGestureDriver', 'eyesHappy': {'actions': [bs('Smile')]},
+                      'mouthBlep': {'actions': [bs('Blep')]}, 'earsBack': {'actions': []}})[0]
+gs = sen['gestures']
+check('Senky\'s: a Gesture Driver, either hand, lock items in Emote Lock',
+      (sen['@class'], sorted({(g['hand'], g['lockMenuItem']) for g in gs})),
+      ('GestureDriver', [(0, 'Emote Lock/Angry'), (0, 'Emote Lock/Happy'), (0, 'Emote Lock/Sad'), (0, 'Emote Lock/Tongue')]))
+check('... happy eyes by thumbs up, stopping the blinks; the tongue by victory',
+      [([a['@class'] for a in g['state']['actions']], g['sign']) for g in gs if g['exclusiveTag'] in ('eyes', 'mouth') and
+       g['state']['actions'] and g['state']['actions'][0].get('blendShape') in ('Smile', 'Blep')],
+      [(['BlendShapeAction', 'BlockBlinkingAction'], 7), (['BlendShapeAction'], 4)])
+
+print('== Blinking and Visemes: faces of their own')
+vf = vrcf(sc, [{'@class': 'Blinking', 'state': {'actions': [bs('Wink')]}},
+               {'@class': 'Visemes', 'state_aa': {'actions': [bs('Blep')]}, 'state_O': {'actions': [bs('Grr', 60)]},
+                'state_PP': {'actions': [bs('Smile')]}}])
+check('the blink', vf.blink, {(b1, 'Wink'): 1.0})
+check('the visemes hypr3d has (aa..ou), at their weights', vf.visemes, {'aa': {(b1, 'Blep'): 1.0}, 'oh': {(b1, 'Grr'): 0.6}})
+
+print('== material actions: a slot\'s material, a property\'s value; Set an FX Float; exclusive tags of several groups')
+sc = Scene()
+hat = sc.go('Hat', sc.root, (0, 0, 0))
+hmr = u.Obj(23, 'MeshRenderer', {'m_GameObject': hat, 'm_Materials': [{'fileID': '2100000', 'guid': 'a' * 32}]})
+hat.comps.append(hmr)
+star, moon, sun = (sc.go(n, sc.root, (0, 0, 0)) for n in ('Star', 'Moon', 'Sun'))
+feats = [toggle('Gold', [{'@class': 'MaterialAction', 'version': 1, 'renderer': hmr, 'materialIndex': '0',
+                          'mat': {'id': 'b' * 32 + '|Assets/Gold.mat'}}]),
+         toggle('Old', [{'@class': 'MaterialAction', 'version': 0, 'obj': hat, 'materialIndex': '0',
+                         'mat': {'id': 'c' * 32 + ':2100000|Assets/Old.mat'}}]),
+         toggle('Tint', [{'@class': 'MaterialPropertyAction', 'version': 2, 'renderer2': hat, 'affectAllMeshes': '0',
+                          'propertyName': '_Color', 'propertyType': '1', 'valueColor': {'r': '1', 'g': '0.5', 'b': '0.5',
+                                                                                        'a': '1'}}]),
+         toggle('Shine', [{'@class': 'MaterialPropertyAction', 'version': 2, 'renderer2': hat, 'affectAllMeshes': '0',
+                           'propertyName': '_Glossiness', 'propertyType': '0', 'value': '1'}]),
+         toggle('Glow', [{'@class': 'FxFloatAction', 'name': 'Glow', 'value': '0.7'}]),
+         toggle('Star', [turn(star, 0)], enableExclusiveTag='1', exclusiveTag='deco, left'),
+         toggle('Moon', [turn(moon, 0)], enableExclusiveTag='1', exclusiveTag='deco'),
+         toggle('Sun', [turn(sun, 0)], enableExclusiveTag='1', exclusiveTag='left')]
+before = len(u.WARNINGS)
+vf = vrcf(sc, feats)
+p = {c['name']: c['parameter']['name'] for _, c in vf.menu}
+check('the material in the slot', vf.apply({p['Gold']: 1.0}, {}).get(('m', hmr, 0)), ('b' * 32, 2100000))
+check('an old save names the object: its renderer\'s slot', vf.apply({p['Old']: 1.0}, {}).get(('m', hmr, 0)),
+      ('c' * 32, 2100000))
+check('a colour property, channel by channel', sorted((k[2], v) for k, v in vf.apply({p['Tint']: 1.0}, {}).items()),
+      [('_Color.a', 1.0), ('_Color.b', 0.5), ('_Color.g', 0.5), ('_Color.r', 1.0)])
+check('a property hypr3d does not carry: said', any('_Glossiness' in w for w in u.WARNINGS[before:]), True)
+check('an FX float while it is on, for the animators to read', (vf.drive({p['Glow']: 1.0}).get('Glow'),
+                                                                 vf.drive({p['Glow']: 0.0}).get('Glow')), (0.7, None))
+check('a toggle of two tags is in both groups', [(c['name'], c.get('group'), c.get('groups')) for _, c in vf.menu[-3:]],
+      [('Star', 'deco', ['deco', 'left']), ('Moon', 'deco', None), ('Sun', 'left', None)])
+
+print('== Move Menu Item and Reorder Menu Item; old features upgraded into toggles')
+m = [((), {'name': 'A'}), (('Sub',), {'name': 'B'}), (('Sub',), {'name': 'C'}), (('Sub', 'Deep'), {'name': 'D'}),
+     ((), {'name': 'E'})]
+vf.moves = [{'@class': 'MoveMenuItem', 'fromPath': 'Sub/B', 'toPath': 'Top/Renamed'},
+            {'@class': 'MoveMenuItem', 'fromPath': 'Sub/Deep', 'toPath': 'Deeper'},
+            {'@class': 'ReorderMenuItem', 'path': 'E', 'position': '0'}]
+check('moved (renamed), a submenu moved whole, one put first', [('/'.join(p + (c['name'],))) for p, c in vf.menu_moved(m)],
+      ['E', 'A', 'Sub/C', 'Top/Renamed', 'Deeper/D'])
+br = u.vrcf_upgrade({'@class': 'Breathing', 'version': '0', 'inState': {'actions': []}, 'outState': {'actions': []},
+                     'blendshape': 'Chest', 'obj': None})[0]
+check('Breathing: a toggle, on at first, of a loop between breathing out and in',
+      (br['@class'], br['name'], br['defaultOn'], br['state']['actions'][0]['@class'],
+       [a['blendShapeValue'] for a in br['state']['actions'][0]['state1']['actions']]),
+      ('Toggle', 'Breathing', '1', 'SmoothLoopAction', [100]))
+wc = u.vrcf_upgrade({'@class': 'WorldConstraint', 'menuPath': 'Props/Drop', '@go': star})[0]
+check('World Constraint: a toggle that drops its object', (wc['name'], wc['state']['actions'][0]['@class'],
+                                                           wc['state']['actions'][0]['obj'] is star),
+      ('Props/Drop', 'WorldDropAction', True))
+
+print('== Full Controller rewriteBindings: path rewrites in turn, deletes, a prefix for every path')
+rw = u.vrcf_rewrite([{'from': 'Armature/', 'to': 'Coat/Armature'}, {'from': 'Coat/Armature/Old', 'to': '', 'delete': '1'}])
+check('a prefix swapped, only on whole names', [rw(x) for x in ('Armature/Hips', 'Armature', 'ArmatureX/Hips', 'Body')],
+      ['Coat/Armature/Hips', 'Coat/Armature', 'ArmatureX/Hips', 'Body'])
+check('a later rule sees an earlier one\'s path; a delete drops the path', (rw('Armature/Old/Bone'), rw('Armature/New')),
+      (None, 'Coat/Armature/New'))
+rw = u.vrcf_rewrite([{'from': '', 'to': 'Prefix/'}])
+check('an empty "from" puts every path under "to", but not one from the root', [rw(x) for x in ('Body', '', '/Root')],
+      ['Prefix/Body', 'Prefix', '/Root'])
+rw = u.vrcf_rewrite([{'from': 'Deep/Down', 'to': '/'}])
+check('"to" the root', rw('Deep/Down/Mesh'), '/Mesh')
+check('no rules: nothing to rewrite', u.vrcf_rewrite([]), None)
+
+print('== Armature Link and animated bones: one an animation moves is linked but keeps its weights, and its children')
+sc = Scene()
+human = avatar(sc)
+tail = sc.go('Tail', human['Hips'], (0, 0.95, 0.1))
+tail2 = sc.go('Tail.001', tail, (0, 0.9, 0.2))
+coat = sc.go('Coat', sc.root, (0, 0, 0))
+oa = sc.go('Armature', coat, (0, 0, 0))
+oh = sc.go('Hips', oa, (0, 1.0, 0))
+osp = sc.go('Spine', oh, (0, 1.1, 0))
+ot = sc.go('Tail', oh, (0, 0.95, 0.1))
+ot2 = sc.go('Tail.001', ot, (0, 0.9, 0.2))
+bag = sc.go('Bag', osp, (0.1, 1.0, 0.1))
+sc.smr(sc.go('CoatMesh', coat, (0, 0, 0)), [oh, osp, ot, ot2], root=oh)
+sc.smr(bag, [], root=None)
+comp = component({}, coat)
+av, h = hierarchy(sc, human)
+u.link_armatures(h, VF(av, [(comp, link(oh))]), human, ({id(ot), id(osp)}, {id(oh)}))
+check('the turned tail: linked, keeps its own weights', (h.up(ot) is tail, id(ot) in h.retarget), (True, False))
+check('... its child stays under it, not linked to the avatar\'s', (h.up(ot2) is ot, id(ot2) in h.retarget), (True, False))
+check('a humanoid bone is linked all the same, but an animated one keeps its weights',
+      (h.up(osp) is human['Spine'], id(osp) in h.retarget), (True, False))
+check('a scaled bone is linked, its weights kept', (h.up(oh) is human['Hips'], id(oh) in h.retarget), (True, False))
+
+print('== the transforms animations move: every controller, a Full Controller\'s rewritten paths, toggle clips')
+
+
+class UFile:
+    def __init__(self, docs):
+        self.docs, self.order, self.binary = docs, list(docs), False
+
+    def cls(self, f):
+        return self.docs[f][0]
+
+    def get(self, f):
+        return (None, self.docs[f][1])
+
+
+class Asset:
+    ext = '.asset'
+
+
+class DB:
+    def __init__(self, files):
+        self.files = files
+
+    def get(self, g):
+        return Asset() if g in self.files else None
+
+    def yaml(self, g):
+        return self.files.get(g)
+
+
+def R(guid, fid):
+    return {'fileID': str(fid), 'guid': guid}
+
+
+sc = Scene()
+arm = sc.go('Armature', sc.root, (0, 0, 0))
+hips = sc.go('Hips', arm, (0, 1, 0))
+ear, wing, horn, fin, halo = (sc.go(n, hips, (0, 1, 0)) for n in ('Ear', 'Wing', 'Horn', 'Fin', 'Halo'))
+acc = sc.go('Acc', sc.root, (0, 0, 0))
+bow = sc.go('Bow', sc.go('Armature', acc, (0, 0, 0)), (0, 1, 0))
+FX, CLIP, TREE, FULL, BOW, HALO = ('%02x' % k * 16 for k in (0xf0, 0xc1, 0xb2, 0xf1, 0xb0, 0xa0))
+an = AN()
+an.db = DB({
+    FX: UFile({1: (1102, {'m_Motion': R(CLIP, 7400000)}), 2: (1102, {'m_Motion': {'fileID': '3'}}),
+               3: (206, {'m_Childs': [{'m_Motion': R(TREE, 7400000)}]})}),
+    CLIP: UFile({7400000: (74, {'m_EulerCurves': [{'path': 'Armature/Hips/Ear'}],
+                                'm_RotationCurves': [{'path': 'Armature/Hips/Horn'}],
+                                'm_EditorCurves': [{'classID': '4', 'path': 'Armature/Hips/Fin',
+                                                    'attribute': 'm_LocalPosition.y'}]})}),
+    TREE: UFile({7400000: (74, {'m_ScaleCurves': [{'path': 'Armature/Hips/Wing'}]})}),
+    FULL: UFile({1: (1102, {'m_Motion': R(BOW, 7400000)})}),
+    BOW: UFile({7400000: (74, {'m_PositionCurves': [{'path': 'Old/Bow'}]})}),
+    HALO: UFile({7400000: (74, {'m_EulerCurves': [{'path': 'Armature/Hips/Halo'}]})})})
+an.av, an.mat = sc.av(), None
+an.av.paths = {u.av_path(an.av, g): g for g in an.av.gos}
+an.av.desc = {'customizeAnimationLayers': '1', 'baseAnimationLayers': [
+    {'type': '5', 'isDefault': '0', 'animatorController': R(FX, 9100000)}]}
+c_root, c_acc = component({}, sc.root), component({}, acc)
+u._VRCF_FEATURES[id(c_root)] = u.vrcf_upgrade(toggle('Halo', [
+    {'@class': 'AnimationClipAction', 'clip': {'id': HALO + ':7400000'}}]))
+an.vrcf = vf = u.VRCFury(an, [c_root])
+vf.feats.append((c_acc, {'@class': 'FullController', 'version': 3, 'controllers': [
+    {'controller': {'id': FULL}, 'type': '5'}], 'rewriteBindings': [{'from': 'Old', 'to': 'Armature'}]}))
+moved, scaled = u.animated_transforms(an)
+
+
+def names(ids):
+    return sorted(u.av_path(an.av, g) for g in an.av.gos if id(g) in ids)
+check('moved or turned: euler and position curves (not a quaternion one), a rewritten path found from where the Full '
+      'Controller is, a toggle\'s clip', names(moved), ['Acc/Armature/Bow', 'Armature/Hips/Ear', 'Armature/Hips/Fin',
+                                                        'Armature/Hips/Halo'])
+check('scaled: a blend tree\'s clip', names(scaled), ['Armature/Hips/Wing'])
 
 print('all passed' if not FAILS else '%d FAILED: %s' % (len(FAILS), ', '.join(FAILS)))
 sys.exit(1 if FAILS else 0)

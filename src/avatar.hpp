@@ -32,6 +32,7 @@ namespace h3d {
         int      material = 0;
         int      part     = 0;
         uint32_t first = 0, count = 0; // in indices
+        int      variants = 0;         // SAvatarModel::variantMaps: the materials it has in material variants, 0 = none
     };
 
     // a mesh node: what outfit toggles show and hide
@@ -42,14 +43,6 @@ namespace h3d {
         bool        hidden    = false; // until shown (the settings file's "hidden")
     };
 
-    // an outfit toggle from the avatar's settings file (VRChat's, converted)
-    struct SAvatarToggle {
-        std::string                        name, group; // the toggles of a group are exclusive
-        bool                               on = false;  // at first
-        std::vector<int>                   show, hide;  // parts: hidden unless a toggle that shows them is on; hidden while on
-        std::vector<std::pair<int, float>> shapes;      // morph weights while on
-    };
-
     struct STRS {
         V3   t;
         Quat r;
@@ -58,6 +51,56 @@ namespace h3d {
         M4 matrix() const {
             return M4::trs(t, r, s);
         }
+    };
+
+    // a node a toggle or a slider puts elsewhere (a VRChat animation of its Transform, converted): what it sets of
+    // the node's own translation, rotation and scale
+    struct SNodePose {
+        enum : uint8_t {
+            T = 1,
+            R = 2,
+            S = 4,
+        };
+        int     node = -1;
+        uint8_t set  = 0;
+        STRS    trs;
+    };
+
+    // a toggle's smooth loop (VRCFury's Smooth Loop, like breathing): from a to b and back every `seconds` while it's on
+    struct SAvatarLoop {
+        float                              seconds = 0; // 0 = none
+        std::vector<std::pair<int, float>> shapesA, shapesB;
+        std::vector<SNodePose>             posesA, posesB;
+    };
+
+    // an outfit toggle from the avatar's settings file (VRChat's, converted)
+    struct SAvatarToggle {
+        std::string                        name, group; // group: the first of groups
+        std::vector<std::string>           groups;      // exclusive with every toggle that shares one of these
+        bool                               on = false;  // at first
+        std::vector<int>                   show, hide;  // parts: hidden unless a toggle that shows them is on; hidden while on
+        std::vector<std::pair<int, float>> shapes;      // morph weights while on
+        std::vector<int>                   variants;    // material variants in effect while on
+        std::vector<SNodePose>             poses;       // nodes put elsewhere while on
+        SAvatarLoop                        loop;        // plays while on
+        std::vector<int>                   drop;        // nodes that stay in the world where they were when it turned on
+    };
+
+    // a slider from the settings file (a VRChat radial puppet, converted): 0..1 through its keys. Morph weights and
+    // node poses go in straight lines from key to key; parts and material variants are as the last key at or below the
+    // value has them. A 2D one (a puppet's two axes) goes -1..1 each way over a grid of keys, blended between the four
+    // around the value; parts and variants as the nearest has them
+    struct SAvatarSlider {
+        struct SKey {
+            float                              at = 0, atY = 0;
+            std::vector<std::pair<int, float>> shapes;
+            std::vector<int>                   show, hide, variants;
+            std::vector<SNodePose>             poses;
+        };
+        std::string       name;
+        float             value = 0, valueY = 0; // at first
+        int               grid  = 0;             // 2D: grid x grid keys, row by row from the bottom; 0 = 1D
+        std::vector<SKey> keys;                  // by where they are
     };
 
     struct SAvatarNode {
@@ -251,11 +294,18 @@ namespace h3d {
     int         gestureFromName(std::string_view name); // -1 = none
 
     // spring bones (VRM's, or VRChat's PhysBones converted): hair, skirts, tails and accessories
-    // that swing. A collider is a sphere, or a capsule from offset to tail.
+    // that swing. A collider is a sphere, or a capsule from offset to tail, that keeps the bones out (or in: PhysBones'
+    // inside bounds), or a plane through offset they keep to the side of that tail - offset points to.
+    enum eColliderKind : uint8_t {
+        COLLIDER_OUTSIDE,
+        COLLIDER_INSIDE,
+        COLLIDER_PLANE,
+    };
     struct SSpringCollider {
-        int   node = -1;
-        V3    offset, tail; // in the node's space
-        float radius = 0;   // meters
+        int           node = -1;
+        V3            offset, tail; // in the node's space
+        float         radius = 0;   // meters
+        eColliderKind kind   = COLLIDER_OUTSIDE;
     };
 
     struct SSpringJoint {
@@ -300,6 +350,7 @@ namespace h3d {
         bool                      loop     = false; // over and over (else once)
         bool                      hold     = false; // its last frame stays till the avatar moves
         bool                      grounded = false; // the feet stay on the ground (not a jump, a fall)
+        float                     speed    = 1;     // how fast it plays
         bool                      fingers  = false; // it moves the fingers
         std::array<int8_t, 2>     gesture{-1, -1};  // per hand, eGesture; -1 = the player's
     };
@@ -336,10 +387,22 @@ namespace h3d {
         SLookAt                    lookAt;
         // the face each hand's gesture makes (left, right): an expression, -1 = none
         std::array<std::array<int, GESTURE_COUNT>, 2> gestureFace;
+        // the face both hands' gestures make together (left, right), over the one hand's: an expression, -1 = none,
+        // -2 = no such combination
+        std::array<std::array<int, GESTURE_COUNT>, GESTURE_COUNT> gestureCombo;
+        // hand poses of its own (the settings file's "hands": a Gesture layer's, converted): per hand and gesture, each
+        // finger bone's local rotation (finger * 3 + segment); where none is set the fingers curl as the gesture's preset
+        std::array<std::array<std::array<Quat, 15>, GESTURE_COUNT>, 2> handPose{};
+        std::array<std::array<bool, GESTURE_COUNT>, 2>                 handPoseSet{};
 
         std::vector<SAvatarPart>   parts;
         std::vector<SAvatarToggle> toggles;
+        std::vector<SAvatarSlider> sliders;
         std::string                settings; // the settings file it came with ("<name>.hypr3d.json"), "" = none
+        // material variants (KHR_materials_variants): their names, and per batch (SAvatarBatch::variants) the material
+        // it takes in some of them, (variant, material); [0] is none
+        std::vector<std::string>                      variants;
+        std::vector<std::vector<std::pair<int, int>>> variantMaps{{}};
 
         std::vector<SSpring>         springs;
         std::vector<SSpringJoint>    springJoints;
@@ -355,6 +418,8 @@ namespace h3d {
         // or their own; -1 = none
         int              findExpression(std::string_view name) const;
         int              findToggle(std::string_view name) const;
+        int              findSlider(std::string_view name) const;
+        int              findVariant(std::string_view name) const;
         std::vector<int> findParts(std::string_view name) const;  // all of that name
         std::vector<int> findMorphs(std::string_view name) const; // all of that name, or "mesh node/name"
 
@@ -364,6 +429,8 @@ namespace h3d {
             preset.fill(-1);
             for (auto& h : gestureFace)
                 h.fill(-1);
+            for (auto& h : gestureCombo)
+                h.fill(-2);
         }
 
         // the renderer copied everything it needs to the GPU (but the morphs)
@@ -452,6 +519,10 @@ namespace h3d {
             return m_held;
         }
         void setGesture(int hand, int gesture); // hand 0 left, 1 right; eGesture
+        // lip sync (CLipSync's): the mouth's aa, ih, ou, ee, oh presets this far, under what the face blocks of the mouth
+        void setVisemes(const std::array<float, 5>& weights) {
+            m_visemes = weights;
+        }
         int  gesture(int hand) const {
             return m_gesture[hand & 1];
         }
@@ -476,9 +547,19 @@ namespace h3d {
         void resetOutfit();                       // as the settings file has it
         void setShape(int morph, float weight);   // NaN = as the toggles say
         float shape(int morph) const;             // the weight it has without expressions
+        void  setSlider(int slider, float value, float valueY = NAN); // 0..1 (2D: -1..1 each), NaN = where it starts
+        float slider(int slider) const;
+        float sliderY(int slider) const; // a 2D slider's second axis
         // per SAvatarModel::parts, 1 = drawn
         const std::vector<uint8_t>& partsShown() const {
             return m_shown;
+        }
+        // per SAvatarModel::batches, the material it's drawn with; null when the model has no material variants
+        const std::vector<int>* batchMaterials() const {
+            return m_batchMat.empty() ? nullptr : &m_batchMat;
+        }
+        bool variant(int v) const { // a material variant in effect
+            return v >= 0 && v < (int)m_variantOn.size() && m_variantOn[v];
         }
 
         // spring bones; off, they hang as the animation has them
@@ -567,6 +648,7 @@ namespace h3d {
         std::vector<SMapMaterial>           m_materials;
         int                                 m_held = -1;
         float                               m_heldWeight = 1;
+        std::array<float, 5>                m_visemes{};
         std::array<uint8_t, 2>              m_gesture{};
         int                                 m_lastHand  = 1;
         bool                                m_autoBlink = true;
@@ -588,14 +670,27 @@ namespace h3d {
         std::array<bool, 2>                 m_handRig{};
         std::array<SHandPose, 2>            m_hand{};
         std::array<float, 2>                m_handW{}; // how much of the gesture's pose is over the animation's
+        std::array<std::array<Quat, 15>, 2> m_handQ{};      // the hand's own pose (SAvatarModel::handPose), eased in
+        std::array<float, 2>                m_handCustom{}; // how much of that is over the preset's
         std::vector<uint8_t>                m_clipFingers; // per clip: moves the fingers
 
         // outfit
         std::vector<uint8_t>                m_toggles;   // per toggle, on
+        std::vector<float>                  m_sliders;   // per slider, 0..1 (2D: x, -1..1)
+        std::vector<float>                  m_slidersY;  // per slider: a 2D one's y
         std::vector<int8_t>                 m_partSet;   // per part: 1 shown, 0 hidden, -1 as the toggles say
         std::vector<float>                  m_shapeSet;  // per morph, NaN = as the toggles say
         std::vector<uint8_t>                m_shown;     // per part
-        std::vector<float>                  m_shapeBase; // per morph: rest, toggles, set by hand
+        std::vector<float>                  m_shapeBase; // per morph: rest, toggles, sliders, set by hand
+        std::vector<uint8_t>                m_variantOn; // per material variant
+        std::vector<int>                    m_batchMat;  // per batch, when the model has material variants
+        std::vector<STRS>                   m_nodePose;  // per node, its rest as the toggles and sliders have it; empty = the rest
+        std::vector<int>                    m_loops;     // the toggles that are on and have a loop
+        std::vector<int>                    m_dropBy;    // per node dropped in the world: the toggle, else -1
+        std::vector<M4>                     m_dropAt;    // per node dropped: where in the world
+        std::vector<uint8_t>                m_dropTake;  // per node: dropped just now, take where it is
+        void                                loopPoses(std::vector<STRS>& pose) const; // the loops' node poses
+        void                                drops(const SAvatarMotion& m);          // nodes left in the world
 
         // emotes
         std::vector<std::shared_ptr<const SAvatarEmote>> m_emotes;
@@ -611,8 +706,9 @@ namespace h3d {
 
         // springs, stepped at a fixed rate
         struct SColliderAt {
-            V3    a, b; // the ends of the capsule, in the world
-            float radius;
+            V3            a, b; // the ends of the capsule, in the world (a plane: a point on it, and that plus its normal)
+            float         radius;
+            eColliderKind kind;
         };
         bool                                m_physics = true;
         std::vector<int>                    m_springOf;   // per node: its joint, -1 = none, -2 = below one
