@@ -28,11 +28,13 @@
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/errorOverlay/Overlay.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/SessionLockManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/notification/NotificationOverlay.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/PassElement.hpp>
@@ -398,6 +400,7 @@ class CDesktop3D {
 
     // Hyprland glue
     std::vector<CHyprSignalListener> m_listeners;
+    wl_event_source*                 m_configTimer = nullptr; // looks at the config values now and then
     SP<SHyprCtlCommand>              m_ctlCommand;
     CFunctionHook*                   m_hookMoved  = nullptr;
     CFunctionHook*                   m_hookWarp   = nullptr;
@@ -584,6 +587,12 @@ void CDesktop3D::init() {
             return; // the exit animation just ended, show the real desktop this frame
 
         g_pHyprRenderer->m_renderPass.add(makeUnique<C3DElement>());
+        // Hyprland's notifications (ours too) and its config error bar went into this frame before the 3D view, which
+        // covers the monitor: again, over it (on the focused monitor, as Hyprland draws them)
+        if (mon == Desktop::focusState()->monitor()) {
+            Notification::overlay()->draw(mon);
+            ErrorOverlay::overlay()->draw();
+        }
         // keep frames coming: Hyprland schedules the next one right after this one is committed,
         // paced by the display (calling scheduleFrameForMonitor here would also queue an unpaced one)
         mon->m_pendingFrame = true;
@@ -642,6 +651,19 @@ void CDesktop3D::init() {
         checkMapConfig();
         checkAvatarConfig();
     }));
+    // a value set at run time comes with no reload (hyprctl keyword, hl.config() through hyprctl eval): look again
+    // every second
+    m_configTimer = wl_event_loop_add_timer(
+        g_pCompositor->m_wlEventLoop,
+        [](void* data) {
+            auto* self = (CDesktop3D*)data;
+            self->checkMapConfig();
+            self->checkAvatarConfig();
+            wl_event_source_timer_update(self->m_configTimer, 1000);
+            return 0;
+        },
+        this);
+    wl_event_source_timer_update(m_configTimer, 1000);
 
     m_ctlCommand = HyprlandAPI::registerHyprCtlCommand(PHANDLE, SHyprCtlCommand{
                                                                     .name  = "hypr3d",
@@ -686,6 +708,9 @@ void CDesktop3D::shutdown() {
     g_moved = g_warp = g_cursor = nullptr;
 
     m_listeners.clear();
+    if (m_configTimer)
+        wl_event_source_remove(m_configTimer);
+    m_configTimer = nullptr;
     if (m_mapSource)
         wl_event_source_remove(m_mapSource);
     m_mapSource = nullptr;

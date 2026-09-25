@@ -43,6 +43,7 @@ namespace h3d {
         std::vector<float> m_buf;      // the analysis window's samples, at m_fs
         size_t             m_hop = 0, m_size = 0;
         float              m_level = -120.f, m_f1 = 0, m_f2 = 0;
+        float              m_unvoiced = 1; // seconds since the last voiced window
         SVisemes           m_shape{}, m_out{};
 
         void setRate(int rate);

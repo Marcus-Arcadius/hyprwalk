@@ -30,6 +30,7 @@ namespace h3d {
         m_out.fill(0);
         m_level = -120.f;
         m_f1 = m_f2 = 0;
+        m_unvoiced = 1;
     }
 
     void CLipSync::setRate(int rate) {
@@ -160,9 +161,11 @@ namespace h3d {
                 }
             }
         }
-        // a consonant, or noise: the last vowel's shape, not as open
-        const float open = voiced ? op : op * 0.3f;
+        // a consonant: the last vowel's shape, not as open, for as long as a consonant lasts. Noise that goes on (a
+        // hiss, a fan, breath) shuts it
         const float dt   = m_hop / m_fs;
+        m_unvoiced       = voiced ? 0.f : m_unvoiced + dt;
+        const float open = voiced ? op : op * 0.3f * std::max(0.f, 1.f - m_unvoiced / 0.2f);
         for (int v = 0; v < VISEME_COUNT; ++v) {
             const float target = open * m_shape[v];
             const float tau    = target > m_out[v] ? 0.04f : 0.09f;
