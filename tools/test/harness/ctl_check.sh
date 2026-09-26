@@ -2,7 +2,8 @@
 # ctl_check.sh: the plugin's avatar commands and Action Menu glue (src/control.cpp, which main.cpp and the harness
 # share) driven through the harness as hyprctl and the keyboard and mouse would: sliders (one and two axes, by
 # number and percent), toggles and the material variants they switch, the menu's pages, a slider's dial by the mouse,
-# the wheel and a click, a two-axis puppet's stick, and an emote's speed.
+# the wheel and a click, a two-axis puppet's stick, an emote's speed, and a node held in the world (MA's World Fixed
+# Object) while the avatar walks away.
 #   tools/test/harness/ctl_check.sh DIR
 # DIR has BoothAccessories.glb and SynthDances.glb with their settings and emote files, as regress.sh --keep (with
 # --items) leaves them in OUT/new. Needs build/test/shot (tools/test/harness/build.sh).
@@ -38,6 +39,20 @@ if [[ -f "$A" ]]; then
     check 'Backspace and Esc: closed' "$out" 'ctl menu -> {"open": false}'
     check 'what the dial and the stick set, kept' "$out" '{"name": "ニーハイの緩さ", "value": 0.250}'
     check '...' "$out" '{"name": "しっぽの向き", "value": [0.414, 0.207]}'
+    # its tail held in the world ("fixed", as the converter writes MA's World Fixed Object), without its spring
+    W="$(mktemp -d)"
+    cp "$A" "$W/"
+    python3 -c 'import json, sys; s = json.load(open(sys.argv[1], encoding="utf-8")); s["fixed"] = ["Tail"]; s.pop("springs", None)
+json.dump(s, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)' "${A%.glb}.hypr3d.json" "$W/BoothAccessories.hypr3d.json"
+    out="$("$SHOT" --size 64x64 --avatar "$W/BoothAccessories.glb" --frames 5 --where Tail --where Head --accel 40 --move 0 3 --frames 60 \
+        --where Tail --where Head 2>&1)"
+    rm -rf "$W"
+    tails=($(grep '^where Tail:' <<< "$out" | awk '{print $3 "," $4 "," $5}')) heads=($(grep '^where Head:' <<< "$out" | awk '{print $5}'))
+    if [[ ${#tails[@]} == 2 && "${tails[0]}" == "${tails[1]}" && ${#heads[@]} == 2 ]] && awk -v a="${heads[0]}" -v b="${heads[1]}" 'BEGIN {exit !(b - a > 2)}'; then
+        echo "ok   a node held in the world stays where it was while the avatar walks 3 m (at ${tails[0]})"
+    else
+        echo "FAIL a node held in the world: tail ${tails[*]}, head z ${heads[*]}"; FAILS=$((FAILS + 1))
+    fi
 else
     echo "skipped: no $A"
 fi

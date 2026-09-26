@@ -1,6 +1,9 @@
 # litmap.py OUTDIR: LitCourt.glb, a small map with everything tools/cs2map.py writes for a game's own lighting, made
 # up here from boxes, quads and gradients (plain python3; nothing of CS2's), for testing hypr3d's map path offscreen and
-# in tools/test/vm. A 20 m court with 5 m walls, open to the sky, and scenery far out around it:
+# in tools/test/vm; and LitCourtRuntimeSun.glb, the same with a sun that has no baked shadow channel (as cs2map writes
+# a Dynamic or Stationary sun without one: no shadows lightmap, no probe shadows), which lights lightmapped and
+# probe-lit surfaces alike, shadowed by the realtime shadow map alone. A 20 m court with 5 m walls, open to the sky,
+# and scenery far out around it:
 #   HYPR3D_lighting    two lighting sets. The court's: a lightmap (irradiance as RGBE, its directional part, the sun's
 #                      baked shadow) and light probes (an atlas of two volumes, the indoor one of higher priority). The
 #                      backdrop's: a lightmap and a probe volume of its own. Then the sun, fog (by distance and height,
@@ -554,7 +557,7 @@ def source2(**kw):
     return dict({'normalYDown': True}, **kw)
 
 
-def litcourt(path):
+def litcourt(path, baked_shadow=True):
     global N256, N128
     N256, N128 = fbm(256, 1), fbm(128, 2)
     g = Map()
@@ -565,7 +568,8 @@ def litcourt(path):
     lm = Lightmap(256, 256)
     floor_uv = lm.chart(6, 6, 100, 100, floor_light)
     wall_uv = {name: lm.chart(118, 6 + 37 * k, 100, 25, wall_light(name)) for k, name in enumerate(('north', 'east', 'south', 'west'))}
-    lm0 = [g.image('map_' + k, d) for k, d in zip(('irradiance', 'directional', 'shadows'), lm.images())]
+    kinds = ('irradiance', 'directional', 'shadows') if baked_shadow else ('irradiance', 'directional')
+    lm0 = [g.image('map_' + k, d) for k, d in zip(kinds, lm.images())]
 
     # two volumes the pillar is in: the indoor one only wins by its priority (the pillar is nearer the other's middle)
     outdoor = volume((-10.5, -0.5, -10.5), (10.5, 7.5, 10.5), (0, 0, 0), (6, 6, 3), 0)
@@ -577,15 +581,15 @@ def litcourt(path):
         return mul(CUBE_OUTDOOR[b], (0.75 + 0.25 * p[1] / 7.5) * (0.85 + 0.3 * (p[0] + 10.0) / 20.0))
     probes0 = probe_atlas((8, 6, 3), [outdoor, indoor], court_cube,
                           lambda k, p: 1.0 if k == 1 or not sunlit(p, (0.0, 1.0, 0.0)) else 0.0)
-    pr0 = [g.image('map_probes', probes0[0]), g.image('map_probe_shadows', probes0[1])]
+    pr0 = [g.image('map_probes', probes0[0])] + ([g.image('map_probe_shadows', probes0[1])] if baked_shadow else [])
 
     # ------------------------------------------------ the backdrop's (lighting set 1), in world space
     lm1 = Lightmap(128, 64)
     hills_uv = lm1.chart(6, 6, 116, 26, hills_light)
-    lb = [g.image('skybox_' + k, d) for k, d in zip(('irradiance', 'directional', 'shadows'), lm1.images())]
+    lb = [g.image('skybox_' + k, d) for k, d in zip(kinds, lm1.images())]
     far = volume((-560.0, -40.0, -560.0), (560.0, 400.0, 560.0), (0, 0, 0), (4, 4, 2), 0)
     probes1 = probe_atlas((4, 4, 2), [far], lambda k, p, b: CUBE_BACKDROP[b], lambda k, p: 0.0)
-    pr1 = [g.image('skybox_probes', probes1[0]), g.image('skybox_probe_shadows', probes1[1])]
+    pr1 = [g.image('skybox_probes', probes1[0])] + ([g.image('skybox_probe_shadows', probes1[1])] if baked_shadow else [])
 
     # ------------------------------------------------ materials, as cs2map leaves them
     floor = g.mat({'name': 'materials/litcourt/floor_tiles', 'normalTexture': dict(tex['floor_normal']),
@@ -748,13 +752,13 @@ def litcourt(path):
     # ------------------------------------------------ HYPR3D_lighting
     def lightmaps(ims):
         return {k: {'image': i} for k, i in zip(('irradiance', 'directional', 'shadows'), ims)}
+
+    def probes(ims, size, volumes):
+        return dict({'irradiance': {'image': ims[0]}, 'size': size, 'columns': 16, 'volumes': volumes},
+                    **({'shadows': {'image': ims[1]}} if len(ims) > 1 else {}))
     g.js['extensions'] = {'HYPR3D_lighting': {
-        'sets': [{'name': 'map', 'lightmaps': lightmaps(lm0),
-                  'probes': {'irradiance': {'image': pr0[0]}, 'shadows': {'image': pr0[1]}, 'size': [8, 6, 3], 'columns': 16,
-                             'volumes': [outdoor, indoor]}},
-                 {'name': 'skybox', 'lightmaps': lightmaps(lb),
-                  'probes': {'irradiance': {'image': pr1[0]}, 'shadows': {'image': pr1[1]}, 'size': [4, 4, 2], 'columns': 16,
-                             'volumes': [far]}}],
+        'sets': [{'name': 'map', 'lightmaps': lightmaps(lm0), 'probes': probes(pr0, [8, 6, 3], [outdoor, indoor])},
+                 {'name': 'skybox', 'lightmaps': lightmaps(lb), 'probes': probes(pr1, [4, 4, 2], [far])}],
         'sun': {'color': [1.0, 0.9, 0.7], 'direction': list(SUN)},
         'fog': {'start': 3.0, 'end': 50.0, 'exponent': 1.2, 'maxOpacity': 0.7, 'lodBias': 0.5,
                 'heightStart': 0.0, 'heightEnd': 30.0, 'heightExponent': 1.0},
@@ -770,5 +774,6 @@ def litcourt(path):
 if __name__ == '__main__':
     out = sys.argv[1] if len(sys.argv) > 1 else '.'
     os.makedirs(out, exist_ok=True)
-    litcourt(os.path.join(out, 'LitCourt.glb'))
-    print('wrote', os.path.join(out, 'LitCourt.glb'))
+    for name, baked in (('LitCourt', True), ('LitCourtRuntimeSun', False)):
+        litcourt(os.path.join(out, name + '.glb'), baked)
+        print('wrote', os.path.join(out, name + '.glb'))

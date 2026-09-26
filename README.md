@@ -131,10 +131,14 @@ all the way in the eight directions, from up clockwise.
 avatar, hypr3d listens to your default microphone through PipeWire (as the "hypr3d lip sync"
 stream), and a red "lip sync: listening" badge sits in the top right corner, below Hyprland's
 notifications while any show. How loud you are opens the mouth, and the vowel you make (its first
-two formants, from linear prediction) picks the shape: the avatar's aa, ih, ou, ee and oh visemes. A
-consonant keeps the last vowel's shape, less open, for a moment; hiss or noise that goes on shuts the
-mouth. It keeps a quarter of a second of sound at most, to look at, and nothing is written anywhere or
-sent. Leaving 3D, or turning it off, closes the microphone.
+two formants, from linear prediction; a window counts as voiced when it's periodic, or when its
+formants stand out) picks the shape: the avatar's aa, ih, ou, ee and oh visemes. Consonants that
+show use the avatar's own consonant visemes where it has them (VRChat's `vrc.v_pp`, `vrc.v_ff`,
+`vrc.v_ss` and `vrc.v_ch`, or the settings file's `visemes`): an s, z or ts (and Japanese し and ち)
+shows ss, a rounder sh ch, a flat, faint f ff, and a low murmur well under the voice (an m, or the
+voice trailing off) pp. Otherwise a consonant keeps the last vowel's shape, less open, for a moment.
+Hiss or noise that goes on shuts the mouth. It keeps a quarter of a second of sound at most, to look
+at, and nothing is written anywhere or sent. Leaving 3D, or turning it off, closes the microphone.
 
 ## hyprctl
 
@@ -174,7 +178,7 @@ other argument does what `hyprctl hypr3d menu` does. The Lua functions are
 - **VRM 0.x and 1.0**: the humanoid map, expressions (blend shapes, material colours and texture
   transforms), look-at, spring bones (VRM 0.x `secondaryAnimation` and `VRMC_springBone`, with
   `VRMC_springBone_extended_collider`'s inside and plane colliders), node constraints
-  (`VRMC_node_constraint`), and MToon's outlines and render queue.
+  (`VRMC_node_constraint`), and MToon's shading, matcap, outlines and render queue.
 - **A plain glTF/GLB**: the humanoid bones are guessed from their names (Mixamo, VRoid, Blender's
   rigs and most other naming styles). Expressions come from shape key names (VRoid, VRChat, MMD and
   ARKit), and spring bones from bone names (hair, skirt, cape, sleeves, ribbons, tail and ears, in
@@ -198,7 +202,20 @@ MToon's; `hyprctl` has no switch for them, the harness's `--outlines 0` turns th
 second draw of each outlined mesh: 0.24 → 0.28 ms a frame for Hatsune Miku NT at 1920×1080 on an RTX
 4090. UnlitWF's back faces take their own colour or texture, and its light clamp keeps the light's
 brightness between its minimum and one (its anti-glare). The converter writes these into the
-material's glTF extras (below).
+material's glTF extras (below). UnlitWF's light has no N·L in it, so its materials are lit the same
+all round unless their toon shade is on, as are Poiyomi's with its Flat lighting.
+
+Toon shading follows MToon's: the sun lights a surface from its shade colour to its lit one as N·L
+goes from one threshold to another, a sharp step in place of the gradual fall-off, and the shade side
+is lit by the sun too (the sky and the bounce light it as any material). A shadow cast on it takes it
+to its shade colour, as MToon folds the shadow into N·L; for that the shadow is looked up 10 cm
+towards the sun (or three of its normal offsets), so the surface's own silhouette in the shadow map
+doesn't draw a staircase along the step. In a map with the game's lighting the sun only gets as far
+as its baked shadow lets it, so an avatar indoors is lit by the probes alone. A matcap, looked up by
+the normal as the eye sees it, is added, multiplied, mixed in, or (UnlitWF's median) lightens and
+darkens, lit as the surface is or as if in full light. VRM files bring MToon's own (`VRMC_materials_mtoon`,
+or VRM 0.x's `materialProperties`); the converter writes lilToon's, Poiyomi's, UnlitWF's and MToon's
+into the extras.
 
 ### The settings file
 
@@ -213,6 +230,8 @@ or overrides it. The converter writes it; you can also write one by hand. Every 
 | `hands` | `{"file": "a .vrma", "left"/"right": {"fist": seconds, …}}`: each sign's finger pose, the animation's at that time (the converter writes an avatar's Gesture layer's hand poses so); the others stay procedural |
 | `floor` | the height the avatar stands on, in the GLB's units (MA's Floor Adjuster); otherwise its lowest point |
 | `hidden` | `["mesh node", …]`: parts that start hidden |
+| `visemes` | `{"pp": {"shape key" or "mesh/shape key": 0..1}, "ff": …, "ss": …, "ch": …}`: the shapes of the consonants lip sync shows (VRChat's PP, FF, SS and CH visemes; the converter also writes th, dd, kk, nn and rr, unused) |
+| `fixed` | `["node", …]`: nodes held in the world where their rest pose was when the avatar appeared (MA's World Fixed Object), with everything under them |
 | `toggles` | `[{"name", "group" or "groups": [names], "on", "show": [parts], "hide": [parts], "shapes": {…}, "variants": [material variants], "transforms": {…}, "loop": {"seconds", "a": {"shapes", "transforms"}, "b": {…}}, "drop": [nodes]}]`: outfit toggles for the Action Menu; the toggles of a group are exclusive, and a toggle in several groups turns off the others of each. A toggle that is on puts its material variants' materials on, sets its nodes' `transforms` (`{"node": {"t": [x,y,z], "r": [x,y,z,w], "s": [x,y,z]}}`, each part optional, in the node's own space), goes from `a` to `b` and back every `seconds` (smoothly), and leaves the `drop` nodes where they were in the world when it went on |
 | `sliders` | `[{"name", "value": 0..1, "keys": [{"at": 0..1, "shapes": {…}, "transforms": {…}, "show": [parts], "hide": [parts], "variants": [material variants]}]}]`: dials for the Action Menu (VRChat's radial puppets). Between two keys the shape keys and transforms blend. Parts and material variants switch at a key, so each key has what holds from it up to the next. A two-axis one has `"axes": 2`, `"value": [x, y]` and a `"grid": n` of n×n keys, each `"at": [x, y]` (−1..1), blended between the four around the stick |
 | `emotes` | `[{"file" or "clip", "name", "loop", "hold", "grounded", "speed"}]`: more emotes. `file` is a `.vrma` or glTF file (next to the settings file unless absolute), `clip` a clip of the avatar's own. `hold` keeps the last frame until you move, `grounded` keeps the feet on the floor, and `speed` (default 1) plays it faster or slower |
@@ -225,8 +244,15 @@ makes it a part of its own (what an MA Mesh Cutter hides while a toggle is on). 
 `hypr3d_queue` is Unity's render queue, `hypr3d_stencil` its stencil test and write (`ref`, `read`,
 `write`, `comp`, `pass`, `fail`, `zfail`, and `again` for UnlitWF's MaskOut_Blend, which draws what
 its mask hides again, fainter), `hypr3d_outline` its toon outline (`width` in metres, `space`
-world, object or screen, `color`, `base`, `tint`, `mask`, `shift`, `fix`, `lit`), `hypr3d_back` its
-back faces' `color` and `texture`, and `hypr3d_light` UnlitWF's light clamp (`min`, `max`, `chroma`).
+world, object or screen, `color`, `base`, `tint`, `mask`, `shift`, `fix`, `lit`, and a colour
+`texture`: `{"index", "transform", "blend"}`, the colour times it, or mixed `blend` of the way
+towards it), `hypr3d_back` its
+back faces' `color` and `texture`, `hypr3d_light` UnlitWF's light clamp (`min`, `max`, `chroma`),
+`hypr3d_toon` its toon shading (`shade`: a linear colour, times the base colour if `base`, and times
+a `texture`: `{"index"}`; `lo` and `hi`: N·L where it's all shade and where it's all lit, `lo = hi =
+-1` lit all round; `strength`: how much of the shade shows) and `hypr3d_matcap` its matcap
+(`{"index", "color": [r, g, b, amount], "mode": "add"|"multiply"|"mix"|"median", "lit"}`, `lit` 0
+as if in full light).
 
 ## Maps
 
@@ -271,7 +297,9 @@ and `OUT.hypr3d.json` for hypr3d, carrying over:
   Mask/MaskOut/MaskOut_Blend shaders by their passes, or by their GUIDs when the shaders aren't in
   the input; lilToon's and Poiyomi's stencil settings), toon outlines (UnlitWF's `_TL_*`, lilToon's
   outline shaders, Poiyomi's and MToon's: width and its mask, colour, Z shift, fixed width near the
-  eye), UnlitWF's back faces (`_BK_*`) and light clamp (`_GL_*`), in the materials' extras. UnlitWF's
+  eye), UnlitWF's back faces (`_BK_*`) and light clamp (`_GL_*`), and toon shading and matcaps
+  (UnlitWF's `_TS_*` and `_HL_*`, lilToon's first shadow and matcap, Poiyomi's Multilayer Math and
+  Flat lighting and its first matcap, MToon's and MToon10's), in the materials' extras. UnlitWF's
   alpha from a mask texture (`_AL_Source` 1 or 2) or inverted (`_AL_InvMaskVal`) is baked into the
   base texture's alpha
 - the Action layer's humanoid clips, dances and poses, as emotes (below)
@@ -333,11 +361,13 @@ Zachz Winner for Doodle Dance, and しぐれうい's 「粛聖!! ロリ神レク
 dance's `speed` in the settings file matches it to the song's tempo. The Doodle Dance page suggests
 about 97.7%. At `"speed": 0.977`, the dance's 22-frame bounce lasts 0.375 s, one beat at 160 BPM.
 
-Not converted: shader effects beyond the above (toon shading, matcaps, rim lights, UnlitWF's outline
-colour texture, lilToon's outline texture, Poiyomi's other outline modes and the like), constraints,
-particles, audio and contacts. MA's World Fixed Object is named in a warning: its objects move with
-the avatar, as hypr3d has no constraints to hold them in the world. World Scale Object and Convert
-Constraints are left out quietly (constraints aren't converted, and hypr3d doesn't scale the
+Not converted: shader effects beyond the above (rim lights, a toon shader's second and third shade
+steps, shade and matcap masks, Poiyomi's other lighting types and matcaps, its other outline modes and
+the like), constraints, particles, audio and contacts. Outlines take their colour
+textures (UnlitWF's custom colour, lilToon's outline texture, Poiyomi's outline texture). MA's World
+Fixed Object is held in the world where its rest pose was when the avatar appeared (MA fixes it to the
+world's origin; hypr3d's worlds start you at theirs), the settings file's `"fixed"`. World Scale Object
+and Convert Constraints are left out quietly (constraints aren't converted, and hypr3d doesn't scale the
 avatar's world), and so are Visible Head Accessory, Mesh Settings and MA's VRChat-only settings,
 since hypr3d has no use for them. VRCFury leaves out SPS, TPS and OGB (hypr3d has no contacts or
 haptics) with a warning.
@@ -378,8 +408,10 @@ Valve's; this reads your copy of the game for your own use.
 
   `grep 'a == "--' tools/test/harness/shot.cpp` lists every option. There are options for the camera,
   motion, faces, gestures, toggles, sliders (`--slider NAME X Y` for a two-axis one), emotes, the
-  menu, lip sync from a WAV file (`--audio FILE`, `--visemes`, `--badge`), outlines (`--outlines 0`),
-  maps, timing (`--bench`) and debugging (`--hide`, `--show`, `--glinfo`, `--where NODE`). `--ctl`
+  menu, lip sync from a WAV file (`--audio FILE`, `--visemes`, `--badge`, and `--lipsync-trace`: a
+  line for each analysis window, its loudness, voicing, formants, fricative bands and visemes),
+  outlines (`--outlines 0`), maps (`--no-dual`: glass without blending's second source, as where the
+  GPU has none), timing (`--bench`) and debugging (`--hide`, `--show`, `--glinfo`, `--where NODE`). `--ctl`
   runs a `hyprctl hypr3d avatar …` or `menu …` request, and `--key`, `--click`, `--wheel` and
   `--mouse` give the Action Menu the plugin's input: the same code as the plugin's (`src/control.cpp`,
   which `main.cpp` hands its commands and menu input to).
@@ -389,9 +421,26 @@ Valve's; this reads your copy of the game for your own use.
   emote at twice its speed. It runs at the VM's 1280×800, and the harness lays its menu out for its
   `--size` before each option, as the plugin does every frame, so the dial and the stick come out
   where the VM test has them.
-- `tools/test/harness/lipsync_check.sh AVATAR.glb`: lip sync on vowels `tools/test/synth/vowels.py`
-  sings (a source-filter model of a man's and a woman's a, i, u, e, o), silence, hiss, a quiet
-  voice, and hiss right after a vowel.
+- `tools/test/harness/toon_check.sh [DIR]`: toon shading and matcaps on `toonballs.py`'s six balls
+  (a plain one, MToon 1.0's, VRM 0.x MToon's, the converter's extras with and without a matcap, and a
+  matcap alone), side on to the sun: the plain ball's light falls off with N·L, a toon ball's is flat
+  on each side of a sharp step, each shade has its own colour, a matcap brightens where it's white,
+  and a toon ball in a wall's shadow is all shade.
+- `tools/test/fuzz/fuzz.py map|avatar OUTDIR [-n N] [--avatars DIR]` (and `replay CASE`): feeds the
+  map and avatar loaders broken files, and keeps what crashes them, trips AddressSanitizer or
+  UndefinedBehaviorSanitizer, hangs or runs away with memory, with its input. It runs a harness built
+  with the sanitizers (`./build.sh -f tools/test/fuzz/asan.mk` makes `build-asan/shot`) on llvmpipe.
+  The seeds are `litmap.py`'s LitCourt for maps, and for avatars BoothAccessories as it is, as a VRM
+  0.x and as a VRM 1.0, and `assets.py`'s ToonTest; a case mutates a seed's JSON, its binary data, its
+  settings file or its emote file. See the script's header for the rest.
+- `tools/test/harness/lipsync_check.sh AVATAR.glb [WORKDIR] [--real DIR [PERCENT]]`: lip sync on
+  vowels `tools/test/synth/vowels.py` sings (a source-filter model of a man's and a woman's a, i, u,
+  e, o), silence, hiss, a quiet voice, hiss right after a vowel, and an s, sh, f and m between two
+  a's (each must show its consonant viseme and no other), and the avatar's own s viseme following an
+  s. `--real DIR` adds recordings of real voices, named for their vowel (`a_*.wav` … `o_*.wav`): how
+  often each one's viseme leads, how open it is, and how much of it counted as voiced; at least
+  PERCENT (85) of them must lead with their own. Such recordings stay out of the repo: the ones used
+  here came from Wikimedia Commons and Lingua Libre (public domain, CC0, CC BY and CC BY-SA).
 - `tools/test/vm/run.sh [--only ITEMS] [--gpu virgl] OUTDIR`: the plugin in a real Hyprland, in NixOS
   VMs (`vm.nix`) built the way Hyprland's own CI tests Hyprland: QEMU with KVM and a virtio GPU that
   Mesa's llvmpipe draws for, the Hyprland you run (the one `build.sh` builds against, or `HYPR_BIN`'s)
@@ -409,12 +458,16 @@ Valve's; this reads your copy of the game for your own use.
     into a window in 3D
   - what a window gets in 3D, seen by `wev`: the pointer entering, moving (surface-local, where the
     crosshair is), leaving, the buttons, keys only while you type, and the wheel exactly as on the
-    2D desktop, whole notches and half ones, both wheels
+    2D desktop: whole notches and half ones, both wheels, with a mouse's own `scroll_factor`
+    (`hl.device`), a window rule's (`scroll_mouse`, `scroll_touchpad`) and
+    `input:emulate_discrete_scroll` at 0 and 2, and a touchpad's two-finger scrolling (`touchpad.py`,
+    through uinput: finger scrolling that stops, both axes in one frame)
   - carrying windows: G, a left or right click, Esc and X, the wheel and Ctrl+wheel while holding
     one, `hyprctl hypr3d grab`, `place`, `hold`, `reset-windows` and `windows`, and a placed window
     that keeps drawing when its workspace is hidden
   - a second monitor (Hyprland's own headless output): 3D on one while the other stays 2D, then on
     the other; the mouse, the focus, notifications on the focused one, and a monitor going away in 3D
+    (and the plugin holding its output for aquamarine's queued frame, below)
   - scales 1.5 and 2: the frame, the crosshair, the Action Menu and the badge drawn at the monitor's
     scale, the dial's mouse counts, aiming, clicking and typing, and the cursor hidden
   - sliders, a material variant and an emote's speed through hyprctl; the Lua functions and the
@@ -423,7 +476,9 @@ Valve's; this reads your copy of the game for your own use.
   - a map with a game's own lighting, as `tools/cs2map.py` writes one: `litmap.py`'s LitCourt.glb, made
     up here, with two lightmap sets, light probes, the sun's baked shadow, fog, a sky, an exposure range,
     a tone curve, Source 2 materials (glass, decals, detail textures, self-illumination), a blend layer,
-    a backdrop and block compressed textures, each checked in a frame
+    a backdrop and block compressed textures, each checked in a frame, and the sun glinting off its
+    glass; and LitCourtRuntimeSun, the same with a sun that has no baked shadow channel, which lights
+    the lightmapped floor as the probe-lit props (only the realtime shadow map shadows it)
   - that Hyprland draws its notifications over the 3D view, that the lip sync badge moves below them,
     and that Hyprland draws its windows (rounding, blur, borders) as before once 3D is left
   - lip sync through PipeWire: `pw-cat` sings the vowels into the virtual microphone, and the
@@ -431,28 +486,28 @@ Valve's; this reads your copy of the game for your own use.
     leave 3D or turn lip sync off are checked
   - `tools/test/live/check.sh`, below, run in the VM with its microphone prompts sung into the test
     microphone, and stopped with Ctrl+C halfway through
-  - that Hyprland exits cleanly with windows open. Hyprland 0.55.x doesn't: it crashes in its dwindle
-    layout (with or without hypr3d), which upstream fixed in 0.56.0 (commit 338bdbb3), so this check
-    says "known" there instead of failing, and the other checks close the terminals before they stop
-    Hyprland
+  - that Hyprland exits cleanly with windows open, in the dwindle and the master layout. Hyprland
+    0.55.x doesn't: it crashes in both (with or without hypr3d), dwindle's fixed upstream in 0.56.0
+    (commit 338bdbb3) and master's not yet, so these checks say "known" there instead of failing, and
+    the other checks close the terminals before they stop Hyprland
 
   `OUTDIR` gets `results.txt` (a line per check), `results.json`, `frames/` (grim's frames from inside
   the VM), `logs/` (Hyprland's logs, the VM's journal, `lipsync.json`, `pw-dump.json`; `logs/hidpi`
   for the second VM), `live/` (the live check's results and frames) and `driver.log`. `--only 14,15`
   runs only those sections (after section 0, which starts Hyprland). Only synthetic things go into the
   VM: BoothAccessories converted from `booth.py`'s packages (or taken from `--avatars DIR`, as
-  `regress.sh --keep` leaves them), `assets.py`'s two files, `litmap.py`'s LitCourt, the vowels,
-  `wheel.py`, the live check script and `hypr3d.so`. A run takes about eleven minutes, nearly all of it
-  in the VMs: Mesa draws in software there, at 6 to 13 frames a second (the lit map's first frames take
-  a while more, as llvmpipe compiles its shaders). With `--gpu virgl` a GPU of yours draws instead,
-  through virglrenderer on the render node
-  `H3D_RENDERNODE` (`/dev/dri/renderD129` by default, an Intel iGPU here): QEMU's egl-headless display,
-  which opens no window either. The first run builds the VMs in about a minute and fetches about
-  410 MiB for them (1.3 GiB unpacked, mostly QEMU and a kernel), `--gpu virgl` about 200 MiB more (the
-  full QEMU, 1 GiB unpacked); `OUTDIR/driver` keeps the VMs' closure (4 GiB, most of it already in a
-  NixOS store) alive until `OUTDIR` is deleted. While it runs, the VMs' disks and the driver's
-  sockets are in a folder under `/tmp` (`H3D_VM_TMP` picks another), deleted afterwards: the test
-  driver puts them in `XDG_RUNTIME_DIR`, a small tmpfs that a core dump fills.
+  `regress.sh --keep` leaves them), `assets.py`'s two files, `litmap.py`'s two courts, the vowels,
+  `wheel.py` and `touchpad.py`, the live check script and `hypr3d.so`. A run takes about thirteen
+  minutes (ten with `--gpu virgl`), nearly all of it in the VMs: Mesa draws in software there, at 6 to
+  13 frames a second (the lit map's first frames take a while more, as llvmpipe compiles its shaders).
+  With `--gpu virgl` a GPU of yours draws instead, through virglrenderer on the render node
+  `H3D_RENDERNODE` (`/dev/dri/renderD129` by default, an Intel iGPU here): QEMU's egl-headless
+  display, which opens no window either. The first run builds the VMs in about a minute and fetches
+  about 410 MiB for them (1.3 GiB unpacked, mostly QEMU and a kernel), `--gpu virgl` about 200 MiB
+  more (the full QEMU, 1 GiB unpacked); `OUTDIR/driver` keeps the VMs' closure (4 GiB, most of it
+  already in a NixOS store) alive until `OUTDIR` is deleted. While it runs, the VMs' disks and the
+  driver's sockets are in a folder under `/tmp` (`H3D_VM_TMP` picks another), deleted afterwards: the
+  test driver puts them in `XDG_RUNTIME_DIR`, a small tmpfs that a core dump fills.
 - `tools/test/live/check.sh OUTDIR [--mic] [--avatar FILE] [--map FILE|--no-map]`: for what only your
   own desktop can check: your GPU and monitor, and your voice. You run it, in your Hyprland session,
   and don't touch the mouse or keyboard while it runs. It loads `hypr3d.so` and compares your desktop
@@ -492,8 +547,8 @@ Valve's; this reads your copy of the game for your own use.
   code on small hand-made hierarchies and features (VRCFury's two save formats and its upgrades).
 - `tools/test/synth/mat_unit.py`: the material reader on hand-made UnlitWF, lilToon, Poiyomi and
   MToon materials (alpha sources and masks, inverted alpha, which faces its shaders draw, emission,
-  stencils, render queues, outlines, back faces, the light clamp), and a GLB exported and read back
-  (the alpha baked into the base texture, the extras and their textures).
+  stencils, render queues, outlines, back faces, the light clamp, toon shading and matcaps), and a
+  GLB exported and read back (the alpha baked into the base texture, the extras and their textures).
 - `tools/test/synth/anim_unit.py`: transform curves, VRCFury's Scale, World Drop and Breathing, 2D
   blend trees, four-axis puppets, avatar masks and hand poses.
 - `tools/test/synth/human_unit.py [-- T_POSE.anim…]`: the muscle-to-bone maths on a small T-posed
@@ -535,16 +590,31 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check
   Load real ones as `.vrma` or glTF clips with `avatar_emotes`.
 - In 3D mode, Alt+Tab doesn't reach Hyprland: Tab opens the Action Menu even with Alt held. Only keys
   with Super or Ctrl+Alt are passed through.
-- Lip sync knows five vowels and how loud you are, not consonants. Its vowels are Japanese ones,
-  between a man's and a woman's voice; other voices and languages may pick the wrong shape now and
-  then. It was tested on sung vowels, through the harness and through PipeWire in a VM
-  (`tools/test/vm`); `tools/test/live/check.sh --mic` tries it on your voice.
+- Lip sync knows five vowels, how loud you are, and four consonants (pp, ff, ss, ch) where the
+  avatar has their visemes; not th, dd, kk, nn or rr, and an n's murmur shows as pp, as an m's does.
+  Its vowels are Japanese ones, between a man's and a woman's voice (Tokyo speakers' measurements and
+  28 recordings of 11 speakers); other voices and languages may pick the wrong shape now and then.
+  It was tested on sung vowels and consonants, through the harness and through PipeWire in a VM
+  (`tools/test/vm`), and on those real recordings (26 of 28 lead with their vowel; the consonants
+  in their words were looked at, not scored); `tools/test/live/check.sh --mic` tries it on your
+  voice.
 - The plugin's Hyprland code (its hooks, dispatchers, hyprctl command, Lua functions and config
   values) is tested in a real Hyprland in a VM (`tools/test/vm`), on a virtual GPU that Mesa draws for
   in software, at scales 1, 1.5 and 2 and with a second (headless) monitor; `tools/test/live/check.sh`
   goes through it on your own monitor and GPU.
-- Hyprland 0.55.x crashes when it quits with windows open, with or without hypr3d (its dwindle
-  layout calls a window that's gone). Hyprland 0.56.0 fixed it (commit 338bdbb3).
+- aquamarine before 0.12.1 (Hyprland 0.55.x has 0.11.0) runs a late frame of a headless output
+  (`hyprctl output create headless`) after the output is removed: Hyprland crashes, or its heap is
+  corrupted and it aborts later (fixed upstream by 1699271 and 6ecde03). In 3D the plugin asks for
+  every frame, so a slow one is nearly always waiting when the monitor it's on goes. While the plugin
+  is loaded, it holds a removed headless output until the frames queued for it have run.
+- Hyprland 0.55.x crashes when it quits with windows open, with or without hypr3d: its dwindle and
+  master layouts call a window that's gone. Hyprland 0.56.0 fixed dwindle's (commit 338bdbb3); master's
+  still crashes on Hyprland's main branch (e368c13c, September 2026). Guarding master's calls the way
+  338bdbb3 guards dwindle's fixes it (tested in the VM on 0.55.2 and on main); that patch isn't here, as
+  it is Hyprland's code.
+- Toon shading takes a toon shader's first shade step only, not its second and third, nor its shade
+  and matcap masks. A shadow on a toon surface is looked up 10 cm towards the sun, so shadows cast from
+  closer than that (a fringe's on the forehead) don't show on it.
 - `tools/unity2hypr3d.py` covers the MA and VRCFury features avatars and outfits use most, not all
   of them (see its "not converted" list above). It has been tested on synthetic packages and on
   three free Booth items (an UnlitWF avatar and two MA dance motions), not on paid avatars or

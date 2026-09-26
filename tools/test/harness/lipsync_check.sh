@@ -1,16 +1,27 @@
 #!/usr/bin/env bash
 # lipsync_check.sh: lip sync (src/lipsync.cpp) on sung vowels that tools/test/synth/vowels.py makes: a man's and a
 # woman's a, i, u, e, o must each open the mouth with their own viseme the most (aa, ih, ou, ee, oh), and silence,
-# hiss, a whisper-quiet voice and hiss that follows a vowel must leave it shut. Through the harness, as the plugin
-# feeds it the microphone.
-#   tools/test/harness/lipsync_check.sh AVATAR.glb [WORKDIR]
+# hiss, a whisper-quiet voice and hiss that follows a vowel must leave it shut; the consonants between two a's (s,
+# sh, f, m) must each show their own (ss, ch, ff, pp) and no other. Through the harness, as the plugin feeds it the
+# microphone.
+#   tools/test/harness/lipsync_check.sh AVATAR.glb [WORKDIR] [--real DIR [PERCENT]]
 # Any avatar will do (it needs no mouth for the numbers). Needs build/test/shot (tools/test/harness/build.sh).
+# --real DIR: recordings of real voices too, WAVs named for their vowel (a_*.wav ... o_*.wav; kept out of the repo:
+# see the README). For each, how often its viseme is the mouth's biggest (after the first 0.3 s), how open it is on
+# average, and how much of it lip sync heard as voiced; at least PERCENT (85) of the files must lead with their own.
 set -uo pipefail
-AV="${1:?usage: lipsync_check.sh AVATAR.glb [WORKDIR]}"
+REAL="" REAL_MIN=85 ARGS=()
+while (($#)); do
+    case "$1" in
+        --real) REAL="$2"; shift 2; [[ "${1:-}" =~ ^[0-9]+$ ]] && { REAL_MIN="$1"; shift; } ;;
+        *) ARGS+=("$1"); shift ;;
+    esac
+done
+AV="${ARGS[0]:?usage: lipsync_check.sh AVATAR.glb [WORKDIR] [--real DIR [PERCENT]]}"
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 SHOT="$REPO/build/test/shot"
 [[ -x "$SHOT" ]] || { echo "no $SHOT: tools/test/harness/build.sh builds it" >&2; exit 1; }
-W="${2:-$(mktemp -d)}"
+W="${ARGS[1]:-$(mktemp -d)}"
 python3 "$REPO/tools/test/synth/vowels.py" "$W" > /dev/null || exit 1
 FAILS=0
 run() { "$SHOT" --size 64x64 --avatar "$AV" --audio "$W/$1.wav" --frames "${2:-30}" --visemes 2>&1 | grep '^visemes'; }
@@ -45,7 +56,7 @@ with wave.open(f'{d}/o_then_hiss.wav', 'wb') as w:
 EOF
 for f in silence hiss quiet_a o_then_hiss; do
     line="$(run "$f" $([[ $f == o_then_hiss ]] && echo 90))" # (0.8 s of the o, then 0.7 of hiss)
-    most="$(awk '{m = 0; for (i = 3; i <= 11; i += 2) if ($i + 0 > m) m = $i + 0; print m}' <<< "$line")"
+    most="$(awk '{m = 0; for (i = 3; i <= 19; i += 2) if ($i + 0 > m) m = $i + 0; print m}' <<< "$line")"
     if [[ "$(awk -v m="$most" 'BEGIN {print (m < 0.05)}')" == 1 ]]; then
         echo "ok   $f: shut ($most)"
     else
@@ -53,5 +64,61 @@ for f in silence hiss quiet_a o_then_hiss; do
         FAILS=$((FAILS + 1))
     fi
 done
+# the consonants, a man's and a woman's: the most each consonant viseme shows along the file (the trace's last nine
+# numbers are the mouth's visemes: aa ih ou ee oh pp ff ss ch)
+for who in man woman; do
+    for pair in asa:ss asha:ch afa:ff ama:pp; do
+        f="${pair%%:*}" want="${pair##*:}"
+        line="$("$SHOT" --size 64x64 --avatar "$AV" --audio "$W/${who}_$f.wav" --lipsync-trace 2>&1 | awk '
+            /^window/ { for (i = 6; i <= 9; i++) { x = $(NF - 9 + i) + 0; if (x > m[i]) m[i] = x } }
+            END { printf "pp %.2f ff %.2f ss %.2f ch %.2f", m[6], m[7], m[8], m[9] }')"
+        got="$(awk -v w="$want" '{for (i = 1; i <= 8; i += 2) if ($i == w) print $(i + 1)}' <<< "$line")"
+        other="$(awk -v w="$want" '{m = 0; for (i = 1; i <= 8; i += 2) if ($i != w && $(i + 1) + 0 > m) m = $(i + 1) + 0; print m}' <<< "$line")"
+        if awk -v g="$got" -v o="$other" 'BEGIN {exit !(g > 0.3 && o < 0.15)}'; then
+            echo "ok   ${who}'s a-${f:1:${#f}-2}-a: $want ($line)"
+        else
+            echo "FAIL ${who}'s a-${f:1:${#f}-2}-a: not $want alone ($line)"
+            FAILS=$((FAILS + 1))
+        fi
+    done
+done
+# and on the avatar: its own s viseme (VRChat's vrc.v_ss) in place of the vowel's shape, halfway through the s
+out="$("$SHOT" --size 64x64 --avatar "$AV" --audio "$W/man_asa.wav" --frames 38 --morphs 2>&1)"
+if grep -q "lip sync's consonants:.* ss" <<< "$out"; then
+    ss="$(grep -o 'vrc.v_ss=[0-9.]*' <<< "$out" | cut -d= -f2)" aa="$(grep -o 'vrc.v_aa=[0-9.]*' <<< "$out" | cut -d= -f2)"
+    if awk -v s="${ss:-0}" -v a="${aa:-0}" 'BEGIN {exit !(s > 0.3 && s > a)}'; then
+        echo "ok   the avatar's s shape through the s: vrc.v_ss $ss over vrc.v_aa ${aa:-0}"
+    else
+        echo "FAIL the avatar's s shape through the s: vrc.v_ss ${ss:-0}, vrc.v_aa ${aa:-0}"
+        FAILS=$((FAILS + 1))
+    fi
+else
+    echo "skipped: $(basename "$AV") has no s viseme (vrc.v_ss)"
+fi
+if [[ -n "$REAL" ]]; then
+    total=0 led=0
+    for f in "$REAL"/[aiueo]_*.wav; do
+        [[ -f "$f" ]] || continue
+        v="$(basename "$f")"; v="${v:0:1}"
+        # the trace's last five numbers are the mouth's visemes (aa ih ou ee oh), then the window's time and voicing
+        line="$("$SHOT" --size 64x64 --avatar "$AV" --audio "$f" --lipsync-trace 2>&1 | awk -v want="$(echo aiueo | awk -v v="$v" '{print index($0, v)}')" '
+            /^window/ { t = $2 + 0; voiced += ($12 == "voiced"); n++
+                if (t > 0.3) { m = 0; k = 0; for (i = 1; i <= 5; i++) { x = $(NF - 9 + i) + 0; if (x > m) { m = x; k = i } }
+                               late++; open += $(NF - 9 + want); if (k == want && m > 0.05) lead++ } }
+            END { printf "%.0f %.2f %.0f", late ? 100 * lead / late : 0, late ? open / late : 0, n ? 100 * voiced / n : 0 }')"
+        read -r pct opn vcd <<< "$line"
+        total=$((total + 1))
+        names=(aa ih ou ee oh); want="$(echo aiueo | awk -v v="$v" '{print index($0, v) - 1}')"
+        if ((pct >= 50)); then led=$((led + 1)); echo "ok   $(basename "$f"): ${names[$want]} leads ${pct}% of the time, opens $opn (voiced $vcd%)"
+        else echo "MISS $(basename "$f"): ${names[$want]} leads only ${pct}% of the time, opens $opn (voiced $vcd%)"; fi
+    done
+    if ((total == 0)); then
+        echo "FAIL no a_*.wav ... o_*.wav in $REAL"; FAILS=$((FAILS + 1))
+    elif ((led * 100 < total * REAL_MIN)); then
+        echo "FAIL real voices: $led of $total lead with their vowel, under $REAL_MIN%"; FAILS=$((FAILS + 1))
+    else
+        echo "ok   real voices: $led of $total lead with their vowel"
+    fi
+fi
 ((FAILS)) && { echo "$FAILS FAILED"; exit 1; }
 echo "all passed"

@@ -41,6 +41,20 @@ namespace h3d {
 using namespace h3d;
 
 namespace {
+    // a load as the plugin's loader thread runs it (CBackgroundLoader): an exception makes it a failed load
+    template <typename Res, typename Req>
+    Res guardedLoad(Res (*fn)(const Req&, const std::atomic<bool>&), const Req& req) {
+        std::atomic<bool> cancel = false;
+        try {
+            return fn(req, cancel);
+        } catch (std::exception& e) {
+            Res r;
+            r.req   = req;
+            r.error = std::format("loading {} failed: {}", req.path, e.what());
+            return r;
+        }
+    }
+
     // ---- PNG, stored deflate (no zlib needed) ----
     uint32_t crcTable[256];
     void     initCrc() {
@@ -359,8 +373,7 @@ int main(int argc, char** argv) {
         menu.layout(W, H, 1);
         if (a == "--avatar") {
             need(i, 1);
-            std::atomic<bool> cancel = false;
-            SAvatarResult     res    = loadAvatar({argv[++i], height}, cancel);
+            SAvatarResult res = guardedLoad(loadAvatar, SAvatarRequest{argv[++i], height});
             for (auto& l : res.log)
                 fprintf(stderr, "[load] %s\n", l.c_str());
             if (!res.model) {
@@ -715,8 +728,7 @@ int main(int argc, char** argv) {
             }
             int e = -1;
             if (what.find('/') != std::string::npos || isEmoteFile(what)) {
-                std::atomic<bool> cancel = false;
-                SEmoteResult      res    = loadEmotes({what, {what}, model}, cancel);
+                SEmoteResult res = guardedLoad(loadEmotes, SEmoteRequest{what, {what}, model});
                 for (auto& l : res.log)
                     fprintf(stderr, "[emote] %s\n", l.c_str());
                 if (!res.error.empty())
@@ -842,9 +854,8 @@ int main(int argc, char** argv) {
             req.compress = plainTextures ? 0 : gl::textureCompression();
             if (i + 1 < argc && argv[i + 1][0] != '-')
                 req.scale = atof(argv[++i]);
-            std::atomic<bool> cancel = false;
-            const auto        t0     = std::chrono::steady_clock::now();
-            SMapResult        res    = loadMap(req, cancel);
+            const auto t0  = std::chrono::steady_clock::now();
+            SMapResult res = guardedLoad(loadMap, req);
             for (const auto& l : res.log)
                 fprintf(stderr, "[map] %s\n", l.c_str());
             if (!res.world || !res.error.empty()) {
@@ -1022,11 +1033,15 @@ int main(int argc, char** argv) {
                         b.render = true;
         } else if (a == "--plain") {
             plainTextures = true;
+        } else if (a == "--no-dual") { // glass without blending's second source, as where there's none (before --map)
+            renderer.dualSource = false;
         } else if (a == "--glinfo") {
             const char* ext = (const char*)glGetString(GL_EXTENSIONS);
             fprintf(stderr, "GL_VERSION %s\nGL_RENDERER %s\n", (const char*)glGetString(GL_VERSION), (const char*)glGetString(GL_RENDERER));
             for (const char* e : {"GL_EXT_texture_compression_s3tc", "GL_EXT_texture_compression_s3tc_srgb", "GL_NV_sRGB_formats", "GL_EXT_texture_compression_rgtc", "GL_EXT_texture_compression_bptc",
-                                  "GL_KHR_texture_compression_astc_ldr", "GL_EXT_texture_filter_anisotropic", "GL_EXT_color_buffer_float", "GL_EXT_color_buffer_half_float"})
+                                  "GL_KHR_texture_compression_astc_ldr", "GL_EXT_texture_filter_anisotropic", "GL_EXT_color_buffer_float", "GL_EXT_color_buffer_half_float",
+                                  "GL_EXT_blend_func_extended", "GL_EXT_shader_framebuffer_fetch", "GL_EXT_shader_framebuffer_fetch_non_coherent", "GL_ARM_shader_framebuffer_fetch",
+                                  "GL_NV_shader_framebuffer_fetch", "GL_KHR_blend_equation_advanced"})
                 fprintf(stderr, "%s %s\n", e, ext && std::strstr(ext, e) ? "yes" : "no");
         } else if (a == "--bench") {
             need(i, 1);
@@ -1077,13 +1092,32 @@ int main(int argc, char** argv) {
             lip.reset();
             fprintf(stderr, "audio %s: %.2f s at %d Hz%s\n", file.c_str(), audioRate ? (double)audio.size() / audioRate : 0.0, audioRate,
                     audio.empty() ? " (no samples: PCM 16/24/32-bit or 32-bit float WAV)" : "");
+        } else if (a == "--lipsync-trace") { // the rest of --audio's file through lip sync, a line a window
+            CLipSync     tr;
+            const size_t from = audioAt;
+            for (size_t k = audioAt; k < audio.size(); k += 32) {
+                const size_t seen = tr.windows();
+                tr.feed(audio.data() + k, std::min<size_t>(32, audio.size() - k), audioRate);
+                if (tr.windows() == seen)
+                    continue;
+                const auto& w = tr.last();
+                const auto& v = tr.visemes();
+                std::string shape, out;
+                for (int s = 0; s < VISEME_COUNT; ++s) {
+                    shape += std::format(" {:.2f}", w.shape[s]);
+                    out += std::format(" {:.2f}", v[s]);
+                }
+                fprintf(stderr, "window %.3f s: level %.1f gain %.1f crossings %.3f periodic %.3f %s F1 %.0f F2 %.0f bands %.3f %.3f %.3f under %.1f consonant %s shape%s out%s\n",
+                        (double)(k - from) / audioRate, w.level, w.gain, w.crossings, w.periodic, w.voiced ? "voiced" : "unvoiced", w.f1, w.f2, w.mid, w.high, w.low,
+                        w.under, w.consonant >= 0 ? VISEME_NAMES[w.consonant] : "-", shape.c_str(), out.c_str());
+            }
         } else if (a == "--badge") { // text: the plugin's corner badge (lip sync's "lip sync: listening")
             need(i, 1);
             badgeText = argv[++i];
         } else if (a == "--visemes") { // what lip sync heard last: aa ih ou ee oh, the level, the formants
             const auto& v = lip.visemes();
-            fprintf(stderr, "visemes aa %.2f ih %.2f ou %.2f ee %.2f oh %.2f, level %.1f dBFS, F1 %.0f F2 %.0f Hz\n", v[0], v[1], v[2], v[3], v[4], lip.level(),
-                    lip.f1(), lip.f2());
+            fprintf(stderr, "visemes aa %.2f ih %.2f ou %.2f ee %.2f oh %.2f pp %.2f ff %.2f ss %.2f ch %.2f, level %.1f dBFS, F1 %.0f F2 %.0f Hz\n", v[0], v[1], v[2],
+                    v[3], v[4], v[5], v[6], v[7], v[8], lip.level(), lip.f1(), lip.f2());
         } else if (a == "--outlines") { // 1|0: the avatar's toon outlines
             need(i, 1);
             outlines = atoi(argv[++i]) != 0;

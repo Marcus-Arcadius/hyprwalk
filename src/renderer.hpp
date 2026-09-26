@@ -104,6 +104,10 @@ namespace h3d {
         // renders one frame into `outTex` (an immutable RGBA8 texture of the given size)
         void render(const SFrameParams& f, GLuint outTex);
 
+        // glass blends with a second source (per channel) where the context has one (EXT_blend_func_extended); off
+        // before init(), it doesn't (the harness's --no-dual)
+        bool dualSource = true;
+
       private:
         struct SPanelGL {
             gl::STarget target;
@@ -112,6 +116,7 @@ namespace h3d {
         };
 
         bool                                     m_ready = false;
+        bool                                     m_dualSource = false; // the map's programs have it
         uint64_t                                 m_frame = 0;
 
         GLuint                                   m_progCapture = 0, m_progCaptureExt = 0, m_progLight = 0, m_progSky = 0, m_progWorld = 0, m_progDepth = 0, m_progPanel = 0,

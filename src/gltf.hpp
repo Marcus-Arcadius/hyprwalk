@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <thread>
@@ -24,6 +25,16 @@ namespace h3d::gltf {
 
     std::string lower(std::string s);
     bool        readFile(const std::string& path, std::vector<uint8_t>& out);
+
+    // a number from a file as an integer, held to lo..hi (NaN: the fallback). Casting a double an int can't hold is
+    // undefined, and a file can say 1e999
+    inline int fileInt(double v, int fallback, int lo = -(1 << 30), int hi = 1 << 30) {
+        return v == v ? (int)std::clamp(v, (double)lo, (double)hi) : fallback;
+    }
+    // and as a float, finite (NaN and infinities: the fallback)
+    inline float fileFloat(double v, float fallback) {
+        return std::isfinite(v) ? (float)std::clamp(v, -1e30, 1e30) : fallback;
+    }
 
     // runs fn(begin, end) over [0, n) on a few threads
     template <typename F>

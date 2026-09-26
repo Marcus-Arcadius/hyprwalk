@@ -13,6 +13,9 @@ namespace h3d::gl {
     // 0 without a context
     int textureCompression();
 
+    // the current context has this extension (false without a context)
+    bool hasExtension(const char* name);
+
     // Hyprland caches parts of the GL state (current program, blend, viewport,
     // bound framebuffer...). Everything we touch while rendering the 3D scene is
     // saved here and put back afterwards, so Hyprland never notices.

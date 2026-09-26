@@ -16,11 +16,12 @@
 #                  llvmpipe in the VM
 #
 # Only synthetic things go into the VM: those two avatars, ToonTest.glb and TestRoom.glb (assets.py), LitCourt.glb
-# (litmap.py), the vowels (synth/vowels.py), wheel.py, the live check script and hypr3d.so. OUTDIR gets results.txt
-# (a line per check), results.json, frames/ (grim's PNGs from inside the VMs), logs/ (Hyprland's logs, the journal,
-# pw-dump; logs/hidpi: the second VM's), live/ (the live check's results and frames) and driver.log. OUTDIR/driver is
-# the driver (a GC root: delete OUTDIR to let the VMs' closure go). The Hyprland is the running one's, as for
-# build.sh, or HYPR_BIN's. Exit status: 0 when every check passed (a "known" failure is Hyprland's own bug).
+# (litmap.py), the vowels (synth/vowels.py), wheel.py, touchpad.py, the live check script and hypr3d.so. OUTDIR
+# gets results.txt (a line per check), results.json, frames/ (grim's PNGs from inside the VMs), logs/ (Hyprland's
+# logs, the journal, pw-dump; logs/hidpi: the second VM's), live/ (the live check's results and frames) and
+# driver.log. OUTDIR/driver is the driver (a GC root: delete OUTDIR to let the VMs' closure go). The Hyprland is the
+# running one's, as for build.sh, or HYPR_BIN's. Exit status: 0 when every check passed (a "known" failure is
+# Hyprland's own bug).
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 VM="$REPO/tools/test/vm"
@@ -62,7 +63,7 @@ say "Hyprland: $HYPR_OUT"
 IN="$OUT/in"
 rm -rf "$IN"
 mkdir -p "$IN/wav" "$IN/emotes"
-cp "$REPO/hypr3d.so" "$VM/wheel.py" "$IN/"
+cp "$REPO/hypr3d.so" "$VM/wheel.py" "$VM/touchpad.py" "$IN/"
 python3 "$VM/assets.py" "$IN" > /dev/null
 python3 "$VM/litmap.py" "$IN" > /dev/null
 # tools/test/live/check.sh, as you'd run it on your desktop (its section runs it in the VM)

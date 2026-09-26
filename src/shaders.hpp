@@ -255,6 +255,13 @@ vec3 panelLights(vec3 P, vec3 N) {
     return sum;
 }
 
+// the sky's light and the ground's, on a surface facing N
+vec3 ambientLight(vec3 N) {
+    vec3 skyAmb = srgbToLinear(vec3(0.55, 0.66, 0.85)) * 0.75;
+    vec3 gndAmb = srgbToLinear(vec3(0.70, 0.56, 0.40)) * 0.45;
+    return mix(gndAmb, skyAmb, N.y * 0.5 + 0.5);
+}
+
 // linear albedo in, linear radiance out; ambOcc darkens the sky light, lightOcc the panels'
 vec3 shade(vec3 albedo, vec3 P, vec3 N, vec4 sunPos, float ambOcc, float lightOcc, float spec) {
     vec3 V = normalize(uEye - P);
@@ -262,9 +269,7 @@ vec3 shade(vec3 albedo, vec3 P, vec3 N, vec4 sunPos, float ambOcc, float lightOc
     float shadow = ndl > 0.0 ? sunShadow(sunPos) : 0.0;
 
     vec3 sunCol = SUN_COLOR;
-    vec3 skyAmb = srgbToLinear(vec3(0.55, 0.66, 0.85)) * 0.75;
-    vec3 gndAmb = srgbToLinear(vec3(0.70, 0.56, 0.40)) * 0.45;
-    vec3 amb = mix(gndAmb, skyAmb, N.y * 0.5 + 0.5);
+    vec3 amb = ambientLight(N);
 
     vec3 H = normalize(uSunDir + V);
     float sp = spec * pow(max(dot(N, H), 0.0), 48.0) * ndl * shadow;
@@ -277,9 +282,7 @@ vec3 shade(vec3 albedo, vec3 P, vec3 N, vec4 sunPos, float ambOcc, float lightOc
 vec3 shadeLight(vec3 P, vec3 N, vec4 sunPos, float ambOcc, float lightOcc) {
     float ndl = max(dot(N, uSunDir), 0.0);
     float shadow = ndl > 0.0 ? sunShadow(sunPos) : 0.0;
-    vec3 skyAmb = srgbToLinear(vec3(0.55, 0.66, 0.85)) * 0.75;
-    vec3 gndAmb = srgbToLinear(vec3(0.70, 0.56, 0.40)) * 0.45;
-    return SUN_COLOR * ndl * shadow + mix(gndAmb, skyAmb, N.y * 0.5 + 0.5) * ambOcc + panelLights(P, N) * lightOcc;
+    return SUN_COLOR * ndl * shadow + ambientLight(N) * ambOcc + panelLights(P, N) * lightOcc;
 }
 
 // aerial perspective
@@ -490,11 +493,26 @@ uniform float uCutoff;
 uniform int uOutline;       // 0: the surface, else its outline
 uniform vec4 uOutlineColor; // linear
 uniform vec3 uOutlineMix;   // how much of the base color it takes, how much it's multiplied by it, how much it's shaded
+uniform vec2 uOutlineTex;   // its color's texture (on the detail texture's unit): the color times it, and mixed towards it
+uniform vec4 uOutlineTexXf; // its uv: mat2 columns
+uniform vec2 uOutlineTexOffset;
 uniform int uBack;          // back faces: 0 as the front, 1 uBackColor, 2 uBackColor times uLayerTex (avatars have no layers)
 uniform vec4 uBackColor;
 uniform vec4 uBackXf;
 uniform vec2 uBackOffset;
 uniform vec3 uLightClamp;   // UnlitWF's: the light's brightness kept between x and 1, 1 from y up (y 0: not), its chroma z
+// toon shading (MToon, lilToon, UnlitWF, Poiyomi): the sun lights it from its shade color to its lit one as N·L goes
+// from lo to hi; and a matcap. Their textures go where the layer mask and the detail mask would (an avatar has
+// neither, and the samplers are all taken)
+uniform int uToon;          // 0 none, 1 toon, 2 with the shade's texture (uLayerMaskTex)
+uniform vec4 uToonShade;    // the shade's color (linear), and how much it's times the base color
+uniform vec3 uToonStep;     // N·L where it's all shade, where it's all lit, how much of the shade shows
+uniform int uMatcap;        // 0 none, else eMatcapMode + 1: added, multiplied, mixed in, lighter and darker (uDetailMaskTex)
+uniform vec4 uMatcapColor;  // its color (the median's: how much lighter, 0 darker), how much of it
+uniform float uMatcapLit;   // how much it's lit as the surface is (0: as if in full light, wherever it is)
+uniform vec3 uViewUp;       // the camera's up
+uniform mat4 uSunViewProj;  // (as the vertex shader has them)
+uniform float uNormalOffset;
 uniform float uAgain;       // > 0: drawn again where the stencil hid it, this much as opaque (MaskOut_Blend)
 uniform int uMode;      // 0 lit, 1 unlit, 2 sky
 // the game's own lighting (HYPR3D_lighting)
@@ -502,6 +520,7 @@ uniform int uBaked;
 uniform sampler2D uIrradianceTex;  // RGB9E5
 uniform sampler2D uDirectionalTex; // xy: main direction in tangent space, z: directionality, a: specular occlusion
 uniform sampler2D uBakedShadowTex; // r: the sun's baked shadow
+uniform int uBakedShadow;          // the lighting set has one (a sun without a baked shadow channel: only ours)
 uniform highp sampler3D uProbeTex; // six blocks: light along +x +y +z -x -y -z (Source's axes); a: the sun's shadow
 uniform vec3 uProbeDims;           // texels of a block
 uniform vec3 uAmbient;             // for what has neither
@@ -516,7 +535,14 @@ uniform vec4 uFogB;                // height: offset, scale, exponent; lod bias
 uniform vec2 uFogSpace;            // distance scale, height offset: the backdrop's own units
 uniform vec4 uCurveA;              // tone curve: shoulder, linear strength, linear angle, toe strength
 uniform vec4 uCurveB;              // toe numerator, toe denominator, white point, 1 / curve(white point)
+#ifdef H3D_DUAL
+// blending's second source (EXT_blend_func_extended): how much of what's behind stays, channel by channel
+layout(location = 0, index = 0) out vec4 fragColor;
+layout(location = 0, index = 1) out vec4 fragKeep;
+#else
 out vec4 fragColor;
+vec4 fragKeep;
+#endif
 
 vec3 srgbEncode(vec3 c) {
     c = clamp(c, 0.0, 1.0);
@@ -606,7 +632,46 @@ vec3 clampLight(vec3 L) {
     return mix(vec3(p), L, uLightClamp.z) * mix(clamp(p / uLightClamp.y, 0.0, 1.0), 1.0, uLightClamp.x) / p;
 }
 
-void main() {
+// the sun's shadow for toon shading: looked up a little towards the sun, past where a surface's own silhouette in the
+// shadow map would shadow it (grazing, near where N·L is 0, its depth changes fast across a texel): its step is a
+// clean line, as N·L draws it, not the shadow map's staircase. Shadows cast from farther away show as they are
+float toonShadow() {
+    return sunShadow(uSunViewProj * vec4(vPos + uSunDir * max(0.1, uNormalOffset * 3.0), 1.0));
+}
+
+// toon shading: the albedo the sun lights, the shade's where N·L is under uToonStep.x, the lit one over .y; a cast
+// shadow takes it to the shade (as MToon has it)
+vec3 toonAlbedo(vec3 albedo, vec2 uv, vec3 N, float sunVis) {
+    vec3 dark = uToonShade.rgb * mix(vec3(1.0), albedo, uToonShade.a);
+    if (uToon == 2)
+        dark *= texture(uLayerMaskTex, uv).rgb;
+    dark = mix(albedo, dark, uToonStep.z);
+    float x = mix(-1.0, 1.0, (dot(N, uSunDir) * 0.5 + 0.5) * sunVis);
+    return mix(dark, albedo, clamp((x - uToonStep.x) / max(uToonStep.y - uToonStep.x, 1e-4), 0.0, 1.0));
+}
+
+// the matcap: a texture looked up by the normal as the eye sees it (turned with the eye, not rolled with it, as MToon
+// has it), over c; light: the light here, full: in full light
+vec3 matcap(vec3 c, vec3 N, vec3 light, vec3 full) {
+    vec3 V = normalize(uEye - vPos);
+    vec3 up = uViewUp - V * dot(V, uViewUp);
+    up = dot(up, up) > 1e-8 ? normalize(up) : vec3(0.0, 1.0, 0.0);
+    vec2 uv = vec2(dot(cross(up, V), N), dot(up, N)) * 0.495 + 0.5; // (its rim: not the far edge's texels)
+    vec3 t = texture(uDetailMaskTex, uv).rgb, m = t * uMatcapColor.rgb;
+    vec3 lit = mix(full, light, uMatcapLit);
+    float k = uMatcapColor.a;
+    if (uMatcap == 1)
+        return c + m * lit * k;
+    if (uMatcap == 2)
+        return c * mix(vec3(1.0), m, k);
+    if (uMatcap == 3)
+        return mix(c, m * lit, k);
+    // UnlitWF's median: lighter where it's over mid grey, darker under, the color saying how much of which
+    vec3 d = t - 0.2140;
+    return c + mix(min(d, 0.0), max(d, 0.0), uMatcapColor.rgb) * lit * k;
+}
+
+void shade() {
     vec2 uv = mat2(uBaseXf.xy, uBaseXf.zw) * vUV + uBaseOffset;
     vec4 base = texture(uBaseTex, uv) * uBaseColor;
     if (uBack != 0 && !gl_FrontFacing) // UnlitWF's back faces: their own color (and texture) in place of the base's
@@ -681,7 +746,12 @@ void main() {
         // none where the texture is see-through (in place of UnlitWF's canceller), then the line's color
         if (base.a < (uAlphaMode == 1 ? uCutoff : uAlphaMode == 2 ? 0.5 : 0.0))
             discard;
-        base = vec4(mix(uOutlineColor.rgb, base.rgb, uOutlineMix.x) * mix(vec3(1.0), base.rgb, uOutlineMix.y), uOutlineColor.a);
+        vec3 line = uOutlineColor.rgb;
+        if (uOutlineTex.x + uOutlineTex.y > 0.0) {
+            vec3 t = texture(uDetailTex, mat2(uOutlineTexXf.xy, uOutlineTexXf.zw) * vUV + uOutlineTexOffset).rgb;
+            line   = mix(line, t, uOutlineTex.y) * mix(vec3(1.0), t, uOutlineTex.x);
+        }
+        base = vec4(mix(line, base.rgb, uOutlineMix.x) * mix(vec3(1.0), base.rgb, uOutlineMix.y), uOutlineColor.a);
     }
     if (uAlphaMode == 1 && base.a < uCutoff)
         discard;
@@ -747,7 +817,7 @@ void main() {
                 vec4 dir = texture(uDirectionalTex, vLight.xy);
                 indirect = lightmapShading(texture(uIrradianceTex, vLight.xy).rgb, dir, nTs, Ng);
                 specOcc = dir.a;
-                baked = 1.0 - textureLod(uBakedShadowTex, vLight.xy, 0.0).r;
+                baked = uBakedShadow != 0 ? 1.0 - textureLod(uBakedShadowTex, vLight.xy, 0.0).r : 1.0;
             } else if (vLightMode == 2) {
                 vec3 p = vLight / vec3(uProbeDims.xy, uProbeDims.z * 6.0);
                 vec3 ns = vec3(N.z, N.x, N.y); // Source's axes
@@ -764,43 +834,90 @@ void main() {
             float geoRough = sqrt(clamp(max(dot(dFdx(Ng), dFdx(Ng)), dot(dFdy(Ng), dFdy(Ng))), 0.0, 1.0));
             float r = max(rough, geoRough);
             float specAO = min(specOcc, occ);
-            vec3 spec = vec3(0.0);
+            vec3 spec = vec3(0.0), glint = vec3(0.0);
             if (uSpecular.x > 0.5 && sun > 0.0)
-                spec += sunSpecular(N, V, uSunDir, r, F0) * uSunColor * sun * (1.0 + F0 * 0.125 * pow(2.0 * r, 4.0) * max(dot(N, V), 0.0));
+                glint = sunSpecular(N, V, uSunDir, r, F0) * uSunColor * sun * (1.0 + F0 * 0.125 * pow(2.0 * r, 4.0) * max(dot(N, V), 0.0));
             if (uSpecular.y > 0.5 && uHasSky != 0) {
                 // the surroundings: the sky, dimmed as much as the diffuse light is
                 vec3 R = reflect(-V, N);
                 float dim = clamp(luma(indirect) / max(luma(uSkyAverage), 1e-3), 0.0, 1.0);
                 spec += skyLight(R, r * uSkyLod) * envBRDF(F0, r, max(dot(N, V), 0.0)) * dim;
             }
-            if (uLightClamp.y > 0.0) {
+            bool toon = uToon != 0 && uOutline == 0, cap = uMatcap != 0 && uOutline == 0;
+            vec3 here = vec3(0.0), full = vec3(0.0); // the matcap's light: here, and in full light
+            if (toon || cap) {
+                // the sun as far as it gets here (the baked shadow), and its cast shadow, however the surface faces
+                float sunVis = baked > 0.001 ? (toon ? toonShadow() : sunShadow(vSun)) : 0.0;
+                vec3 around = indirect + panelLights(vPos, N);
+                vec3 alb = toon ? toonAlbedo(diffuse, uv, N, sunVis) : diffuse;
+                if (uLightClamp.y > 0.0) {
+                    // UnlitWF's: one light, clamped; toon shading shades it, not N·L
+                    float k = uExposure * 2.8;
+                    here = full = clampLight((uSunColor * (toon ? baked : ndl * sun) + around) * occ * k) / k;
+                    c = alb * here;
+                } else {
+                    here = (uSunColor * baked * sunVis + around) * occ;
+                    full = (uSunColor + around) * occ;
+                    // toon: the sun on the shade too, a cast shadow shading it
+                    c = toon ? (uSunColor * baked * alb + diffuse * around) * occ : diffuse * (uSunColor * ndl * sun + around) * occ;
+                }
+            } else if (uLightClamp.y > 0.0) {
                 float k = uExposure * 2.8; // (as gameCurve() scales it)
                 c = diffuse * clampLight((uSunColor * ndl * sun + indirect + panelLights(vPos, N)) * occ * k) / k;
             } else {
                 c = diffuse * (uSunColor * ndl * sun + indirect) * occ;
                 c += diffuse * panelLights(vPos, N) * occ;
             }
+            if (cap)
+                c = matcap(c, N, here, full);
             if (uOutline != 0)
                 c = mix(albedo, c, uOutlineMix.z); // unshaded: its color as it is
             c += uEmissive * texture(uEmissiveTex, mat2(uEmissiveXf.xy, uEmissiveXf.zw) * (uEmissiveUV == 0 ? vUV : vUV1) + uEmissiveOffset).rgb *
                 mix(vec3(1.0), albedo, uSelfIllumAlbedo);
             float fogged;
             if (uGlass != 0 && a < 1.0) {
-                // its own color by its opacity and all of what it reflects, over a background it hides by its
-                // opacity and by as much as it reflects (Fresnel): blended as one color at that cover, and encoded
-                // before it's scaled by it, as the frame is (encoded after, a pane came out two or three times too
-                // bright)
+                // its own color by its opacity and what it reflects of the surroundings, over a background it hides
+                // by its opacity and by as much as it reflects (Fresnel): blended as one color at that cover, and
+                // encoded before it's scaled by it, as the frame is (encoded after, a pane came out two or three times
+                // too bright). The sun's glint then screens all that: it takes each channel g of the way to white, g
+                // being how far it takes the pane's own light there on the screen. So a glint on clear glass reaches
+                // white, not only the cover, and never darkens what's behind. With a second source what's behind is
+                // kept by 1 - g channel by channel; else by the least of them (a glint's edge a little brighter)
                 float cover = clamp(a + (1.0 - a) * luma(envBRDF(F0, r, max(dot(N, V), 0.0))), a, 1.0);
-                c = gameFog((c * a + spec * specAO) / cover, vPos, fogged);
-                fragColor = vec4(srgbEncode(gameCurve(c * uExposure)) * cover, cover);
+                vec3 own = c * a + spec * specAO;
+                vec3 pane = srgbEncode(gameCurve(gameFog(own / cover, vPos, fogged) * uExposure)) * cover;
+                vec3 unlit = srgbEncode(gameCurve(gameFog(own, vPos, fogged) * uExposure));
+                vec3 lit = srgbEncode(gameCurve(gameFog(own + glint * specAO, vPos, fogged) * uExposure));
+                vec3 g = clamp((lit - unlit) / max(1.0 - unlit, 1e-4), 0.0, 1.0);
+#ifdef H3D_DUAL
+                fragColor = vec4(g + (1.0 - g) * pane, cover);
+                fragKeep = vec4((1.0 - g) * (1.0 - cover), 1.0 - cover);
+#else
+                fragColor = vec4(g + (1.0 - g) * pane, 1.0 - (1.0 - min(g.r, min(g.g, g.b))) * (1.0 - cover));
+#endif
                 return;
             }
-            c = gameFog(c + spec * specAO, vPos, fogged);
+            c = gameFog(c + (spec + glint) * specAO, vPos, fogged);
             fragColor = vec4(srgbEncode(gameCurve(c * uExposure)) * a, a);
             return;
         }
         float local = vAO.x * occ;
-        if (uLightClamp.y > 0.0)
+        bool toon = uToon != 0 && uOutline == 0, cap = uMatcap != 0 && uOutline == 0;
+        vec3 here = vec3(0.0), full = vec3(0.0);
+        if (toon || cap) {
+            // as above, with hypr3d's own light: the sun, the sky, the panels, the sun bounced
+            float sunVis = toon ? toonShadow() : sunShadow(vSun), ndl = max(dot(N, uSunDir), 0.0);
+            vec3 around = ambientLight(N) * local * mix(0.45, 1.0, vAO.y) + panelLights(vPos, N) * local + SUN_COLOR * (vAO.z * 0.8 * occ);
+            vec3 alb = toon ? toonAlbedo(base.rgb, uv, N, sunVis) : base.rgb;
+            if (uLightClamp.y > 0.0) {
+                here = full = clampLight((SUN_COLOR * (toon ? 1.0 : ndl * sunVis) + around) * uExposure) / uExposure;
+                c = alb * here;
+            } else {
+                here = SUN_COLOR * sunVis + around;
+                full = SUN_COLOR + around;
+                c = toon ? SUN_COLOR * alb + base.rgb * around : base.rgb * (SUN_COLOR * ndl * sunVis + around);
+            }
+        } else if (uLightClamp.y > 0.0)
             c = base.rgb * clampLight((shadeLight(vPos, N, vSun, local * mix(0.45, 1.0, vAO.y), local) + SUN_COLOR * (vAO.z * 0.8 * occ)) * uExposure) /
                 uExposure;
         else {
@@ -808,12 +925,21 @@ void main() {
             // sunlight bounced off the surroundings (baked), off surfaces of about this albedo
             c += base.rgb * SUN_COLOR * (vAO.z * 0.8 * occ);
         }
+        if (cap)
+            c = matcap(c, N, here, full);
         c += uEmissive * texture(uEmissiveTex, mat2(uEmissiveXf.xy, uEmissiveXf.zw) * (uEmissiveUV == 0 ? vUV : vUV1) + uEmissiveOffset).rgb;
         c = tonemap(applyFog(c, vPos) * uExposure);
         if (uOutline != 0)
             c = mix(applyFog(base.rgb, vPos), c, uOutlineMix.z); // unshaded: its color as it is
     }
     fragColor = vec4(linearToSrgb(c) * a, a);
+}
+
+void main() {
+    fragKeep = vec4(-1.0);
+    shade();
+    if (fragKeep.a < 0.0)
+        fragKeep = vec4(1.0 - fragColor.a); // (as premultiplied alpha keeps it)
 }
 )";
 

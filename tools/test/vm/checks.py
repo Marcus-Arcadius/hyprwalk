@@ -6,7 +6,7 @@
 # hypr3d:menu dispatchers). Keys, the mouse (relative, a PS/2 mouse), the tablet (absolute) and the wheel come from
 # the VM's own input devices through QMP's input-send-event, so they pass through the kernel, libinput and
 # Hyprland's input stack to the plugin's listeners and function hooks; wheel.py adds a mouse with a high-resolution
-# wheel through uinput. wev shows what reaches a window. Frames come from grim inside the VM. Lip sync listens to
+# wheel through uinput, and touchpad.py a touchpad that scrolls with two fingers. wev shows what reaches a window. Frames come from grim inside the VM. Lip sync listens to
 # PipeWire's default source, a virtual "Test microphone" that pw-cat sings test vowels into. A second monitor is
 # Hyprland's own headless output (hyprctl output create), and the hidpi VM runs at scales 1.5 and 2.
 #
@@ -36,6 +36,7 @@ AV = f"{H}/BoothAccessories.glb"
 TOON = f"{H}/ToonTest.glb"
 ROOM = f"{H}/TestRoom.glb"
 LIT = f"{H}/LitCourt.glb"
+LIT_RS = f"{H}/LitCourtRuntimeSun.glb"  # (its sun has no baked shadow channel)
 VOWELS = ["a", "i", "u", "e", "o"]
 VISEMES = ["aa", "ih", "ou", "ee", "oh"]
 for d in (FRAMES, LOGS, RAW):
@@ -388,10 +389,38 @@ def segfaults():
     return int(machine.execute("journalctl -k --no-pager | grep -c 'segfault at' || true")[1].strip() or 0)
 
 
+def coredumps():
+    """the core dumps systemd-coredump has taken so far (their PIDs)"""
+    out = machine.execute("coredumpctl list --json=short --no-pager 2>/dev/null || true")[1].strip()
+    try:
+        return {str(d.get("pid")) for d in json.loads(out)} if out.startswith("[") else set()
+    except ValueError:
+        return set()
+
+
+def new_coredump(before):
+    """the crashed thread's stack in a core dump taken since `before` (coredumps()); None: none yet"""
+    new = sorted(p for p in coredumps() if p not in before)
+    if not new:
+        return None
+    return machine.execute(f"coredumpctl info --no-pager {new[-1]} 2>/dev/null | grep -m1 -A20 'Stack trace of thread' || true")[1]
+
+
+def restart_after_crash():
+    """Hyprland again after a crash a check saw coming, and the plugin; its crash dialog (hyprland-dialog, which
+    segfaults in this VM's hyprtoolkit) and its crash counted as seen"""
+    n = segfaults()
+    start_hyprland(HYPR["config"], lua_config() if HYPR["config"].endswith(".lua") else conf_config(load=False))
+    ensure_plugin()
+    time.sleep(3)
+    KNOWN_CRASHES[0] += segfaults() - n
+
+
 def stop_hyprland():
     """Hyprland 0.55.2 itself dies in its exit path when windows are still open (CCompositor::cleanup ->
-    CWindow::unmapWindow -> CDwindleAlgorithm::calculateWorkspace -> ITarget::setPositionGlobal, a null pointer; with
-    or without hypr3d), so the terminals go first. A crash now is a crash with the plugin (if it's loaded)."""
+    CWindow::unmapWindow -> CDwindleAlgorithm or CMasterAlgorithm::calculateWorkspace -> ITarget::setPositionGlobal,
+    a null pointer; with or without hypr3d), so the terminals go first. A crash now is a crash with the plugin (if
+    it's loaded)."""
     if not HYPR["pid"]:
         return
     plugin = "hypr3d" in ctl("plugin", "list")
@@ -1151,7 +1180,7 @@ def wev_start():
 
 
 def wev_mark(name):
-    alice(f"echo '### {name}' >> /tmp/wev.log")  # (its file: root can't write to alice's in /tmp)
+    alice(f"echo {shlex.quote('### ' + name)} >> /tmp/wev.log")  # (its file: root can't write to alice's in /tmp)
 
 
 def wev_events(name):
@@ -1203,14 +1232,79 @@ def wev_scrolls(evs):
     return out
 
 
+def wev_axis_frames(evs):
+    """the scrolling's frames: all that wev got in each (event, what it said but the time)"""
+    out, cur = [], []
+    for iface, ev, rest in evs:
+        if iface != "wl_pointer":
+            continue
+        if ev.startswith("axis"):
+            cur.append((ev, re.sub(r"time: \d+; ", "", rest)))
+        elif ev == "frame" and cur:
+            out.append(tuple(cur))
+            cur = []
+    return out
+
+
 def wheel_hires(*steps):
     """wheel.py: a high-resolution wheel turned by each of these, in 1/120ths of a notch (h: the horizontal one)"""
     machine.succeed("python3 " + H + "/wheel.py " + " ".join(str(v) for v in steps), timeout=30)
     time.sleep(0.5)
 
 
+def touchpad(*steps):
+    """touchpad.py: two fingers moved this far on a touchpad, one scroll each, 30 units a millimetre (h: sideways)"""
+    machine.succeed("python3 " + H + "/touchpad.py " + " ".join(str(v) for v in steps), timeout=30)
+    time.sleep(0.5)
+
+
 WHEEL_SEQ = [("a notch down", lambda: wheel(1)), ("half notches: down, down, down, up", lambda: wheel_hires(60, 60, 60, -60)),
              ("half notches of the horizontal wheel, right", lambda: wheel_hires("h60", "h60"))]
+# wheel.py's device (Hyprland's name for "hypr3d test wheel"), and a window rule for wev: Hyprland takes the rule's
+# scroll factor first, then the device's, then input's
+WHEEL_DEV = 'hl.device({{ name = "hypr3d-test-wheel", scroll_factor = {} }})'
+WEV_RULE = 'hl.window_rule({ name = "h3d-wev-scroll", match = { class = "wev" }, scroll_mouse = 3, scroll_touchpad = 2 })'
+WEV_RULE_OFF = 'hl.window_rule({ name = "h3d-wev-scroll", enabled = false })'
+EMULATE = 'hl.config({{ input = {{ emulate_discrete_scroll = {} }} }})'
+# (what's set, [(what's done, how, what Hyprland sends on the 2D desktop: (axis, value, value120, discrete) a frame,
+# or None)]); each after the ones before. The QEMU mouse's wheel is "the other mouse"
+WHEEL_CASES = [
+    ("", [], [(what, do, None) for what, do in WHEEL_SEQ]),
+    ("the wheel's own scroll_factor 2.5", [WHEEL_DEV.format(2.5)], [
+        ("a notch down", lambda: wheel_hires(120), [(0, 37.5, 300, None)]),
+        ("half notches: down, down, down, up", lambda: wheel_hires(60, 60, 60, -60), [(0, 37.5, 150, None)] * 3 + [(0, -37.5, -150, None)]),
+        ("the other mouse's notch", lambda: wheel(1), [(0, 15.0, 120, None)])]),
+    ("a window rule's scroll_mouse 3, over the wheel's 2.5", [WEV_RULE], [
+        ("a notch down", lambda: wheel_hires(120), [(0, 45.0, 360, None)]),
+        ("the other mouse's notch", lambda: wheel(1), [(0, 45.0, 360, None)])]),
+    ("input:emulate_discrete_scroll 0", [WEV_RULE_OFF, WHEEL_DEV.format(1), EMULATE.format(0)], [
+        ("half notches: down, down, down, up", lambda: wheel_hires(60, 60, 60, -60), [(0, 7.5, 60, None)] * 3 + [(0, -7.5, -60, None)])]),
+    ("input:emulate_discrete_scroll 2, the wheel's 2.5", [WHEEL_DEV.format(2.5), EMULATE.format(2)], [
+        ("notches down, three", lambda: wheel_hires(120, 120, 120), [(0, 37.5, 300, None), (0, 75.0, 300, None), (0, 112.5, 300, None)])]),
+    ("a touchpad", [WHEEL_DEV.format(1), EMULATE.format(1)], [
+        ("two fingers down", lambda: touchpad(600), None), ("two fingers right", lambda: touchpad("h450"), None),
+        ("two fingers down and right", lambda: touchpad("d450"), None)]),
+    ("a touchpad, a window rule's scroll_touchpad 2", [WEV_RULE], [("two fingers down", lambda: touchpad(600), None)]),
+]
+
+
+def wheel_cases(mode):
+    """every case of WHEEL_CASES in turn: {(case, what): (wev_scrolls, wev_axis_frames)}"""
+    got = {}
+    for case, lua, seqs in WHEEL_CASES:
+        for stmt in lua:
+            r = ctl("eval", stmt)
+            if r.strip() not in ("", "ok"):
+                note("14", f"hyprctl eval {stmt}", r)
+        time.sleep(0.5)
+        for what, do, _ in seqs:
+            mark = f"{mode} {case}: {what}"
+            wev_mark(mark)
+            do()
+            evs = wev_events(mark)
+            got[case, what] = (wev_scrolls(evs), wev_axis_frames(evs))
+    ctl("eval", WEV_RULE_OFF)
+    return got
 
 
 @section("14", "what reaches a window in 3D (wev): enter, motion, buttons, the wheel as on the 2D desktop, keys, leave")
@@ -1223,12 +1317,21 @@ def s_wev():
     tablet(12000, 12000)
     tablet(16384, 16384)
     time.sleep(0.5)
-    flat = {}
-    for what, do in WHEEL_SEQ:
-        wev_mark("2d " + what)
-        do()
-        flat[what] = wev_scrolls(wev_events("2d " + what))
-    note("14", "the wheel on the 2D desktop", flat)
+    flat = wheel_cases("2d")
+    note("14", "the wheel on the 2D desktop", {f"{c}: {w}" if c else w: v[0] for (c, w), v in flat.items()})
+    for case, lua, seqs in WHEEL_CASES:
+        for what, do, want in seqs:
+            if want is not None:
+                check("14", f"on the 2D desktop, {case}: {what}: Hyprland sends what its onMouseWheel says", flat[case, what][0] == want,
+                      f"{flat[case, what][0]}, expected {want}")
+    frames = {k: v[1] for k, v in flat.items() if k[0].startswith("a touchpad")}
+    note("14", "a touchpad on the 2D desktop", frames)
+    check("14", "on the 2D desktop, the touchpad scrolls with fingers: axis_source finger, then axis_stop",
+          all(f and all(any(e == "axis_source" and "finger" in r for e, r in fr) for fr in f) and any(e == "axis_stop" for fr in f for e, r in fr)
+              for f in frames.values()), frames)
+    both = [fr for fr in frames["a touchpad", "two fingers down and right"] if sum(e == "axis" for e, r in fr) == 2]
+    check("14", "... down and right at once: both axes in a frame (Hyprland holds a touchpad's frame back for the device's)", len(both) > 3,
+          f"{len(both)} frames with both")
     ensure_3d()
     menu_closed()
     ctl("hypr3d", "view", "first")
@@ -1248,11 +1351,16 @@ def s_wev():
         click(b)
     got = wev_buttons(wev_events("3d buttons"))
     check("14", "clicks: left, right and middle, pressed and released", got == [(272, 1), (272, 0), (273, 1), (273, 0), (274, 1), (274, 0)], got)
-    for what, do in WHEEL_SEQ:
-        wev_mark("3d " + what)
-        do()
-        got = wev_scrolls(wev_events("3d " + what))
-        check("14", f"the wheel, {what}: what wev gets in 2D", got and got == flat[what], f"3D {got}, 2D {flat[what]}")
+    check("14", "the plugin hooked CInputManager::onMouseWheel and onPointerFrame (the device's scroll factor, a touchpad's frames)",
+          st()["hooks"].get("wheel") and st()["hooks"].get("frame"), st()["hooks"])
+    got = wheel_cases("3d")
+    for case, lua, seqs in WHEEL_CASES:
+        for what, do, want in seqs:
+            g, f = got[case, what], flat[case, what]
+            # (the frames too: a touchpad's axes and axis_stop)
+            same = g[0] and g[0] == f[0] and g[1] == f[1]
+            check("14", f"the wheel, {case + ': ' if case else ''}{what}: what wev gets in 2D", same,
+                  f"3D {g[0]}, 2D {f[0]}" + ("" if g[1] == f[1] else f"; frames 3D {g[1]}, 2D {f[1]}"))
     wev_mark("3d walking")
     press("a")
     got = wev_keys(wev_events("3d walking"))
@@ -1484,10 +1592,29 @@ def s_monitors():
     two = frame("notification-second-3d", "H3D-2")
     check("16", "... notifications show over it", len(notification_boxes(two)) == 1, notification_boxes(two))
     ctl("dismissnotify")
-    # the monitor goes away while in 3D on it
+    # the monitor goes away while in 3D on it. aquamarine before 0.12.1 (Hyprland 0.55.2 has 0.11.0) queues a headless
+    # output's late frame as an idle event that points at the output, and runs it after the output is freed if that
+    # comes first (fixed upstream by 1699271 and 6ecde03). In 3D, where the plugin asks for each frame as soon as the
+    # last is out, one is nearly always queued so: Hyprland crashed here (CBackend::dispatchIdle -> a freed signal), or
+    # its heap was corrupted and malloc aborted later (in section 17, linking the map's shaders). The plugin holds the
+    # output until that event has run (holdOutput() in main.cpp)
+    dumps = coredumps()
     r = ctl("output", "remove", "H3D-2")
+    time.sleep(1)
+    if not alive():
+        try:
+            stack = wait_for("the core dump", lambda: (lambda t: t if t and "Stack trace" in t else None)(new_coredump(dumps)), 30, 1)
+        except TimeoutError:
+            stack = ""
+        aq = "_ZN10Aquamarine8CBackend12dispatchIdleEv" in stack and "emitInternal" in stack
+        check("16", "the second monitor removed while in 3D on it: back to 2D, Hyprland fine", False,
+              f"{r}; Hyprland crashed{' in aquamarine (CBackend::dispatchIdle): the output went before its queued frame' if aq else ''}; the rest of the section skipped")
+        restart_after_crash()
+        return
     ok = wait_for("2D", lambda: st()["mode"] == "off", 10)
     check("16", "the second monitor removed while in 3D on it: back to 2D, Hyprland fine", r == "ok" and ok and alive() and "H3D-2" not in monitors(), f"{r}; {st()['mode']}")
+    held = machine.execute("journalctl -t start-hyprland --no-pager -n 3000 | grep 'hypr3d.*H3D-2.*held' || true")[1].strip()
+    check("16", "... its output held until aquamarine's idle events queued before it had run", held, held.split("[hypr3d] ")[-1])
     time.sleep(1)
     img = calm_frame("first-after-second-gone")
     d = one2d.differs(img)
@@ -1560,12 +1687,35 @@ def s_litmap():
     check("17", "the mod2x decal darkens and brightens the floor", dark > 100 and bright > 100, f"{dark} dark, {bright} bright pixels")
     glass = mean(img, (.29, .45, .35, .58))
     check("17", "the glass pane isn't washed out (a light tint over the wall behind it)", max(glass) < 185, glass)
+    # the sun (50 degrees up) glints off the pane where you look up at it from under it: white, not held to the pane's
+    # cover (an opacity of 0.2 kept a glint under a quarter of white)
+    ctl("hypr3d", "tp", "-3.961", "0", "-5.4845", timeout=240)
+    ctl("hypr3d", "turn", "35", "50", timeout=240)
+    time.sleep(3)
+    img = frame("litcourt-glint", timeout=240)
+    n = img.count(lambda r, g, b: min(r, g, b) > 245, frac(img, (.42, .40, .58, .60)))
+    check("17", "the sun glints off the glass: white where it's reflected", n > 100, f"{n} white pixels")
+    # the same court with a sun that has no baked shadow channel: CS2 then shadows it on every surface by the realtime
+    # shadow alone, so the lightmapped floor is as sunlit as LitCourt's (it got no sun at all), and the band that only
+    # the baked shadow has is gone
+    r = ctl("eval", f'hl.config({{ plugin = {{ hypr3d = {{ map = "{LIT_RS}" }} }} }})')
+    ok = wait_for("LitCourtRuntimeSun", lambda: slow("hypr3d", "status")["world"] == "LitCourtRuntimeSun", 240, 2)
+    ctl("hypr3d", "spawn", timeout=240)
+    time.sleep(3)
+    img2 = frame("litcourt-runtime-sun", timeout=240)
+    orange2, band2 = mean(img2, (.15, .80, .40, .88)), mean(img2, (.10, .735, .42, .775))
+    check("17", "a sun with no baked shadow channel (LitCourtRuntimeSun): the lightmapped floor sunlit as LitCourt's",
+          ok and all(abs(a - b) <= 12 for a, b in zip(orange, orange2)), f"{r}; {orange2}, LitCourt's {orange}")
+    check("17", "... and only the realtime shadow: the baked shadow's band gone", sum(band2) > 0.95 * sum(orange2) and sum(band) < 0.9 * sum(orange),
+          f"band {band2} over {orange2} (LitCourt's {band} over {orange})")
     note("17", "frames a second in the map", slow("hypr3d", "status")["fps"])
     ctl("hypr3d", "off", timeout=240)
     wait_for("2D", lambda: slow("hypr3d", "status")["mode"] == "off", 120, 1)
     ctl("eval", 'hl.config({ plugin = { hypr3d = { map = "" } } })')
-    ok = wait_for("the courtyard", lambda: ctlj("hypr3d", "map")["world"] != "LitCourt", 20)
+    ok = wait_for("the courtyard", lambda: ctlj("hypr3d", "map")["world"] == "courtyard", 20)
     check("17", "map = \"\": back to the courtyard", ok)
+    time.sleep(0.5)
+    ctl("dismissnotify")  # ("back to the courtyard", so that the next section's frames don't have it)
 
 
 @section("11", "after 3D, Hyprland draws its windows as before (rounding, blur, borders)")
@@ -1771,7 +1921,7 @@ chmod 755 {H}/sing.sh && chown alice {H}/sing.sh""")
     check("live", "... and the desktop is as it was", d < 0.005 and lipsync_node() is None, f"{d:.2%} of pixels differ")
 
 
-@section("exit", "Hyprland exits cleanly with windows open (0.55.2 crashes, plugin or not: its own bug)")
+@section("exit", "Hyprland exits cleanly with windows open, dwindle and master (0.55.2 crashes, plugin or not: its own bug)")
 def s_exit_windows():
     # Hyprland 0.55.2's CCompositor::cleanup drops its windows before their clients, and dwindle then calls an expired
     # target of a window that's gone (fixed in 0.56.0, upstream commit 338bdbb3). stop_hyprland() closes the
@@ -1787,6 +1937,19 @@ def s_exit_windows():
     HYPR["pid"] = ""
     check("exit", "hl.dsp.exit() in 3D with two terminals open: Hyprland exits without crashing", gone and not crashed, f"{r}; {crashed} segfaults",
           known="Hyprland 0.55.2 crashes in CDwindleAlgorithm on exit with windows open, fixed in 0.56.0 (upstream 338bdbb3)")
+    # the master layout crashes the same way (CMasterAlgorithm::calculateWorkspace -> ITarget::setPositionGlobal on an
+    # expired target), and 338bdbb3 doesn't cover it: upstream main (e368c13c) still has no guard in master
+    start_hyprland("hyprland.lua", lua_config({"avatar": AV}, load=True, layout="master"))
+    ensure_avatar(AV)
+    ensure_3d()
+    n = segfaults()
+    r = ctl("dispatch", "hl.dsp.exit()")
+    gone = wait_for("Hyprland to go", lambda: not hypr_pid(), 15, 0.5)
+    crashed = segfaults() - n
+    KNOWN_CRASHES[0] += crashed
+    HYPR["pid"] = ""
+    check("exit", "... the same with the master layout", gone and not crashed, f"{r}; {crashed} segfaults",
+          known="Hyprland 0.55.2 crashes in CMasterAlgorithm on exit with windows open, not fixed upstream (main e368c13c)")
     note("exit", "the Hyprland", machine.succeed("readlink -f $(command -v Hyprland)").strip())
 
 

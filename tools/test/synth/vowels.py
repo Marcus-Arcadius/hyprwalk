@@ -1,7 +1,12 @@
 # vowels.py OUTDIR: sung vowels for testing lip sync (src/lipsync.cpp), made by a source-filter model: a pulse train at
 # the voice's pitch, tilted like a glottis, through resonators at the vowel's formants (Japanese a, i, u, e, o; a man's
 # and a woman's, from the usual measurements), then as radiated from the lips. 0.8 s each, 48 kHz 16-bit mono WAVs:
-# man_a.wav ... woman_o.wav, and silence.wav, hiss.wav (white noise, as an s is), quiet_a.wav (a man's a, 40 dB down)
+# man_a.wav ... woman_o.wav, and silence.wav, hiss.wav (white noise, as an s is), quiet_a.wav (a man's a, 40 dB down).
+# And consonants between two a's (0.3 s, then the consonant, then 0.3 s; 0.2 s of silence before and after):
+# man_asa.wav, man_asha.wav, man_afa.wav
+# (noise shaped as s, sh and f are: most of it around 6 kHz; around 3 kHz; flat above 1 kHz and faint) and man_ama.wav,
+# man_ana.wav (a nasal murmur: voiced, its resonance at 250 Hz, a dip where the mouth's side branch cancels, about 1
+# kHz for an m and 1.8 kHz for an n, and 12 dB fainter than the vowel); woman_asa.wav ... likewise at her pitch
 #   python3 vowels.py OUTDIR
 import math, os, random, struct, sys, wave
 
@@ -49,6 +54,56 @@ def voice(f0, formants, seconds=0.8, gain=1.0):
     return [x / peak * 0.5 * gain * min(1.0, k / ramp, (n - 1 - k) / ramp) for k, x in enumerate(s)]
 
 
+def biquad(xs, kind, fc, q):
+    """RBJ's low-pass (0), high-pass (1), band-pass (2) or notch (3)"""
+    w = 2 * math.pi * fc / RATE
+    c, al = math.cos(w), math.sin(w) / (2 * q)
+    b = {0: ((1 - c) / 2, 1 - c, (1 - c) / 2), 1: ((1 + c) / 2, -(1 + c), (1 + c) / 2), 2: (al, 0.0, -al), 3: (1.0, -2 * c, 1.0)}[kind]
+    a0, a1, a2 = 1 + al, -2 * c, 1 - al
+    b0, b1, b2 = (v / a0 for v in b)
+    a1, a2 = a1 / a0, a2 / a0
+    x1 = x2 = y1 = y2 = 0.0
+    out = []
+    for x in xs:
+        y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        out.append(y)
+        x2, x1, y2, y1 = x1, x, y1, y
+    return out
+
+
+def fricative(kind, seconds, level, rnd):
+    """shaped noise at a peak level (0.5 = the vowels'): s, sh or f"""
+    n = int(seconds * RATE)
+    x = [rnd.gauss(0.0, 1.0) for _ in range(n)]
+    if kind == 's':
+        x = biquad(biquad(x, 1, 4000, 0.7), 2, 6500, 0.8)
+    elif kind == 'sh':
+        x = biquad(biquad(x, 1, 1500, 0.7), 2, 3000, 1.2)
+    else:
+        x = biquad(biquad(x, 1, 1000, 0.7), 0, 9000, 0.7)
+    peak = max(abs(v) for v in x) or 1.0
+    ramp = int(0.01 * RATE)
+    return [v / peak * level * min(1.0, k / ramp, (n - 1 - k) / ramp) for k, v in enumerate(x)]
+
+
+def nasal(f0, dip, seconds, gain):
+    """a nasal murmur: the voice through the nose (a resonance at 250 Hz, weaker ones above) with a dip at `dip`"""
+    s = voice(f0, (250, 1100 if dip > 1400 else 1350, 2200, 3300), seconds, 1.0)
+    s = biquad(s, 3, dip, 2.0)
+    s = biquad(s, 0, 1200, 0.7)  # (little above: the nose damps it)
+    peak = max(abs(x) for x in s) or 1.0
+    return [x / peak * 0.5 * gain for x in s]
+
+
+def vcv(f0, vowel, middle):
+    """a vowel, a consonant, the vowel: crossfaded over 10 ms each way"""
+    a = voice(f0, vowel, 0.3)
+    fade = int(0.01 * RATE)
+    out = a[:-fade] + [x * (1 - k / fade) + middle[k] * k / fade for k, x in enumerate(a[-fade:])] + middle[fade:-fade]
+    b = voice(f0, vowel, 0.3)
+    return out + [middle[len(middle) - fade + k] * (1 - k / fade) + x * k / fade for k, x in enumerate(b[:fade])] + b[fade:]
+
+
 def write(path, xs):
     with wave.open(path, 'wb') as w:
         w.setnchannels(1)
@@ -66,4 +121,13 @@ write(os.path.join(out, 'silence.wav'), [0.0] * int(0.8 * RATE))
 rnd = random.Random(1)
 write(os.path.join(out, 'hiss.wav'), [rnd.uniform(-0.2, 0.2) for _ in range(int(0.8 * RATE))])
 write(os.path.join(out, 'quiet_a.wav'), voice(125, VOICES['man'][1]['a'], gain=0.01))
-print('wrote %d files to %s' % (len(VOICES) * 5 + 3, out))
+n = 0
+for who, (f0, table) in VOICES.items():
+    rnd = random.Random(2 if who == 'man' else 3)
+    for name, middle in (('asa', fricative('s', 0.16, 0.25, rnd)), ('asha', fricative('sh', 0.16, 0.25, rnd)),
+                         ('afa', fricative('f', 0.14, 0.04, rnd)), ('ama', nasal(f0, 1000, 0.12, 0.25)),
+                         ('ana', nasal(f0, 1800, 0.12, 0.25))):
+        quiet = [0.0] * int(0.2 * RATE)
+        write(os.path.join(out, '%s_%s.wav' % (who, name)), quiet + vcv(f0, table['a'], middle) + quiet)
+        n += 1
+print('wrote %d files to %s' % (len(VOICES) * 5 + 3 + n, out))

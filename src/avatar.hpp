@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lipsync.hpp"
 #include "loader.hpp"
 #include "map.hpp"
 #include "math3d.hpp"
@@ -263,6 +264,7 @@ namespace h3d {
         std::vector<SMaterialBind> materials;
         bool                       binary   = false; // all or nothing
         bool                       shapeKey = false; // one of the model's morphs by its own name, not an expression it defines
+        bool                       viseme   = false; // a consonant's mouth, for lip sync (SAvatarModel::consonant)
         eOverride                  overrideBlink = OVERRIDE_NONE, overrideLookAt = OVERRIDE_NONE, overrideMouth = OVERRIDE_NONE;
     };
 
@@ -383,6 +385,7 @@ namespace h3d {
         uint32_t                   morphFirst = 0, morphEnd = 0; // the vertices morphs move
         std::vector<SExpression>   expressions;                 // the presets it has, its own, then its shape keys
         std::array<int, EX_COUNT>  preset;                      // expression per preset, -1 = none
+        std::array<int, VISEME_COUNT - VOWEL_COUNT> consonant{-1, -1, -1, -1}; // lip sync's pp, ff, ss, ch: expression, -1 = none
         std::string                expressionsFrom;             // "VRM", "VRM 1.0", "shape key names", "" = none
         SLookAt                    lookAt;
         // the face each hand's gesture makes (left, right): an expression, -1 = none
@@ -398,6 +401,8 @@ namespace h3d {
         std::vector<SAvatarPart>   parts;
         std::vector<SAvatarToggle> toggles;
         std::vector<SAvatarSlider> sliders;
+        std::vector<int>           fixed; // nodes held in the world (MA's World Fixed Object): where their rest pose was
+                                          // when the avatar appeared
         std::string                settings; // the settings file it came with ("<name>.hypr3d.json"), "" = none
         // material variants (KHR_materials_variants): their names, and per batch (SAvatarBatch::variants) the material
         // it takes in some of them, (variant, material); [0] is none
@@ -519,8 +524,9 @@ namespace h3d {
             return m_held;
         }
         void setGesture(int hand, int gesture); // hand 0 left, 1 right; eGesture
-        // lip sync (CLipSync's): the mouth's aa, ih, ou, ee, oh presets this far, under what the face blocks of the mouth
-        void setVisemes(const std::array<float, 5>& weights) {
+        // lip sync (CLipSync's): the mouth's aa, ih, ou, ee, oh presets this far, and its consonants where the avatar has
+        // them, under what the face blocks of the mouth
+        void setVisemes(const SVisemes& weights) {
             m_visemes = weights;
         }
         int  gesture(int hand) const {
@@ -648,7 +654,7 @@ namespace h3d {
         std::vector<SMapMaterial>           m_materials;
         int                                 m_held = -1;
         float                               m_heldWeight = 1;
-        std::array<float, 5>                m_visemes{};
+        SVisemes                            m_visemes{};
         std::array<uint8_t, 2>              m_gesture{};
         int                                 m_lastHand  = 1;
         bool                                m_autoBlink = true;

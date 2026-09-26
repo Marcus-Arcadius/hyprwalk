@@ -62,8 +62,9 @@ it is. Features for VRChat's own systems (security locks, avatar scale, toes, ta
 person fixes and the like) change nothing hypr3d shows.
 
 What it does not: shader effects beyond the above (toon shading, matcaps, rim lights and the like),
-constraints, particles, audio, contacts; MA's World Fixed Object; VRCFury's SPS, TPS and OGB (each is
-named in a warning). Full Controller layers other than FX, Gesture and Action have nothing to do
+constraints, particles, audio, contacts; VRCFury's SPS, TPS and OGB (each is named in a warning). MA's
+World Fixed Object is held in the world where its rest pose was when the avatar appeared (the settings
+file's "fixed"): MA fixes it to the world's origin, and hypr3d's worlds put you at their start. Full Controller layers other than FX, Gesture and Action have nothing to do
 here. Blender imports only binary FBX files, so a model in any other format stops the conversion.
 """
 
@@ -3593,6 +3594,20 @@ class Analysis:
                     out[(hand, g)] = m
         return out
 
+    def consonants(self):
+        """the visemes of the consonants (VRChat's PP ... RR): {'pp': {(renderer, shape key): weight}, ...}; hypr3d's lip
+        sync shows pp, ff, ss and ch"""
+        if self.vrcf is not None and self.vrcf.consonants:  # VRCFury's Visemes, in place of the descriptor's
+            return dict(self.vrcf.consonants)
+        d, av = self.av.desc, self.av
+        smr = d.get('VisemeSkinnedMesh')
+        if inum(d.get('lipSync')) != 3 or not (isinstance(smr, Obj) and smr.cls == 137):
+            return {}
+        names = [str(x) for x in listof(d.get('VisemeBlendShapes'))]
+        have = av.shape_names(smr)
+        # (the descriptor's order: sil, PP, FF, TH, DD, kk, CH, SS, nn, RR, then the vowels)
+        return {n: {(smr, names[i]): 1.0} for i, (n, _) in enumerate(CONSONANT_VISEMES, 1) if i < len(names) and names[i] in have}
+
     def visemes(self):
         if self.vrcf is not None and self.vrcf.visemes:  # VRCFury's Visemes, in place of the descriptor's
             return [{'name': p, 'preset': p, 'shapes': sh} for p, sh in self.vrcf.visemes.items()]
@@ -3712,6 +3727,11 @@ def to_linear(c):
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
+# VRChat's consonant visemes: the settings file's names for them, and VRCFury's Visemes' (state_PP ...)
+CONSONANT_VISEMES = (('pp', 'PP'), ('ff', 'FF'), ('th', 'TH'), ('dd', 'DD'), ('kk', 'kk'), ('ch', 'CH'), ('ss', 'SS'), ('nn', 'nn'),
+                     ('rr', 'RR'))
+
+
 def linear_rgba(c):
     return tuple(round(x, 5) for x in (to_linear(c[0]), to_linear(c[1]), to_linear(c[2]), min(max(c[3], 0.0), 1.0)))
 
@@ -3795,14 +3815,17 @@ class MatInfo:
         # the one of the material's alpha mode, the stencil test, the toon outline, the back faces, the light clamp
         self.queue = -1
         self.stencil = None  # {ref, read, write, comp, pass, fail, zfail}, and 'again': {comp, alpha} (MaskOut_Blend)
-        self.outline = None  # {width (m), space, color (linear), base, tint, mask: (image, channel), shift (m), fix, lit}
+        self.outline = None  # {width (m), space, color (linear), base, tint, mask: (image, channel), shift (m), fix, lit,
+        #                       tex: (image, (scale, offset), blend or None: times it)}
         self.back = None  # {color (linear), tex: image or None (the main texture), xf}
         self.light = None  # (min, max, chroma): UnlitWF's _GL_LevelMin, _GL_LevelMax, _GL_BlendPower
+        self.toon = None  # {shade: [r, g, b] (linear), base: times the base colour, tex: image or None, lo, hi, strength}
+        self.matcap = None  # {tex: image, color: [r, g, b, amount], mode: add|multiply|mix|median, lit}
 
     def key(self):
         return (self.name, self.tex, self.tex_xf, self.color, self.mode, self.alpha, self.cutoff, self.double,
                 self.emit, self.emit_tex, self.emit_xf, self.invert, self.queue, repr(self.stencil),
-                repr(self.outline), repr(self.back), self.light)
+                repr(self.outline), repr(self.back), self.light, repr(self.toon), repr(self.matcap))
 
 
 def _prop_entries(sp, key):
@@ -4008,13 +4031,15 @@ class Materials:
         m.queue = self.render_queue(shader, rq)
         m.stencil = self.stencil(shader, fl)
         m.outline = self.outline(shader, low, kw, tex, fl, col)
+        m.toon, m.matcap = self.toon(shader, low, kw, tex, fl, col, wf)
         if wf:
             m.back = self.unlitwf_back(m, kw, tex, fl, col)
             # the light's brightness kept between these (UnlitWF's anti-glare), its colour this saturated; the
-            # minimum moved towards 0 or 1 by _GL_LevelTweak (newer UnlitWF)
+            # minimum moved towards 0 or 1 by _GL_LevelTweak (newer UnlitWF), then taken from gamma to linear
+            # (calcLightColorFrag's GammaToCurrentColorSpaceExact)
             lo, tw = fl.get('_GL_LevelMin', 0.125), fl.get('_GL_LevelTweak', 0.0)
             lo = lo + (0.0 - lo) * -tw if tw < 0 else lo + (1.0 - lo) * tw
-            m.light = (round(min(max(lo, 0.0), 1.0), 4), round(min(max(fl.get('_GL_LevelMax', 0.8), 0.0), 1.0), 4),
+            m.light = (round(to_linear(min(max(lo, 0.0), 1.0)), 4), round(min(max(fl.get('_GL_LevelMax', 0.8), 0.0), 1.0), 4),
                        round(min(max(fl.get('_GL_BlendPower', 0.8), 0.0), 1.0), 4))
         return m
 
@@ -4157,23 +4182,41 @@ class Materials:
 
         def color(key, default):
             return linear_rgba(col.get(key, default))
+
+        def ctex(key, uv=None, blend=None):
+            """the line's colour texture: (image, its tiling, how far the colour goes towards it; None: times it)"""
+            t = tex.get(key)
+            f = self.image(t[0]) if t and ref(t[0])[0] else None
+            if not f:
+                return None
+            u = uv or t
+            return (f, (u[1], u[2]), blend)
         tl = '_TL_ENABLE' in kw or not kw and fl.get('_TL_Enable', 0.0) > 0.5
         if tl and ('unlitwf' in nlow.replace('_', '') and 'outline' in nlow or re.search(r'Name\s+"OUTLINE"', src) or
                    not name and '_TL_LineWidth' in fl):
             w = max(fl.get('_TL_LineWidth', 0.05), 0.0) * 0.01
             # the EDGE type's lines are pushed back ten widths, so only a silhouette's show
             back = fl.get('_TL_Z_Shift', 0.0) + (w * 10 if fl.get('_TL_LineType', 0.0) > 0.5 else 0.0)
-            return {'width': round(w, 6), 'space': 'world', 'color': color('_TL_LineColor', (0.1, 0.1, 0.1, 1)),
+            # its custom colour texture, mixed in by _TL_BlendCustom, on the main texture's uv (UnlitWF's
+            # WF_TEX2D_OUTLINE_COLOR); white when it has none
+            custom = min(max(fl.get('_TL_BlendCustom', 0.0), 0.0), 1.0)
+            line = color('_TL_LineColor', (0.1, 0.1, 0.1, 1))
+            ct = ctex('_TL_CustomColorTex', tex.get('_MainTex'), round(custom, 4)) if custom > 0 else None
+            if custom > 0 and not ct:
+                line = tuple(round(c + (1.0 - c) * custom, 5) for c in line[:3]) + tuple(line[3:])
+            return {'width': round(w, 6), 'space': 'world', 'color': line,
                     'base': round(min(max(fl.get('_TL_BlendBase', 0.0), 0.0), 1.0), 4),
                     'mask': mask('_TL_MaskTex', 0, fl.get('_TL_InvMaskVal', 0.0) > 0.5), 'shift': round(-back, 5) + 0.0,
-                    'lit': 1.0} if w > 0 else None
+                    'lit': 1.0, 'tex': ct} if w > 0 else None
         g = ref(shader)[1] or ''
         if g in LILTOON_OUTLINE or 'liltoon' in nlow and 'outline' in nlow:
             w = max(fl.get('_OutlineWidth', 0.08), 0.0) * 0.01
+            # its colour: _OutlineTex (often the main texture) times _OutlineColor (lilToon's OVERRIDE_OUTLINE_COLOR)
             return {'width': round(w, 6), 'space': 'object', 'color': color('_OutlineColor', (0.6, 0.56, 0.73, 1)),
                     'mask': mask('_OutlineWidthMask'), 'shift': round(-fl.get('_OutlineZBias', 0.0), 5) + 0.0,
                     'fix': [round(min(max(fl.get('_OutlineFixWidth', 0.5), 0.0), 1.0), 4), 1.0],
-                    'lit': round(min(max(fl.get('_OutlineEnableLighting', 1.0), 0.0), 1.0), 4)} if w > 0 else None
+                    'lit': round(min(max(fl.get('_OutlineEnableLighting', 1.0), 0.0), 1.0), 4),
+                    'tex': ctex('_OutlineTex')} if w > 0 else None
         if ('poiyomi' in low or '.poi' in low or not name and '_EnableOutlines' in fl) and \
                 fl.get('_EnableOutlines', 0.0) > 0.5:
             w = max(fl.get('_LineWidth', 1.0), 0.0) * 0.01
@@ -4181,10 +4224,13 @@ class Materials:
             if fl.get('_OutlineFixedSize', 1.0) > 0.5:
                 fix = [round(min(max(fl.get('_OutlineFixWidth', 0.5), 0.0), 1.0), 4),
                        round(max(fl.get('_OutlinesMaxDistance', 1.0), 0.0), 4)]
+            # its colour: _OutlineTexture (on the first uv set) times the line's colour, times the base as much as
+            # _OutlineTintMix says (Poiyomi's outline fragment)
             return {'width': round(w, 6), 'space': 'world' if fl.get('_OutlineSpace', 0.0) > 0.5 else 'object',
                     'color': color('_LineColor', (1, 1, 1, 1)), 'tint': round(fl.get('_OutlineTintMix', 0.0), 4),
                     'mask': mask('_OutlineMask', fl.get('_OutlineMaskChannel', 0.0)), 'fix': fix,
-                    'lit': round(min(max(fl.get('_OutlineLit', 1.0), 0.0), 1.0), 4)} if w > 0 else None
+                    'lit': round(min(max(fl.get('_OutlineLit', 1.0), 0.0), 1.0), 4),
+                    'tex': ctex('_OutlineTexture') if int(fl.get('_OutlineTextureUV', 0.0)) == 0 else None} if w > 0 else None
         if 'mtoon' in low or not name and '_OutlineWidthMode' in fl:
             mode = int(fl.get('_OutlineWidthMode', 0))
             ten = 'mtoon10' in low or '_OutlineWidthTex' in tex  # UniVRM's MToon10: metres, the mask's green
@@ -4202,6 +4248,110 @@ class Materials:
                 out['max'] = round(max(fl.get('_OutlineScaledMaxDistance', 1.0), 0.0), 4)
             return out
         return None
+
+    def toon(self, shader, low, kw, tex, fl, col, wf):
+        """a material's toon shading and matcap, as hypr3d draws them (MatInfo's toon and matcap): UnlitWF's toon shade
+        and matcap (_TS_*, _HL_*: WF_UnToon_Function.cginc's drawToonShade and calcMatcapColor), lilToon's first
+        shadow and matcap (lil_common_frag.hlsl), Poiyomi's Multilayer Math (lilToon's) and Flat lighting and its
+        first matcap, MToon's (0.x: MToonCore.cginc; MToon10: VRMC_materials_mtoon). The shade is lit by the sun as
+        the lit colour is, from where N·L is lo (all shade) to hi (all lit); a toon step on half-Lambert (N·L / 2 + 1/2,
+        as lilToon and UnlitWF have it) is taken to N·L. UnlitWF without its toon shade and Poiyomi's Flat are lit
+        the same all round (lo = hi = -1). (None, None): neither"""
+        name = self.known_shader(shader)
+        nlow = name.lower()
+
+        def image(key):
+            t = tex.get(key)
+            return self.image(t[0]) if t and ref(t[0])[0] else None
+
+        def color(key, default):
+            return list(linear_rgba(col.get(key, default)))
+
+        def clamp(x, lo=0.0, hi=1.0):
+            return min(max(x, lo), hi)
+
+        def step(lo, hi):  # N·L from where it's all shade to where it's all lit
+            return round(lo, 4), round(max(hi, lo + 0.001), 4)
+
+        def halfstep(lo, hi):  # from half-Lambert's
+            lo, hi = clamp(lo), clamp(hi)
+            return step(2 * lo - 1, 2 * hi - 1)
+
+        shade = cap = None
+        flat = {'shade': [1.0, 1.0, 1.0], 'base': True, 'tex': None, 'lo': -1.0, 'hi': -1.0, 'strength': 1.0}
+        if wf:
+            # UnlitWF's light has no N·L in it (calcLightColorVertex: the lights' colours and the ambient's), so
+            # without its toon shade it's lit the same all round
+            shade = flat
+            if '_TS_ENABLE' in kw or not kw and fl.get('_TS_Enable', 0.0) > 0.5:
+                # the colour times 1st / base, _TS_Power of the way there; UnlitWF weakens it as the other light gets
+                # stronger (calcShadowPower), to about 3/4 under hypr3d's sun and sky, unless _TS_FixContrast
+                fix = '_TS_FIXC_ENABLE' in kw or fl.get('_TS_FixContrast', 0.0) > 0.5
+                p = clamp(fl.get('_TS_Power', 1.0), 0.0, 2.0) * (1.0 if fix else 0.75)
+                first, base = color('_TS_1stColor', (0.81, 0.81, 0.9, 1)), color('_TS_BaseColor', (1, 1, 1, 1))
+                s = [round(max(0.0, 1 + p * (min(f / max(b, 1e-4), 4.0) - 1)), 4) for f, b in zip(first[:3], base[:3])]
+                border = clamp(fl.get('_TS_1stBorder', 0.4))
+                lo, hi = halfstep(border, border + clamp(fl.get('_TS_1stFeather', 0.05), 0.001))
+                shade = {'shade': s, 'base': True, 'tex': None, 'lo': lo, 'hi': hi, 'strength': 1.0}
+            f = image('_HL_MatcapTex') if '_HL_ENABLE' in kw or not kw and fl.get('_HL_Enable', 0.0) > 0.5 else None
+            if f:
+                # its tint doubled (grey: none); the light and shade caps take it gamma encoded
+                kind = int(fl.get('_HL_CapType', 0))
+                two = [min(2 * c, 4.0) for c in color('_HL_MatcapColor', (0.5, 0.5, 0.5, 1))[:3]]
+                if kind in (1, 2):
+                    two = [max(1.055 * c ** (1 / 2.4) - 0.055, 0.0) for c in two]
+                cap = {'tex': f, 'color': [round(c, 4) for c in two] + [round(clamp(fl.get('_HL_Power', 1.0), 0.0, 2.0), 4)],
+                       'mode': {1: 'add', 2: 'multiply'}.get(kind, 'median'), 'lit': 1.0}
+        elif 'liltoon' in nlow or 'liltoon' in low or not name and '_UseShadow' in fl and '_TransparentMode' in fl:
+            if fl.get('_UseShadow', 0.0) > 0.5:
+                border, blur = fl.get('_ShadowBorder', 0.5), fl.get('_ShadowBlur', 0.1)
+                lo, hi = halfstep(border - blur / 2, border + blur / 2)
+                t = image('_ShadowColorTex')  # (in place of the base colour)
+                shade = {'shade': color('_ShadowColor', (0.82, 0.76, 0.85, 1))[:3], 'base': t is None, 'tex': t,
+                         'lo': lo, 'hi': hi, 'strength': round(clamp(fl.get('_ShadowStrength', 1.0)), 4)}
+            f = image('_MatCapTex') if fl.get('_UseMatCap', 0.0) > 0.5 else None
+            if f:
+                c = color('_MatCapColor', (1, 1, 1, 1))
+                cap = {'tex': f, 'color': c[:3] + [round(c[3] * clamp(fl.get('_MatCapBlend', 1.0)), 4)],
+                       'mode': {0: 'mix', 3: 'multiply'}.get(int(fl.get('_MatCapBlendMode', 1)), 'add'),  # (screen: added)
+                       'lit': round(clamp(fl.get('_MatCapEnableLighting', 1.0)), 4)}
+        elif 'poiyomi' in low or '.poi' in low or not name and '_LightingMode' in fl:
+            mode = int(fl.get('_LightingMode', 5))
+            if mode == 1:  # Multilayer Math: lilToon's
+                border, blur = fl.get('_ShadowBorder', 0.5), fl.get('_ShadowBlur', 0.1)
+                lo, hi = halfstep(border - blur / 2, border + blur / 2)
+                t = image('_ShadowColorTex')
+                shade = {'shade': color('_ShadowColor', (0.82, 0.76, 0.85, 1))[:3], 'base': t is None, 'tex': t,
+                         'lo': lo, 'hi': hi, 'strength': round(clamp(fl.get('_ShadowStrength', 1.0)), 4)}
+            elif mode == 5:  # Flat: the same light all round
+                shade = flat
+            f = image('_Matcap') if fl.get('_MatcapEnable', 0.0) > 0.5 else None
+            if f:
+                c = color('_MatcapColor', (1, 1, 1, 1))
+                how, amount = max((('mix', fl.get('_MatcapReplace', 1.0)), ('multiply', fl.get('_MatcapMultiply', 0.0)),
+                                   ('add', fl.get('_MatcapAdd', 0.0))), key=lambda x: x[1])
+                if amount > 0:
+                    k = clamp(fl.get('_MatcapIntensity', 1.0), 0.0, 5.0) * c[3] * clamp(amount)
+                    cap = {'tex': f, 'color': c[:3] + [round(k, 4)], 'mode': how, 'lit': 1.0}
+        elif 'mtoon' in low or not name and ('_ShadeToony' in fl or '_ShadingToonyFactor' in fl):
+            if 'mtoon10' in low or '_ShadingToonyFactor' in fl:  # UniVRM's MToon10: VRMC_materials_mtoon's
+                toony, shift = clamp(fl.get('_ShadingToonyFactor', 0.9)), clamp(fl.get('_ShadingShiftFactor', 0.0), -1.0)
+                lo, hi = step(-1 + toony - shift, 1 - toony - shift)
+                shade = {'shade': color('_ShadeColor', (1, 1, 1, 1))[:3], 'base': False, 'tex': image('_ShadeTex'),
+                         'lo': lo, 'hi': hi, 'strength': 1.0}
+                f = image('_MatcapTex')
+                if f:
+                    cap = {'tex': f, 'color': color('_MatcapColor', (1, 1, 1, 1))[:3] + [1.0], 'mode': 'add',
+                           'lit': round(clamp(fl.get('_RimLightingMix', 1.0)), 4)}
+            else:
+                toony, shift = clamp(fl.get('_ShadeToony', 0.9)), clamp(fl.get('_ShadeShift', 0.0), -1.0)
+                lo, hi = step(shift, shift + (1 - shift) * (1 - toony))
+                shade = {'shade': color('_ShadeColor', (0.97, 0.81, 0.86, 1))[:3], 'base': False,
+                         'tex': image('_ShadeTexture'), 'lo': lo, 'hi': hi, 'strength': 1.0}
+                f = image('_SphereAdd')
+                if f:  # added as it is
+                    cap = {'tex': f, 'color': [1.0, 1.0, 1.0, 1.0], 'mode': 'add', 'lit': 0.0}
+        return shade, cap
 
     def unlitwf_back(self, m, kw, tex, fl, col):
         """UnlitWF's back faces (_BK_*): its back texture (white when empty; often the main one) times its colour, in
@@ -4475,9 +4625,11 @@ MA_QUIET = ('VisibleHeadAccessory', 'MeshSettings')
 # handling), Rename Collision Tags (contacts, which hypr3d does not have), Move Independently (an editor tool), Convert
 # Constraints (it turns Unity's constraints into VRChat's, and this tool converts neither kind) and World Scale Object
 # (it keeps an object at the world's scale while a VRChat player scales the avatar; hypr3d scales an avatar only as
-# avatar_height asks, and then all of it). World Fixed Object leaves an object at the world's origin, where its
-# constraint holds it; hypr3d carries no constraints, so it moves with the avatar
-MA_WHY = {'WorldFixedObject': 'the objects move with the avatar, as hypr3d has no constraints to hold them in the world'}
+# avatar_height asks, and then all of it). World Fixed Object is converted: MA moves the object, as it is at rest, to
+# a root its constraint holds at the world's origin (WorldFixedObjectProcessor); the settings file's "fixed" has
+# hypr3d hold it in the world where its rest pose was when the avatar appeared (at the world's start, as a VRChat
+# world's origin usually is)
+MA_WHY = {}
 
 
 class MergeSpec:
@@ -4520,6 +4672,9 @@ class ModularAvatar:
                 if k:
                     comps.setdefault(k, []).append(c)
         self.comps = comps
+        # World Fixed Objects: held in the world (Settings' "fixed")
+        self.fixed = [g for g in av.gos if id(g) in av.inside and any(
+            c.cls == 114 and MA_OTHER.get(c.script()[1] or '') == 'WorldFixedObject' for c in g.comps)]
         self.pbblock = {id(c.go) for c in comps.get('PBBlocker', [])}
         # Scale Adjuster, the first thing MA does to the hierarchy: the meshes weighted to its bone are weighted to a
         # child of it scaled so (in the bone's axes) instead, and the bone's own children keep their size (apply())
@@ -5705,6 +5860,7 @@ class VRCFury:
         self.missed = {}  # actions and features that are not converted: kind -> count
         self.blink = None  # Blinking's face: {(renderer, shape key): weight}
         self.visemes = None  # Visemes': {preset: {(renderer, shape key): weight}}
+        self.consonants = None  # and its consonants': {'pp' ... 'rr': {(renderer, shape key): weight}}
         self.loops = {}  # toggle parameter -> (seconds, {property: value} at one end, at the other): Smooth Loops
         self.drops = {}  # toggle parameter -> [GameObjects left in the world while it is on]: World Drops
         others = {}
@@ -6074,6 +6230,14 @@ class VRCFury:
                         out[pr] = sh
                 if out:
                     self.visemes = out
+                cons = {}
+                for name, key in CONSONANT_VISEMES:
+                    sh = {(p[1], p[2]): min(max(v / 100.0, 0.0), 1.0) for p, v in self.props(f.get('state_' + key), c).items()
+                          if p[0] == 's' and v > 0.5}
+                    if sh:
+                        cons[name] = sh
+                if cons:
+                    self.consonants = cons
 
     def move_menus(self):
         """Move Menu Item and Reorder Menu Item, done to the whole menu when the rest is in (Analysis calls it)"""
@@ -8630,8 +8794,9 @@ def png_bytes(im):
 
 def material_extras(js, binc, b):
     """what hypr3d reads from the materials' extras that glTF has no place for (MatInfo's queue, stencil, outline,
-    back faces, light clamp): "hypr3d_queue", "hypr3d_stencil", "hypr3d_outline", "hypr3d_back", "hypr3d_light". The
-    textures only they use (outline masks, back textures) are added to the GLB as PNGs"""
+    back faces, light clamp, toon shading, matcap): "hypr3d_queue", "hypr3d_stencil", "hypr3d_outline", "hypr3d_back",
+    "hypr3d_light", "hypr3d_toon", "hypr3d_matcap". The textures only they use (outline masks, back textures, shade
+    textures, matcaps) are added to the GLB as PNGs"""
     out = bytearray(binc)
     made = {}  # image file -> texture index
     stems = {}  # an image name the exporter gave one image only -> that image
@@ -8693,7 +8858,7 @@ def material_extras(js, binc, b):
         if mi.stencil:
             ex['hypr3d_stencil'] = mi.stencil
         if mi.outline:
-            o = {k: v for k, v in mi.outline.items() if v is not None and k != 'mask'}
+            o = {k: v for k, v in mi.outline.items() if v is not None and k not in ('mask', 'tex')}
             mk = mi.outline.get('mask')
             if mk:
                 t = texture(mk[0], 512)
@@ -8701,6 +8866,18 @@ def material_extras(js, binc, b):
                     o['mask'] = {'index': t, 'channel': 'RGBA'.index(mk[1])}
                     if mk[2]:
                         o['mask']['invert'] = True
+            ct = mi.outline.get('tex')
+            if ct:
+                f, xf, blend = ct
+                # (the main texture's own, when it's that: its RGB; its alpha may have been baked)
+                t = m.get('pbrMetallicRoughness', {}).get('baseColorTexture', {}).get('index') if f == mi.tex else texture(f)
+                if t is not None:
+                    o['texture'] = {'index': t}
+                    x = xform(xf)
+                    if x:
+                        o['texture']['transform'] = x
+                    if blend is not None:
+                        o['texture']['blend'] = blend
             ex['hypr3d_outline'] = o
         if mi.back:
             bk = {'color': list(mi.back['color'])}
@@ -8718,6 +8895,18 @@ def material_extras(js, binc, b):
             ex['hypr3d_back'] = bk
         if mi.light:
             ex['hypr3d_light'] = {'min': mi.light[0], 'max': mi.light[1], 'chroma': mi.light[2]}
+        if mi.toon:
+            tn = {k: v for k, v in mi.toon.items() if k != 'tex'}
+            f = mi.toon.get('tex')
+            t = m.get('pbrMetallicRoughness', {}).get('baseColorTexture', {}).get('index') if f and f == mi.tex else \
+                texture(f) if f else None
+            if t is not None:
+                tn['texture'] = {'index': t}
+            ex['hypr3d_toon'] = tn
+        if mi.matcap:
+            t = texture(mi.matcap['tex'], 512)
+            if t is not None:
+                ex['hypr3d_matcap'] = dict({k: v for k, v in mi.matcap.items() if k != 'tex'}, index=t)
         if ex:
             m.setdefault('extras', {}).update(ex)
             said.append('%s (%s)' % (m.get('name'), ', '.join(k[7:] for k in ex)))
@@ -9603,6 +9792,9 @@ class Settings:
         exprs, gestures = self.expressions()
         if exprs:
             out['expressions'] = exprs
+        vis = {n: sh for n, sh in ((n, self.shapes(x)) for n, x in self.an.consonants().items()) if sh}
+        if vis:
+            out['visemes'] = vis
         if gestures:
             out['gestures'] = gestures
         hidden, toggles, sliders = self.outfit()
@@ -9612,6 +9804,10 @@ class Settings:
             out['toggles'] = toggles
         if sliders:
             out['sliders'] = sliders
+        fixed = [self.nodes[n]['name'] for n in (self.node(g) for g in (self.ma.fixed if self.ma else [])) if n is not None]
+        if fixed:
+            out['fixed'] = fixed
+            log('%d object(s) held in the world (Modular Avatar World Fixed Object): %s' % (len(fixed), ', '.join(fixed)))
         cols, springs = self.dynamics()
         if cols:
             out['colliders'] = cols

@@ -51,8 +51,11 @@ namespace h3d {
             return loc;
         }
 
-        std::string withCommon(const char* body, bool sky, bool lit = false) {
-            std::string s = "#version 300 es\nprecision highp float;\nprecision highp int;\n";
+        std::string withCommon(const char* body, bool sky, bool lit = false, bool dual = false) {
+            std::string s = "#version 300 es\n";
+            if (dual)
+                s += "#extension GL_EXT_blend_func_extended : require\n#define H3D_DUAL 1\n";
+            s += "precision highp float;\nprecision highp int;\n";
             s += shaders::NOISE_GLSL;
             if (sky || lit)
                 s += shaders::SKY_COMMON_GLSL;
@@ -381,7 +384,13 @@ namespace h3d {
         m_progLight      = gl::makeProgram("light", shaders::LIGHT_VS, shaders::LIGHT_FS);
         m_progSky        = gl::makeProgram("sky", shaders::SKY_VS, withCommon(shaders::SKY_FS_BODY, true));
         m_progWorld      = gl::makeProgram("world", shaders::WORLD_VS, withCommon(shaders::WORLD_FS_BODY, true, true));
-        m_progMap        = gl::makeProgram("map", shaders::MAP_VS, withCommon(shaders::MAP_FS_BODY, true, true));
+        // (with blending's second source for glass when there is one, else without)
+        m_dualSource = dualSource && gl::hasExtension("GL_EXT_blend_func_extended");
+        m_progMap    = m_dualSource ? gl::makeProgram("map", shaders::MAP_VS, withCommon(shaders::MAP_FS_BODY, true, true, true)) : 0;
+        if (!m_progMap) {
+            m_dualSource = false;
+            m_progMap    = gl::makeProgram("map", shaders::MAP_VS, withCommon(shaders::MAP_FS_BODY, true, true));
+        }
         m_progMapDepth   = gl::makeProgram("map-depth", shaders::MAP_DEPTH_VS, shaders::MAP_DEPTH_FS);
         m_progDepth      = gl::makeProgram("depth", shaders::DEPTH_VS, shaders::DEPTH_FS);
         m_progPanel      = gl::makeProgram("panel", shaders::PANEL_VS, shaders::PANEL_FS);
@@ -505,8 +514,8 @@ namespace h3d {
             logf("GL error after renderer init: 0x{:x}", err);
 
         m_ready = true;
-        logf("renderer ready: {} world vertices, {} map triangles, {}x MSAA, {}px shadows{}", m_worldCount, m_map.model ? m_map.model->triangles : 0, m_samples,
-             m_shadowSize, m_sunFollow ? " (following)" : "");
+        logf("renderer ready: {} world vertices, {} map triangles, {}x MSAA, {}px shadows{}{}", m_worldCount, m_map.model ? m_map.model->triangles : 0, m_samples,
+             m_shadowSize, m_sunFollow ? " (following)" : "", m_dualSource ? ", glass with a second source" : "");
         return true;
     }
 
@@ -1268,18 +1277,22 @@ namespace h3d {
         glUniform1f(U(prog, "uTime"), f.time);
         glBindVertexArray(m_map.vao);
 
-        eMapBlend blending = BLEND_NORMAL;
+        constexpr int GLASS_DUAL = 0x100;
+        int           blending   = BLEND_NORMAL;
         for (const auto& b : model.batches) {
             if (!wanted(b))
                 continue;
             const auto& m = model.materials[b.material];
-            // Source's decals that multiply what's under them
-            if (const eMapBlend want = m.alphaMode == ALPHA_BLEND ? m.blend : BLEND_NORMAL; want != blending) {
+            // Source's decals that multiply what's under them, glows that add to it, and glass that keeps what's
+            // behind it by as much as its second color says, channel by channel (MAP_FS_BODY's fragKeep)
+            if (const int want = m.alphaMode != ALPHA_BLEND ? BLEND_NORMAL : m.glass && m_dualSource ? GLASS_DUAL : m.blend; want != blending) {
                 blending = want;
                 if (want == BLEND_MOD2X)
                     glBlendFuncSeparate(GL_DST_COLOR, GL_SRC_COLOR, GL_ZERO, GL_ONE);
                 else if (want == BLEND_ADD)
                     glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
+                else if (want == GLASS_DUAL)
+                    glBlendFuncSeparate(GL_ONE, GL_SRC1_COLOR_EXT, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
                 else
                     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
             }
@@ -1316,6 +1329,9 @@ namespace h3d {
         bind(UNIT_IRRADIANCE, GL_TEXTURE_2D, gl.irradiance);
         bind(UNIT_DIRECTIONAL, GL_TEXTURE_2D, gl.directional);
         bind(UNIT_BAKED_SHADOW, GL_TEXTURE_2D, gl.shadows);
+        // CS2 shadows its sun by (1 - its channel of the baked shadows) times its realtime shadow on every surface; a sun
+        // with no channel has only the realtime shadow, as the probes' alpha says then too (0: none baked)
+        glUniform1i(U(prog, "uBakedShadow"), gl.shadows ? 1 : 0);
         bind(UNIT_PROBES, GL_TEXTURE_3D, gl.probes);
         const bool sky = L.skyImage >= 0 && (size_t)L.skyImage < m_map.textures.size() && m_map.textures[L.skyImage];
         bind(UNIT_SKY, GL_TEXTURE_2D, sky ? m_map.textures[L.skyImage] : 0);
@@ -1453,6 +1469,7 @@ namespace h3d {
         const M4    world = f.avatar.transform * model.fix;
         const float scale = length(V3{world.m[0], world.m[1], world.m[2]}); // the model's (lilToon's outlines scale with it)
         uVec3(prog, "uEye", f.eye);
+        uVec3(prog, "uViewUp", V3{f.view.m[1], f.view.m[5], f.view.m[9]}); // (the view's second row)
         glUniform1f(U(prog, "uAspect"), (float)f.height / (float)std::max(f.width, 1));
         glUniform1i(U(prog, "uOutline"), 0);
         glUniform1f(U(prog, "uAgain"), 0.f);
@@ -1493,6 +1510,25 @@ namespace h3d {
                 }
             }
             glUniform3f(U(prog, "uLightClamp"), m.lightClamp[0], m.lightClamp[1], m.lightClamp[2]);
+            // toon shading and the matcap: their textures where the layer mask and the detail mask go (in MAP_FS_BODY)
+            const auto& tn = m.toon;
+            glUniform1i(U(prog, "uToon"), !tn.on ? 0 : loaded(tn.shadeTex) ? 2 : 1);
+            if (tn.on) {
+                glUniform4f(U(prog, "uToonShade"), tn.shade[0], tn.shade[1], tn.shade[2], tn.shadeBase ? 1.f : 0.f);
+                glUniform3f(U(prog, "uToonStep"), tn.lo, tn.hi, tn.strength);
+                if (loaded(tn.shadeTex)) {
+                    glActiveTexture(GL_TEXTURE0 + UNIT_LAYER_MASK);
+                    glBindTexture(GL_TEXTURE_2D, m_avatar.textures[tn.shadeTex]);
+                }
+            }
+            const bool matcap = loaded(tn.matcapTex);
+            glUniform1i(U(prog, "uMatcap"), matcap ? (int)tn.matcapMode + 1 : 0);
+            if (matcap) {
+                glUniform4f(U(prog, "uMatcapColor"), tn.matcap[0], tn.matcap[1], tn.matcap[2], tn.matcap[3]);
+                glUniform1f(U(prog, "uMatcapLit"), tn.matcapLit);
+                glActiveTexture(GL_TEXTURE0 + UNIT_DETAIL_MASK);
+                glBindTexture(GL_TEXTURE_2D, m_avatar.textures[tn.matcapTex]);
+            }
             // the outline first, as Unity's toon shaders draw it: the mesh pushed out, its front faces culled
             if (const auto& ol = m.outline; ol.width > 0 && f.avatar.outlines) {
                 glEnable(GL_CULL_FACE);
@@ -1507,7 +1543,17 @@ namespace h3d {
                 glUniform3f(U(prog, "uOutlineMix"), ol.base, ol.tint, ol.lit);
                 glActiveTexture(GL_TEXTURE0 + UNIT_OUTLINE_MASK);
                 glBindTexture(GL_TEXTURE_2D, mask ? m_avatar.textures[ol.maskTex] : m_avatar.white);
+                // its color's texture, where the detail texture goes (an avatar has none, and the samplers are all taken)
+                const bool colorTex = loaded(ol.colorTex);
+                glUniform2f(U(prog, "uOutlineTex"), colorTex && ol.colorBlend < 0 ? 1.f : 0.f, colorTex && ol.colorBlend >= 0 ? ol.colorBlend : 0.f);
+                if (colorTex) {
+                    glUniform4f(U(prog, "uOutlineTexXf"), ol.colorXf[0], ol.colorXf[1], ol.colorXf[2], ol.colorXf[3]);
+                    glUniform2f(U(prog, "uOutlineTexOffset"), ol.colorXf[4], ol.colorXf[5]);
+                    glActiveTexture(GL_TEXTURE0 + UNIT_DETAIL);
+                    glBindTexture(GL_TEXTURE_2D, m_avatar.textures[ol.colorTex]);
+                }
                 draw();
+                glUniform2f(U(prog, "uOutlineTex"), 0.f, 0.f);
                 glUniform1i(U(prog, "uOutline"), 0);
                 glDisable(GL_CULL_FACE);
             }

@@ -941,5 +941,25 @@ f2.data['m_IsActive'] = '1'
 before = len(u.WARNINGS)
 check('two active: none, and said', (st.floor(), len(u.WARNINGS) - before), (None, 1))
 
+print('== MA World Fixed Object: held in the world, no warning')
+WFO = '0e2d9f1d69e34b92a96e6cc162770fad'
+sc = Scene()
+arm, hips, spine, chest, head = avatar(sc)
+lamp = sc.go('Lamp', sc.root, (0.5, 0, 0.5))
+bulb = sc.go('Bulb', lamp, (0.5, 1, 0.5))
+pen = sc.go('Pen', hips, (0.2, 1, 0))
+sc.comp(lamp, {}, script=WFO)
+sc.comp(pen, {}, script=WFO)
+before = len(u.WARNINGS)
+ma = sc.run({'Hips': hips})
+check('the objects it is on, not their children, and nothing said', (sorted(u.go_name(g) for g in ma.fixed),
+                                                                     len(u.WARNINGS) - before), (['Lamp', 'Pen'], 0))
+st = u.Settings.__new__(u.Settings)
+st.ma, st.nodes, st.index = ma, [{'name': 'Lamp'}, {'name': 'Pen'}], {'Lamp': 0, 'Pen': 1}
+for g in ma.fixed:
+    g.name = u.go_name(g)  # (as the avatar's objects are named when it's read)
+check('... their nodes, for the settings file\'s "fixed"', sorted(st.nodes[n]['name'] for n in (st.node(g) for g in ma.fixed)),
+      ['Lamp', 'Pen'])
+
 print('\n%d failure(s)' % len(FAILS) if FAILS else '\nall passed')
 sys.exit(1 if FAILS else 0)

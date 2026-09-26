@@ -52,8 +52,9 @@ written from reading MA's source, and the notice above covers it too.
 `UNLITWF_SHADERS` lists the GUIDs of UnlitWF's stencil mask and outline shaders, from the `.meta` files of
 whiteflare's Unlit_WF_ShaderSuite (https://github.com/whiteflare/Unlit_WF_ShaderSuite), so that a material whose
 shader isn't in the input is still known. What the converter does with UnlitWF's settings (its stencil passes, its
-outline width, EDGE lines, back faces, light clamp and alpha) was worked out from reading its shaders; none of their
-code is here. UnlitWF is under the zlib License:
+outline width, EDGE lines, back faces, light clamp and alpha, and its toon shade, matcaps and light: `drawToonShade`,
+`calcMatcapColor`, `calcLightColorVertex` and `calcLightColorFrag` in `WF_UnToon_Function.cginc`) was worked out from
+reading its shaders; none of their code is here. UnlitWF is under the zlib License:
 
 ```
 The zlib/libpng License
@@ -82,7 +83,8 @@ distribution.
 
 `LILTOON_OUTLINE` lists the GUIDs of lilToon's outline shaders, from the `.meta` files of lilToon
 (https://github.com/lilxyzw/lilToon), and the converter's reading of lilToon's outline settings follows its
-`lilGetOutlineWidth` and `lilCalcOutlinePosition`. lilToon is under the MIT License:
+`lilGetOutlineWidth` and `lilCalcOutlinePosition`, and of its shadow and matcap settings its `lilGetShading`,
+`lilTooningScale`, `lilGetMatCap` and `lilBlendColor`. lilToon is under the MIT License:
 
 ```
 MIT License
@@ -108,14 +110,25 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-The converter's reading of Poiyomi Toon's outline and stencil settings (`_EnableOutlines`, `_LineWidth`,
-`_OutlineSpace`, `_OutlineFixedSize`, `_Stencil*`) follows its shader (https://github.com/poiyomi/PoiyomiToonShader,
-MIT License, Copyright (c) 2026 Poiyomi Labs); none of its code is here.
+The converter's reading of Poiyomi Toon's outline, stencil, lighting and matcap settings (`_EnableOutlines`,
+`_LineWidth`, `_OutlineSpace`, `_OutlineFixedSize`, `_Stencil*`, `_LightingMode` and its Multilayer Math's
+`_Shadow*`, `_Matcap*`) follows its shader (https://github.com/poiyomi/PoiyomiToonShader, MIT License, Copyright (c)
+2026 Poiyomi Labs); none of its code is here.
+
+The plugin's toon shading and matcaps (`toonAlbedo` and `matcap` in `src/shaders.hpp`, and the loader's reading of
+MToon in `src/gltf.cpp`) follow MToon's (https://github.com/Santarh/MToon, `MToonCore.cginc`, MIT License,
+Copyright (c) 2018 Masataka SUMI) and the VRM 1.0 specification's `VRMC_materials_mtoon`
+(https://github.com/vrm-c/vrm-specification, its schema's defaults), written from reading them; none of their code
+is here.
 
 ## Lip sync
 
-`src/lipsync.cpp` finds vowels by their formants (linear prediction, its polynomial's roots), a textbook method;
-the vowels' formant values are the usual measurements of Japanese vowels. It borrows nothing from uLipSync
+`src/lipsync.cpp` finds vowels by their formants (linear prediction, its polynomial's roots), a textbook method, and
+consonants by where a fricative's noise lies (band energies) and a murmur's loudness, textbook phonetics too. The
+vowels' formant values are between the usual measurements of Japanese vowels and Tokyo speakers' means in Yazawa and
+Kondo (2019), from Kakeru Yazawa's "Japanese Vowel Length Acoustic Data" (Zenodo record 15227304, CC BY 4.0,
+https://creativecommons.org/licenses/by/4.0/): the geometric means of its 8 men's and 8 women's F1 and F2, computed
+from it and adjusted; none of the data is in this repo. It borrows nothing from uLipSync
 (https://github.com/hecomi/uLipSync, MIT), which matches MFCCs against recorded voice profiles instead.
 
 ## The VM test (tools/test/vm)
@@ -130,6 +143,12 @@ full one, with virglrenderer), fonts, PipeWire, foot, grim, wev and Python keep 
 factors and its discrete scrolling made up for high-resolution wheels, `input:emulate_discrete_scroll`), written
 after reading it (https://github.com/hyprwm/Hyprland, BSD 3-Clause License, Copyright (c) 2022-2026, vaxerski), so
 that a window scrolls the same in 3D as on the desktop.
+
+`src/main.cpp`'s `holdOutput()` works around a bug in aquamarine's headless backend that its commits 1699271 and
+6ecde03 fix upstream (a removed output's queued frame runs on the freed output). It was written after reading
+aquamarine's `src/backend/Headless.cpp` and `src/backend/Backend.cpp` (https://github.com/hyprwm/aquamarine, BSD
+3-Clause License, Copyright (c) 2024, Hypr Development). No code of it is copied: the plugin only calls its public
+`CBackend::addIdleEvent` and `removeIdleEvent`.
 
 ## VRCFury
 

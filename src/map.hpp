@@ -113,6 +113,30 @@ namespace h3d {
         float         fix = 0, fixMax = 1;    // thinner up close: width * mix(1, min(distance, fixMax), fix)
         float         lit = 1;                // how much it's shaded (0: its color as it is)
         float         maxW = 1;               // screen space: the distance it stops staying as wide at
+        int           colorTex = -1;          // its color's texture (index into images): the color times it,
+        float         colorBlend = -1;        // or (>= 0) mixed this far towards it (UnlitWF's custom color)
+        float         colorXf[6] = {1, 0, 0, 1, 0, 0}; // its uv: mat2 columns, then the offset
+    };
+
+    // toon shading (MToon, lilToon, UnlitWF, Poiyomi): the sun lights a surface from its shade color to its lit one as
+    // N·L goes from lo to hi, not by N·L itself; and a matcap, looked up by the normal as the camera sees it
+    enum eMatcapMode : uint8_t {
+        MATCAP_ADD,      // added (MToon's, lilToon's Add and Screen, UnlitWF's light cap, Poiyomi's Add)
+        MATCAP_MULTIPLY, // the color times it (UnlitWF's shade cap, lilToon's and Poiyomi's Multiply)
+        MATCAP_MIX,      // in place of the color, this much (lilToon's Normal, Poiyomi's Replace)
+        MATCAP_MEDIAN,   // lighter where it's over mid grey, darker under (UnlitWF's median cap)
+    };
+    struct SToon {
+        bool        on = false; // the shading (a matcap: matcapTex)
+        float       shade[3] = {1, 1, 1}; // linear
+        bool        shadeBase = true;     // times the base color
+        int         shadeTex  = -1;       // times this (index into images)
+        float       lo = -1, hi = -1;     // N·L where it's all shade, and all lit (lo = hi = -1: lit all round, flat)
+        float       strength = 1;         // how much of the shade shows
+        int         matcapTex = -1;
+        float       matcap[4] = {1, 1, 1, 1}; // color (the median's: how much lighter, 0 darker), and how much of it
+        eMatcapMode matcapMode = MATCAP_ADD;
+        float       matcapLit = 1; // how much it's lit as the surface is (0: as if in full light, wherever it is)
     };
 
     struct SMapMaterial {
@@ -168,6 +192,7 @@ namespace h3d {
         int         queue = -1;
         SStencil    stencil;
         SOutline    outline;
+        SToon       toon;
         int         back = 0; // 1: back faces take backColor, 2: backTex times backColor (in place of the base color's rgb)
         int         backTex      = -1;
         float       backColor[4] = {1, 1, 1, 1};

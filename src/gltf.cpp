@@ -235,9 +235,18 @@ namespace h3d::gltf {
                     const auto* ci = t->image;
                     img.name       = ci->name ? ci->name : ci->uri && std::strncmp(ci->uri, "data:", 5) != 0 ? ci->uri : std::format("image {}", ii);
                     if (const auto* s = t->sampler) {
-                        img.wrapS   = s->wrap_s ? (int)s->wrap_s : 0x2901;
-                        img.wrapT   = s->wrap_t ? (int)s->wrap_t : 0x2901;
-                        img.nearest = s->mag_filter == cgltf_filter_type_nearest;
+                        // cgltf keeps the file's numbers in its enums as they are: read them as numbers (an enum
+                        // holding another value is undefined), and take only GL's own
+                        const auto num = [](const auto& e) {
+                            static_assert(sizeof(e) == sizeof(int));
+                            int v = 0;
+                            std::memcpy(&v, &e, sizeof(v));
+                            return v;
+                        };
+                        const auto wrap = [](int v) { return v == 0x812F || v == 0x8370 ? v : 0x2901; }; // clamp, mirror, else repeat
+                        img.wrapS   = wrap(num(s->wrap_s));
+                        img.wrapT   = wrap(num(s->wrap_t));
+                        img.nearest = num(s->mag_filter) == 0x2600; // GL_NEAREST
                     }
                     out.images.push_back(std::move(img));
                 }
@@ -388,19 +397,46 @@ namespace h3d::gltf {
             //                      "mask": {"index", "channel", "invert"}, "shift", "fix": [amount, max], "lit", "max"}
             //   "hypr3d_back": {"color", "texture": {"index", "transform": {"offset", "scale"}}}
             //   "hypr3d_light": {"min", "max", "chroma"}
+            // "hypr3d_toon": {"shade": [r, g, b], "base": times the base color, "texture": {"index"} (times it too), "lo",
+            // "hi" (N·L), "strength"}
+            void toon(const SJson* t, SMapMaterial& m) {
+                auto& tn = m.toon;
+                tn.on    = true;
+                t->numbers("shade", tn.shade, 3);
+                const SJson* b = t->get("base");
+                tn.shadeBase   = !b || b->type != SJson::BOOL || b->num != 0;
+                if (const SJson* x = t->get("texture"); x && x->type == SJson::OBJECT)
+                    tn.shadeTex = textureRef(x, true);
+                tn.lo       = std::clamp(fileFloat(t->number("lo", -1), -1), -2.f, 2.f);
+                tn.hi       = std::clamp(std::max(fileFloat(t->number("hi", -1), -1), tn.lo + 1e-3f), -2.f, 2.f);
+                tn.strength = std::clamp(fileFloat(t->number("strength", 1), 1), 0.f, 1.f);
+            }
+
+            // "hypr3d_matcap": {"index", "color": [r, g, b, a], "mode": "add"|"multiply"|"mix"|"median", "lit"}
+            void matcap(const SJson* mc, SMapMaterial& m) {
+                auto& tn = m.toon;
+                if ((tn.matcapTex = textureRef(mc, true)) < 0)
+                    return;
+                mc->numbers("color", tn.matcap, 4);
+                const SJson*           mode = mc->get("mode");
+                const std::string_view md   = mode && mode->type == SJson::STRING ? std::string_view(mode->str) : "add";
+                tn.matcapMode = md == "multiply" ? MATCAP_MULTIPLY : md == "mix" ? MATCAP_MIX : md == "median" ? MATCAP_MEDIAN : MATCAP_ADD;
+                tn.matcapLit  = std::clamp(fileFloat(mc->number("lit", 1), 1), 0.f, 1.f);
+            }
+
             void hypr3d(const cgltf_material& cm, SMapMaterial& m) {
                 if (!cm.extras.data)
                     return;
                 const auto j = SJson::parse(cm.extras.data);
                 if (!j || j->type != SJson::OBJECT)
                     return;
-                m.queue = (int)j->number("hypr3d_queue", -1);
+                m.queue = fileInt(j->number("hypr3d_queue", -1), -1);
                 if (const SJson* s = j->get("hypr3d_stencil"); s && s->type == SJson::OBJECT) {
                     auto& st = m.stencil;
                     st.on    = true;
-                    st.ref   = (uint8_t)std::clamp(s->number("ref", 0), 0., 255.);
-                    st.read  = (uint8_t)std::clamp(s->number("read", 255), 0., 255.);
-                    st.write = (uint8_t)std::clamp(s->number("write", 255), 0., 255.);
+                    st.ref   = (uint8_t)fileInt(s->number("ref", 0), 0, 0, 255);
+                    st.read  = (uint8_t)fileInt(s->number("read", 255), 255, 0, 255);
+                    st.write = (uint8_t)fileInt(s->number("write", 255), 255, 0, 255);
                     st.comp  = stencilComp(s->get("comp"), SC_ALWAYS);
                     st.pass  = stencilOp(s->get("pass"));
                     st.fail  = stencilOp(s->get("fail"));
@@ -427,9 +463,24 @@ namespace h3d::gltf {
                     ol.fixMax = fix[1];
                     if (const SJson* mk = o->get("mask"); mk && mk->type == SJson::OBJECT) {
                         ol.maskTex     = textureRef(mk, false);
-                        ol.maskChannel = (uint8_t)std::clamp(mk->number("channel", 0), 0., 3.);
+                        ol.maskChannel = (uint8_t)fileInt(mk->number("channel", 0), 0, 0, 3);
                         const SJson* inv = mk->get("invert");
                         ol.maskInvert    = inv && inv->type == SJson::BOOL && inv->num != 0;
+                    }
+                    if (const SJson* ct = o->get("texture"); ct && ct->type == SJson::OBJECT) {
+                        ol.colorTex   = textureRef(ct, true);
+                        ol.colorBlend = ct->get("blend") ? std::clamp((float)ct->number("blend", 0), 0.f, 1.f) : -1.f;
+                        if (!(ol.colorBlend == ol.colorBlend))
+                            ol.colorBlend = -1.f;
+                        if (const SJson* x = ct->get("transform"); x && x->type == SJson::OBJECT) {
+                            float scale[2] = {1, 1}, offset[2] = {0, 0};
+                            x->numbers("scale", scale, 2);
+                            x->numbers("offset", offset, 2);
+                            ol.colorXf[0] = scale[0];
+                            ol.colorXf[3] = scale[1];
+                            ol.colorXf[4] = offset[0];
+                            ol.colorXf[5] = offset[1];
+                        }
                     }
                 }
                 if (const SJson* b = j->get("hypr3d_back"); b && b->type == SJson::OBJECT) {
@@ -450,6 +501,10 @@ namespace h3d::gltf {
                         }
                     }
                 }
+                if (const SJson* t = j->get("hypr3d_toon"); t && t->type == SJson::OBJECT)
+                    toon(t, m);
+                if (const SJson* t = j->get("hypr3d_matcap"); t && t->type == SJson::OBJECT)
+                    matcap(t, m);
                 if (const SJson* l = j->get("hypr3d_light"); l && l->type == SJson::OBJECT) {
                     m.lightClamp[0] = std::clamp((float)l->number("min", 0), 0.f, 1.f);
                     m.lightClamp[1] = std::clamp((float)l->number("max", 1), 0.001f, 1.f);
@@ -477,7 +532,25 @@ namespace h3d::gltf {
                     }
                 }
                 if (const double off = j->number("renderQueueOffsetNumber", 0); off != 0)
-                    m.queue = (m.alphaMode == ALPHA_BLEND ? 3000 : m.alphaMode == ALPHA_MASK ? 2450 : 2000) + (int)off;
+                    m.queue = (m.alphaMode == ALPHA_BLEND ? 3000 : m.alphaMode == ALPHA_MASK ? 2450 : 2000) + fileInt(off, 0, -1000, 1000);
+                // its shading: N·L + shift from shade to lit over -1 + toony .. 1 - toony; its shade color times its shade
+                // texture (flat without one); its matcap added
+                auto& tn = m.toon;
+                tn.on    = true;
+                j->numbers("shadeColorFactor", tn.shade, 3);
+                tn.shadeBase = false;
+                if (const SJson* t = j->get("shadeMultiplyTexture"); t && t->type == SJson::OBJECT)
+                    tn.shadeTex = textureRef(t, true);
+                const float shift = std::clamp(fileFloat(j->number("shadingShiftFactor", 0), 0), -1.f, 1.f);
+                const float toony = std::clamp(fileFloat(j->number("shadingToonyFactor", 0.9), 0.9f), 0.f, 1.f);
+                tn.lo             = -1 + toony - shift;
+                tn.hi             = std::max(1 - toony - shift, tn.lo + 1e-3f);
+                float mc[3]       = {1, 1, 1};
+                j->numbers("matcapFactor", mc, 3);
+                if (const SJson* t = j->get("matcapTexture"); t && t->type == SJson::OBJECT && (tn.matcapTex = textureRef(t, true)) >= 0) {
+                    std::copy_n(mc, 3, tn.matcap);
+                    tn.matcapLit = std::clamp(fileFloat(j->number("rimLightingMixFactor", 1), 1), 0.f, 1.f);
+                }
             }
 
             // VRM 0.x's MToon (extensions.VRM.materialProperties, by material): its outline and render queue
@@ -505,7 +578,7 @@ namespace h3d::gltf {
                     if (i >= data->materials_count || !sh || sh->type != SJson::STRING || sh->str != "VRM/MToon")
                         continue;
                     SMapMaterial& m  = out.materials[i];
-                    const int     rq = (int)p.number("renderQueue", -1);
+                    const int     rq = fileInt(p.number("renderQueue", -1), -1);
                     if (rq >= 0 && rq != m.renderQueue())
                         m.queue = rq;
                     const SJson* fl  = p.get("floatProperties");
@@ -513,7 +586,28 @@ namespace h3d::gltf {
                     const SJson* tex = p.get("textureProperties");
                     if (!fl || fl->type != SJson::OBJECT)
                         continue;
-                    const int   mode = (int)fl->number("_OutlineWidthMode", 0);
+                    const auto texOf = [&](const char* key) {
+                        const double t = tex && tex->type == SJson::OBJECT ? tex->number(key, -1) : -1;
+                        return t >= 0 && t < (double)data->textures_count ? texture(&data->textures[(size_t)t], true) : -1;
+                    };
+                    // its shading (MToon 0.x): N·L from _ShadeShift (all shade) to lerp(1, _ShadeShift, _ShadeToony)
+                    // (all lit); _ShadeColor times _ShadeTexture; _SphereAdd, a matcap added
+                    auto& tn   = m.toon;
+                    tn.on      = true;
+                    float c[4] = {0.97f, 0.81f, 0.86f, 1}; // (MToon.shader's)
+                    if (vec && vec->type == SJson::OBJECT)
+                        vec->numbers("_ShadeColor", c, 4);
+                    for (int ch = 0; ch < 3; ++ch)
+                        tn.shade[ch] = linear(std::clamp(c[ch], 0.f, 1.f));
+                    tn.shadeBase     = false;
+                    tn.shadeTex      = texOf("_ShadeTexture");
+                    const float shift = std::clamp(fileFloat(fl->number("_ShadeShift", 0), 0), -1.f, 1.f);
+                    const float toony = std::clamp(fileFloat(fl->number("_ShadeToony", 0.9), 0.9f), 0.f, 1.f);
+                    tn.lo             = shift;
+                    tn.hi             = std::max(shift + (1 - shift) * (1 - toony), shift + 1e-3f);
+                    tn.matcapTex     = texOf("_SphereAdd");
+                    tn.matcapLit     = 0; // (added as it is)
+                    const int   mode = fileInt(fl->number("_OutlineWidthMode", 0), 0);
                     const float w    = (float)fl->number("_OutlineWidth", 0) * 0.01f; // cm
                     if ((mode != 1 && mode != 2) || w <= 0)
                         continue;
@@ -627,6 +721,59 @@ namespace h3d::gltf {
         DataPtr guard(data, cgltf_free);
         if (cgltf_load_buffers(&opt, data, path.c_str()) != cgltf_result_success) {
             error = std::format("couldn't load the buffers of the {} (missing .bin next to it?)", what);
+            return {nullptr, cgltf_free};
+        }
+        // What the file says must fit what it has (accessors in their buffer views, the views in their buffers,
+        // indices under their vertex counts, morph targets and animations counted alike, no loops among the nodes),
+        // else reading it runs past its data: cgltf_validate. First what it takes for granted: it reads a sparse
+        // accessor's indices before it looks at their buffer view, and adds up offsets, strides and counts in ways a
+        // huge number wraps around. So each view in its buffer, and offsets, counts and strides no bigger than any
+        // file's (2^48); and each accessor aligned for its type, as cgltf reads elements through pointers of it
+        constexpr size_t BIG = size_t(1) << 48;
+        for (size_t i = 0; i < data->buffer_views_count; ++i)
+            if (const auto& v = data->buffer_views[i]; v.buffer && (v.offset > v.buffer->size || v.size > v.buffer->size - v.offset)) {
+                error = std::format("the {} is broken: buffer view {} runs past its buffer", what, i);
+                return {nullptr, cgltf_free};
+            }
+        for (size_t i = 0; i < data->accessors_count; ++i) {
+            const auto&  a  = data->accessors[i];
+            const auto&  sp = a.sparse;
+            const size_t c  = std::max<size_t>(cgltf_component_size(a.component_type), 1);
+            const bool   big = a.offset > BIG || a.count > BIG || a.stride > BIG || (a.stride && a.count > BIG / a.stride) ||
+                (a.is_sparse && (sp.count > a.count || sp.indices_byte_offset > BIG || sp.values_byte_offset > BIG));
+            const bool misaligned = (a.buffer_view && ((a.buffer_view->offset + a.offset) % c || a.stride % c)) ||
+                (a.is_sparse && sp.indices_buffer_view &&
+                 (sp.indices_buffer_view->offset + sp.indices_byte_offset) % std::max<size_t>(cgltf_component_size(sp.indices_component_type), 1)) ||
+                (a.is_sparse && sp.values_buffer_view && (sp.values_buffer_view->offset + sp.values_byte_offset) % c);
+            if (big || misaligned) {
+                error = std::format("the {} is broken: accessor {} {}", what, i, big ? "is out of all proportion" : "isn't aligned");
+                return {nullptr, cgltf_free};
+            }
+        }
+        // and a node tree no deeper than a thousand (files have 20): cgltf_validate looks for loops by walking up from
+        // each node, as parts of ours walk up, and a chain of 200000 took a minute. Each node's depth here, from the
+        // nearest one above it that has one: a loop never gets to one
+        {
+            constexpr size_t    DEEPEST = 1000;
+            std::vector<int>    depth(data->nodes_count, -1);
+            std::vector<size_t> path;
+            for (size_t i = 0; i < data->nodes_count; ++i) {
+                path.clear();
+                const cgltf_node* nd = &data->nodes[i];
+                for (; nd && depth[(size_t)(nd - data->nodes)] < 0 && path.size() <= DEEPEST; nd = nd->parent)
+                    path.push_back((size_t)(nd - data->nodes));
+                int d = nd ? depth[(size_t)(nd - data->nodes)] : -1;
+                if (path.size() > DEEPEST || d + path.size() > DEEPEST) {
+                    error = std::format("the {} is broken: its nodes are nested too deep, or in a loop", what);
+                    return {nullptr, cgltf_free};
+                }
+                for (auto it = path.rbegin(); it != path.rend(); ++it)
+                    depth[*it] = ++d;
+            }
+        }
+        if (const auto r = cgltf_validate(data); r != cgltf_result_success) {
+            error = std::format("the {} is broken: {} (cgltf_validate)", what,
+                                r == cgltf_result_data_too_short ? "its data is shorter than it says" : "its parts don't fit together");
             return {nullptr, cgltf_free};
         }
         for (size_t i = 0; i < data->extensions_required_count; ++i) {
@@ -1078,7 +1225,7 @@ namespace h3d::gltf {
             out.fogHeightExponent = (float)f->number("heightExponent", 1);
         }
         if (const SJson* sky = j->get("sky"); sky && sky->type == SJson::OBJECT) {
-            out.skyImage = (int)sky->number("image", -1);
+            out.skyImage = fileInt(sky->number("image", -1), -1, -1, 1 << 30);
             float c[3]   = {1, 1, 1};
             sky->numbers("color", c, 3);
             out.skyColor = {c[0], c[1], c[2]};

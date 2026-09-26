@@ -402,13 +402,9 @@ namespace h3d {
             }
 
             // backdrop: under a hypr3d_backdrop node
-            void node(const cgltf_node* nd, bool backdrop) {
+            void node(const cgltf_node* nd, bool backdrop, const M4& xf) {
                 const std::string name = nd->name ? nd->name : "";
                 const std::string ln   = lower(name);
-                float             wm[16];
-                cgltf_node_transform_world(nd, wm);
-                M4 xf;
-                std::memcpy(xf.m, wm, sizeof(wm));
 
                 if (ln.starts_with("hypr3d_spawn")) {
                     spawnNode    = xf.point({0, 0, 0});
@@ -885,9 +881,11 @@ namespace h3d {
         b.materials();
         // the game's own lighting, when the file has it (cs2map's HYPR3D_lighting): before the
         // geometry, which gets its lightmap uvs and light probe coordinates as it's read
-        if (gltf::readLighting(data, abs.parent_path().string(), model.lighting, cancel, log)) {
-            auto& L    = model.lighting;
-            L.skyImage = L.skyImage >= 0 && (size_t)L.skyImage < b.imageSlot.size() ? b.imageSlot[L.skyImage] : -1;
+        const bool lit = gltf::readLighting(data, abs.parent_path().string(), model.lighting, cancel, log);
+        // (the sky's image as the model has them, lighting or not: it counts the materials' images only)
+        auto& L    = model.lighting;
+        L.skyImage = L.skyImage >= 0 && (size_t)L.skyImage < b.imageSlot.size() ? b.imageSlot[L.skyImage] : -1;
+        if (lit) {
             size_t volumes = 0;
             for (const auto& s : L.sets)
                 volumes += s.volumes.size();
@@ -895,27 +893,38 @@ namespace h3d {
                                       L.exposureAuto ? std::format(", exposure {}-{}", L.exposureMin, L.exposureMax) : ""));
         }
 
-        std::vector<std::pair<const cgltf_node*, bool>> stack; // and whether it's in the backdrop
-        const cgltf_scene*                              scene = data->scene ? data->scene : data->scenes_count ? &data->scenes[0] : nullptr;
+        // each node with whether it's in the backdrop and its parent's world transform (worked out on the way down:
+        // cgltf_node_transform_world walks up to the root for each node, and a file can nest them 100000 deep)
+        struct SVisit {
+            const cgltf_node* nd;
+            bool              backdrop;
+            M4                parent;
+        };
+        std::vector<SVisit> stack;
+        const cgltf_scene*  scene = data->scene ? data->scene : data->scenes_count ? &data->scenes[0] : nullptr;
         if (scene)
             for (size_t i = 0; i < scene->nodes_count; ++i)
-                stack.emplace_back(scene->nodes[i], false);
+                stack.push_back({scene->nodes[i], false, M4::identity()});
         else
             for (size_t i = 0; i < data->nodes_count; ++i)
                 if (!data->nodes[i].parent)
-                    stack.emplace_back(&data->nodes[i], false);
+                    stack.push_back({&data->nodes[i], false, M4::identity()});
         while (!stack.empty()) {
-            auto [nd, backdrop] = stack.back();
+            auto [nd, backdrop, parent] = stack.back();
             stack.pop_back();
+            gltf::check(cancel);
+            float lm[16];
+            cgltf_node_transform_local(nd, lm);
+            M4 local;
+            std::memcpy(local.m, lm, sizeof(lm));
+            const M4 xf = parent * local;
             if (nd->name && lower(nd->name).starts_with("hypr3d_backdrop")) {
-                backdrop = true;
-                float wm[16];
-                cgltf_node_transform_world(nd, wm);
-                std::memcpy(model.backdropTransform.m, wm, sizeof(wm));
+                backdrop                = true;
+                model.backdropTransform = xf;
             }
-            b.node(nd, backdrop);
+            b.node(nd, backdrop, xf);
             for (size_t i = 0; i < nd->children_count; ++i)
-                stack.emplace_back(nd->children[i], backdrop);
+                stack.push_back({nd->children[i], backdrop, xf});
         }
         if (b.skippedDraco)
             log.push_back(std::format("skipped {} draco compressed meshes (not supported)", b.skippedDraco));
@@ -994,8 +1003,8 @@ namespace h3d {
         for (const auto& bt : model.batches)
             if (const int t = model.materials[bt.material].baseTex; bt.sky && t >= 0)
                 model.images[t].plain = true;
-        if (model.lighting.skyImage >= 0)
-            model.images[model.lighting.skyImage].plain = true;
+        if (L.skyImage >= 0 && (size_t)L.skyImage < model.images.size())
+            model.images[L.skyImage].plain = true;
         gltf::decodeImages(data, abs.parent_path().string(), model.images, b.imageSlot, cancel, log, req.compress);
         if (const V3 d = model.lighting.sunDir; model.lighting.present && length(d) > 0.5f && d.y > 0.1f)
             b.sunNode = normalize(d);

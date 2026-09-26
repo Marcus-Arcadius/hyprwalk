@@ -22,6 +22,8 @@ namespace h3d {
 
         constexpr float TAU = 6.28318530718f;
         constexpr V3    UP{0, 1, 0};
+        constexpr float MAX_CLIP = 900.f; // seconds: the longest clip (an emote) taken
+        constexpr int   DROP_FIXED = 1 << 30; // CAvatarAnimator::m_dropBy of a node held in the world by no toggle
 
         // --- a small JSON reader, for the VRM extensions (cgltf leaves them as text)
 
@@ -1550,7 +1552,8 @@ namespace h3d {
                     return;
                 }
                 const size_t n = aPos->count;
-                if (!aJoints || !aWeights || aJoints->count != n || aWeights->count != n)
+                // (a skin with no joints: as if it had none, it would name joints past the end)
+                if (!aJoints || !aWeights || aJoints->count != n || aWeights->count != n || (skin >= 0 && data->skins[skin].joints_count == 0))
                     skin = -1;
                 const int    mat       = prim.material ? (int)cgltf_material_index(data, prim.material) : mats.defaultMaterial;
                 const size_t skinCount = skin >= 0 ? data->skins[skin].joints_count : 0;
@@ -1861,7 +1864,7 @@ namespace h3d {
                         return false;
                     auto set = [&](std::string_view bone, const SJson* node) {
                         const int hb = humanBoneOf(bone, vrmVersion == 2);
-                        if (hb < 0 || !node || node->type != SJson::J_NUM || node->num < 0 || node->num >= (double)data->nodes_count)
+                        if (hb < 0 || !node || node->type != SJson::J_NUM || !(node->num >= 0 && node->num < (double)data->nodes_count))
                             return;
                         model.human[hb] = nodeIndex[(size_t)node->num];
                     };
@@ -2149,11 +2152,13 @@ namespace h3d {
                             continue;
                         c.times.resize(keys);
                         cgltf_accessor_unpack_floats(ch.sampler->input, c.times.data(), keys);
+                        // times in order, and within a quarter of an hour (a clip is baked at 60 frames a second)
+                        if (!std::ranges::all_of(c.times, [](float t) { return t >= -MAX_CLIP && t <= MAX_CLIP; }) || !std::ranges::is_sorted(c.times) ||
+                            c.times.back() - c.times.front() > MAX_CLIP)
+                            continue;
                         c.values.resize(keys * per * comps);
                         for (size_t k = 0; k < keys * per; ++k)
                             cgltf_accessor_read_float(ch.sampler->output, k, &c.values[k * comps], comps);
-                        if (!std::ranges::is_sorted(c.times))
-                            continue;
                         t0 = std::min(t0, c.times.front());
                         t1 = std::max(t1, c.times.back());
                         clip.channels.push_back(std::move(c));
@@ -2163,7 +2168,7 @@ namespace h3d {
                     for (auto& c : clip.channels)
                         for (float& t : c.times)
                             t -= t0;
-                    clip.duration = std::max(0.f, t1 - t0);
+                    clip.duration = std::clamp(t1 - t0, 0.f, MAX_CLIP);
                     if (!emoteSource) // an emote goes where it goes (a jump, a fall)
                         rootMotion(clip);
                     model.clips.push_back(std::move(clip));
@@ -2262,7 +2267,8 @@ namespace h3d {
                     e.binary = jbool(g.get("isBinary"));
                     if (const auto* binds = jarr(g.get("binds")))
                         for (const auto& b : *binds)
-                            bindMorph(e, false, (int)jnum(b.get("mesh"), -1), (int)jnum(b.get("index"), -1), (float)jnum(b.get("weight"), 100) / 100.f);
+                            bindMorph(e, false, gltf::fileInt(jnum(b.get("mesh"), -1), -1), gltf::fileInt(jnum(b.get("index"), -1), -1),
+                                      (float)jnum(b.get("weight"), 100) / 100.f);
                     if (const auto* values = jarr(g.get("materialValues")))
                         for (const auto& v : *values) {
                             const std::string_view mat = jstr(v.get("materialName")), prop = jstr(v.get("propertyName"));
@@ -2314,7 +2320,7 @@ namespace h3d {
                     e.overrideMouth  = overrideOf(jstr(j.get("overrideMouth")));
                     if (const auto* binds = jarr(j.get("morphTargetBinds")))
                         for (const auto& b : *binds)
-                            bindMorph(e, true, (int)jnum(b.get("node"), -1), (int)jnum(b.get("index"), -1), (float)jnum(b.get("weight"), 1));
+                            bindMorph(e, true, gltf::fileInt(jnum(b.get("node"), -1), -1), gltf::fileInt(jnum(b.get("index"), -1), -1), (float)jnum(b.get("weight"), 1));
                     if (const auto* binds = jarr(j.get("materialColorBinds")))
                         for (const auto& b : *binds) {
                             const int              m    = material(b);
@@ -2533,12 +2539,19 @@ namespace h3d {
             // "hidden": [parts]; "toggles": [{"name", "group" or "groups": [...], "on", "show": [parts], "hide": [parts],
             // "shapes": {...}, "variants": [material variants], "transforms": {...}, "loop": {"seconds", "a": {"shapes",
             // "transforms"}, "b": {...}}, "drop": [nodes]}]; "sliders": [{"name", "value", "keys": [{"at", "shapes",
-            // "show", "hide", "variants", "transforms"}]}]
+            // "show", "hide", "variants", "transforms"}]}]; "fixed": [nodes]
             void outfit() {
                 std::vector<int> hidden;
                 partsOf(settings.get("hidden"), hidden);
                 for (int p : hidden)
                     model.parts[p].hidden = true;
+                if (const auto* f = jarr(settings.get("fixed")))
+                    for (const auto& x : *f) {
+                        if (const int n = nodeNamed(jstr(&x)); n >= 0)
+                            model.fixed.push_back(n);
+                        else
+                            missing.push_back(std::string(jstr(&x)));
+                    }
                 if (const auto* list = jarr(settings.get("toggles")))
                     for (const auto& t : *list) {
                         SAvatarToggle tg;
@@ -2597,7 +2610,7 @@ namespace h3d {
                             y = a && a->size() == 2 ? std::clamp((float)jnum(&(*a)[1], 0), -1.f, 1.f) : 0.f;
                         };
                         if (two) {
-                            sl.grid = std::max(2, (int)jnum(s.get("grid"), 0));
+                            sl.grid = gltf::fileInt(jnum(s.get("grid"), 0), 2, 2, 1024);
                             xy(s.get("value"), sl.value, sl.valueY);
                         } else
                             sl.value = std::clamp((float)jnum(s.get("value"), 0), 0.f, 1.f);
@@ -2704,6 +2717,31 @@ namespace h3d {
                     model.expressions[it->second].morphs.push_back({(int)i, 1.f});
                 }
 
+                // the consonants lip sync shows (VRChat's visemes PP, FF, SS and CH): the settings file's "visemes"
+                // ({"pp": {"shape key": weight, ...}, ...}, as the converter writes a VRChat avatar's), else shape keys by
+                // VRChat's names ("vrc.v_pp"), which are expressions of their own by now
+                static constexpr std::string_view CONSONANT[VISEME_COUNT - VOWEL_COUNT] = {"pp", "ff", "ss", "ch"};
+                const SJson*                      vis = settings.get("visemes");
+                for (int k = 0; k < VISEME_COUNT - VOWEL_COUNT; ++k) {
+                    if (const SJson* shapes = vis && vis->type == SJson::J_OBJ ? vis->get(CONSONANT[k]) : nullptr) {
+                        SExpression e;
+                        e.name   = std::format("viseme {}", CONSONANT[k]);
+                        e.viseme = true;
+                        morphsOf(shapes, [&](int m, float w) { e.morphs.push_back({m, w}); });
+                        if (!e.morphs.empty()) {
+                            model.consonant[k] = (int)model.expressions.size();
+                            model.expressions.push_back(std::move(e));
+                            continue;
+                        }
+                    }
+                    for (size_t e = 0; e < model.expressions.size(); ++e)
+                        if (model.expressions[e].shapeKey && normName(model.expressions[e].name) == std::format("v{}", CONSONANT[k])) {
+                            model.consonant[k]            = (int)e;
+                            model.expressions[e].viseme = true;
+                            break;
+                        }
+                }
+
                 for (const auto& [yes, from] : {std::pair{fromVRM > 0, vrmVersion == 2 ? "VRM 1.0" : "VRM"}, std::pair{!mine.empty(), settingsName.c_str()},
                                                 std::pair{guessed, "shape key names"}})
                     if (yes)
@@ -2794,7 +2832,7 @@ namespace h3d {
 
             // a glTF node index from the JSON, as ours; -1 = none
             int gltfNode(const SJson* j) const {
-                if (!j || j->type != SJson::J_NUM || j->num < 0 || j->num >= (double)data->nodes_count)
+                if (!j || j->type != SJson::J_NUM || !(j->num >= 0 && j->num < (double)data->nodes_count))
                     return -1;
                 return nodeIndex[(size_t)j->num];
             }
@@ -3661,16 +3699,22 @@ namespace h3d {
             for (int p = 0; p < EX_COUNT; ++p)
                 if (model->preset[p] >= 0)
                     presets += std::format("{}{}", presets.empty() ? "" : " ", PRESET_NAMES[p]);
+            std::string consonants;
+            for (int k = 0; k < VISEME_COUNT - VOWEL_COUNT; ++k)
+                if (model->consonant[k] >= 0)
+                    consonants += std::format(" {}", VISEME_NAMES[VOWEL_COUNT + k]);
             static constexpr const char* EYES[] = {"don't move", "turn (bones)", "turn (expressions)"};
-            log.push_back(std::format("face: {} expressions{}, {} shape keys, {} morphs; presets: {}; eyes {}", model->expressions.size() - shapeKeys,
+            log.push_back(std::format("face: {} expressions{}, {} shape keys, {} morphs; presets: {}; eyes {}{}", model->expressions.size() - shapeKeys,
                                       model->expressionsFrom.empty() ? "" : " from " + model->expressionsFrom, shapeKeys, model->morphs.size(),
-                                      presets.empty() ? "none" : presets, EYES[model->lookAt.type]));
+                                      presets.empty() ? "none" : presets, EYES[model->lookAt.type],
+                                      consonants.empty() ? "" : "; lip sync's consonants:" + consonants));
         }
         if (model->parts.size() > 1 || !model->settings.empty()) {
             const size_t hidden = std::ranges::count_if(model->parts, [](const SAvatarPart& p) { return p.hidden; });
-            log.push_back(std::format("outfit: {} parts{}, {} toggles{}{}{}", model->parts.size(), hidden ? std::format(" ({} hidden)", hidden) : "",
+            log.push_back(std::format("outfit: {} parts{}, {} toggles{}{}{}{}", model->parts.size(), hidden ? std::format(" ({} hidden)", hidden) : "",
                                       model->toggles.size(), model->sliders.empty() ? "" : std::format(", {} sliders", model->sliders.size()),
                                       model->variants.empty() ? "" : std::format(", {} material variants", model->variants.size()),
+                                      model->fixed.empty() ? "" : std::format(", {} held in the world", model->fixed.size()),
                                       model->settings.empty() ? "" : " from " + b.settingsName));
         }
         if (!model->springJoints.empty() || !model->constraints.empty()) {
@@ -4388,10 +4432,17 @@ namespace h3d {
             }
         }
 
-        // lip sync: the mouth's presets as the voice has them
-        for (int k = 0; k < 5; ++k)
+        // lip sync: the mouth's presets as the voice has them, and the consonants the avatar has, in place of as much of
+        // the vowels
+        float spoken = 0;
+        for (int k = VOWEL_COUNT; k < VISEME_COUNT; ++k)
+            if (const int e = md.consonant[k - VOWEL_COUNT]; e >= 0 && m_visemes[k] > 0) {
+                out[e] = std::max(out[e], std::clamp(m_visemes[k], 0.f, 1.f));
+                spoken += m_visemes[k];
+            }
+        for (int k = 0; k < VOWEL_COUNT; ++k)
             if (m_visemes[k] > 0)
-                more(EX_AA + k, m_visemes[k]);
+                more(EX_AA + k, m_visemes[k] * std::max(0.f, 1.f - spoken));
 
         for (size_t e = 0; e < n; ++e) {
             float     o = binary(e, out[e]);
@@ -4400,7 +4451,7 @@ namespace h3d {
                 o *= blinkM;
             else if (p >= EX_LOOK_UP && p <= EX_LOOK_RIGHT)
                 o *= lookM;
-            else if (p >= EX_AA && p <= EX_OH)
+            else if ((p >= EX_AA && p <= EX_OH) || md.expressions[e].viseme)
                 o *= mouthM;
             out[e] = o;
         }
@@ -4529,7 +4580,9 @@ namespace h3d {
         }
     }
 
-    // nodes a toggle leaves in the world (VRCFury's World Drop): where they were when it turned on, and all under them
+    // nodes a toggle leaves in the world (VRCFury's World Drop): where they were when it turned on, and all under them;
+    // and nodes held in the world (MA's World Fixed Object): where their rest pose was when the avatar appeared (MA
+    // moves them to a world-fixed root as the avatar is built)
     void CAvatarAnimator::drops(const SAvatarMotion& m) {
         if (m_dropBy.empty())
             return;
@@ -4546,7 +4599,13 @@ namespace h3d {
             if (m_dropBy[n] < 0)
                 continue;
             if (m_dropTake[n]) {
-                m_dropAt[n]   = W * m_global[n];
+                M4 at = m_global[n];
+                if (m_dropBy[n] == DROP_FIXED) {
+                    at = M4::identity();
+                    for (int k = (int)n; k >= 0; k = md.nodes[k].parent)
+                        at = md.nodes[k].rest.matrix() * at;
+                }
+                m_dropAt[n]   = W * at;
                 m_dropTake[n] = 0;
             }
             m_global[n] = Wi * m_dropAt[n];
@@ -4699,6 +4758,11 @@ namespace h3d {
                     drops       = true;
                 }
         }
+        for (const int n : md.fixed)
+            if (m_dropBy[n] < 0) {
+                m_dropBy[n] = DROP_FIXED;
+                drops       = true;
+            }
         if (!drops)
             m_dropBy.clear();
         else {

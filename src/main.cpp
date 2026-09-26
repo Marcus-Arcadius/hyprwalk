@@ -40,6 +40,8 @@
 #include <hyprland/src/render/pass/PassElement.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 
+#include <aquamarine/backend/Backend.hpp>
+
 #include <array>
 #include <dlfcn.h>
 #include <filesystem>
@@ -248,6 +250,7 @@ class CDesktop3D {
     // hooks, return true when the event was eaten
     bool                          onRelativeMotion(const Vector2D& delta);
     bool                          onAbsoluteMotion(const Vector2D& abs);
+    void                          onPointerFrame();
     bool                          cursorHidden() const {
         return m_mode != MODE_OFF;
     }
@@ -365,6 +368,7 @@ class CDesktop3D {
         uint32_t axis = 0, timeMs = 0;
         uint32_t acc = 0; // 1/120ths of a notch not sent as a whole one yet
     } m_wheel;            // a high-resolution wheel's notches made up for the window aimed at, as Hyprland does
+    bool                         m_axisFramePending = false; // a touchpad's scrolling sent, its frame not yet (the device's)
 
     // the Action Menu (Tab), like VRChat's: while it's open the mouse moves its cursor, not the camera
     CActionMenu m_menu{[this](const std::string& id) {
@@ -410,7 +414,12 @@ class CDesktop3D {
     CFunctionHook*                   m_hookMoved  = nullptr;
     CFunctionHook*                   m_hookWarp   = nullptr;
     CFunctionHook*                   m_hookCursor = nullptr;
+    CFunctionHook*                   m_hookWheel  = nullptr;
+    CFunctionHook*                   m_hookFrame  = nullptr;
+    // idle events of aquamarine's that let go of a removed headless output (holdOutput())
+    std::vector<SP<std::function<void()>>> m_outputHolds;
 
+    void                             holdOutput(const PHLMONITOR& mon);
     void                             buildWorldFor(const Vector2D& logical);
     void                             checkMapConfig();
     std::string                      requestMap(const std::string& path, float scale);
@@ -508,10 +517,17 @@ namespace {
     using FnMouseMoved = void (*)(void*, IPointer::SMotionEvent);
     using FnMouseWarp  = void (*)(void*, IPointer::SMotionAbsoluteEvent);
     using FnEnsure     = void (*)(void*);
+    using FnMouseWheel = void (*)(void*, IPointer::SAxisEvent, SP<IPointer>);
+    using FnFrame      = void (*)(void*);
 
     CFunctionHook* g_moved  = nullptr;
     CFunctionHook* g_warp   = nullptr;
     CFunctionHook* g_cursor = nullptr;
+    CFunctionHook* g_wheel  = nullptr;
+    CFunctionHook* g_frame  = nullptr;
+    // the device of the wheel event being handled: CInputManager::onMouseWheel takes its own scroll factor first, and
+    // the event bus's input.mouse.axis, which it emits, doesn't say
+    WP<IPointer> g_wheelPointer;
 
     void           hkMouseMoved(void* self, IPointer::SMotionEvent e) {
         if (g_p3D && g_p3D->onRelativeMotion(e.unaccel != Vector2D{} ? e.unaccel : e.delta))
@@ -523,6 +539,18 @@ namespace {
         if (g_p3D && g_p3D->onAbsoluteMotion(e.absolute))
             return;
         ((FnMouseWarp)g_warp->m_original)(self, e);
+    }
+
+    void hkMouseWheel(void* self, IPointer::SAxisEvent e, SP<IPointer> pointer) {
+        g_wheelPointer = pointer;
+        ((FnMouseWheel)g_wheel->m_original)(self, e, pointer);
+        g_wheelPointer.reset();
+    }
+
+    void hkPointerFrame(void* self) {
+        ((FnFrame)g_frame->m_original)(self);
+        if (g_p3D)
+            g_p3D->onPointerFrame();
     }
 
     void hkEnsureCursor(void* self) {
@@ -556,6 +584,8 @@ void CDesktop3D::init() {
     m_hookMoved  = g_moved  = hookByName("onMouseMoved", "CInputManager::onMouseMoved(", (void*)&hkMouseMoved);
     m_hookWarp   = g_warp   = hookByName("onMouseWarp", "CInputManager::onMouseWarp(", (void*)&hkMouseWarp);
     m_hookCursor = g_cursor = hookByName("ensureCursorRenderingMode", "HyprRenderer::ensureCursorRenderingMode(", (void*)&hkEnsureCursor);
+    m_hookWheel  = g_wheel  = hookByName("onMouseWheel", "CInputManager::onMouseWheel(", (void*)&hkMouseWheel);
+    m_hookFrame  = g_frame  = hookByName("onPointerFrame", "CInputManager::onPointerFrame(", (void*)&hkPointerFrame);
 
     if (!m_hookMoved)
         notify("couldn't hook mouse motion: mouse look won't work (arrow keys still do)", true);
@@ -604,6 +634,7 @@ void CDesktop3D::init() {
     }));
 
     m_listeners.emplace_back(ev.monitor.removed.listen([this](const PHLMONITOR& mon) {
+        holdOutput(mon);
         if (m_mode != MODE_OFF && (!m_monitor.lock() || mon == m_monitor.lock()))
             exitNow();
     }));
@@ -705,14 +736,20 @@ void CDesktop3D::shutdown() {
         restore();
     }
 
-    for (auto** h : {&m_hookMoved, &m_hookWarp, &m_hookCursor}) {
+    for (auto** h : {&m_hookMoved, &m_hookWarp, &m_hookCursor, &m_hookWheel, &m_hookFrame}) {
         if (*h)
             HyprlandAPI::removeFunctionHook(PHANDLE, *h);
         *h = nullptr;
     }
-    g_moved = g_warp = g_cursor = nullptr;
+    g_moved = g_warp = g_cursor = g_wheel = g_frame = nullptr;
+    g_wheelPointer.reset();
 
     m_listeners.clear();
+    // (their idle events are this plugin's code: out of aquamarine's queue before it goes)
+    if (const auto backend = g_pCompositor->m_aqBackend)
+        for (const auto& h : m_outputHolds)
+            backend->removeIdleEvent(h);
+    m_outputHolds.clear();
     if (m_configTimer)
         wl_event_source_remove(m_configTimer);
     m_configTimer = nullptr;
@@ -1308,6 +1345,26 @@ void CDesktop3D::exitNow() {
         });
     if (const auto mon = m_monitor.lock())
         g_pHyprRenderer->damageMonitor(mon);
+}
+
+// aquamarine before 0.12.1 queues a headless output's late frame as an idle event that points at the output itself
+// (CHeadlessOutput::framecb captures `this`; fixed upstream by 1699271 and 6ecde03), so when the output goes before the
+// event runs, it runs on freed memory: Hyprland crashes in CBackend::dispatchIdle, or its heap is corrupted and malloc
+// aborts later. In 3D the plugin asks for each frame as soon as the last one is out, so when its monitor is a headless
+// one being removed, a slow frame is nearly always queued so (and one can be just after 3D, or on any headless monitor
+// that draws). An idle event of ours, queued after that one, holds a removed headless output until then
+void CDesktop3D::holdOutput(const PHLMONITOR& mon) {
+    const auto backend = g_pCompositor->m_aqBackend;
+    if (!mon || !mon->m_output || !backend)
+        return;
+    if (const auto impl = mon->m_output->getBackend(); !impl || impl->type() != Aquamarine::AQ_BACKEND_HEADLESS)
+        return;
+    // (the ones whose event has run are held only here)
+    std::erase_if(m_outputHolds, [](const auto& h) { return h.strongRef() <= 1; });
+    auto hold = makeShared<std::function<void()>>([out = mon->m_output]() mutable { out.reset(); });
+    m_outputHolds.emplace_back(hold);
+    backend->addIdleEvent(hold);
+    log(mon->m_name + " removed: its output held until aquamarine's idle events queued before it have run");
 }
 
 void CDesktop3D::restore() {
@@ -2319,14 +2376,16 @@ void CDesktop3D::onAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& inf
         return;
 
     // to the window as Hyprland sends it on the 2D desktop (CInputManager::onMouseWheel): the scroll factor (a window
-    // rule's first; the device's own isn't known here), and for clients without high-resolution scrolling whole
-    // notches made up from a high-resolution wheel's (input:emulate_discrete_scroll: the first at once, then one per
-    // notch's worth, afresh after half a second or a change of direction)
+    // rule's first, then the device's own, then input's or input:touchpad's), and for clients without high-resolution
+    // scrolling whole notches made up from a high-resolution wheel's (input:emulate_discrete_scroll: the first at
+    // once, then one per notch's worth, afresh after half a second or a change of direction)
     static auto PSCROLL   = CConfigValue<Config::FLOAT>("input:scroll_factor");
     static auto PTPSCROLL = CConfigValue<Config::FLOAT>("input:touchpad:scroll_factor");
     static auto PEMULATE  = CConfigValue<Config::INTEGER>("input:emulate_discrete_scroll");
     const bool  touchpad  = *PTPSCROLL <= 0.f || e.source == WL_POINTER_AXIS_SOURCE_FINGER;
     double      factor    = touchpad ? *PTPSCROLL : *PSCROLL;
+    if (const auto dev = g_wheelPointer.lock(); dev && dev->m_scrollFactor.has_value())
+        factor = *dev->m_scrollFactor;
     if (m_aimed >= 0 && m_aimed < (int)m_panels.size()) {
         if (const auto w = m_panels[m_aimed].window.lock()) {
             if (!touchpad && w->isScrollMouseOverridden())
@@ -2358,6 +2417,16 @@ void CDesktop3D::onAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& inf
     const int32_t steps    = std::abs(discrete) != 0 && std::abs(discrete) < 1 ? std::copysign(1, discrete) : std::round(discrete);
 
     g_pSeatManager->sendPointerAxis(e.timeMs, e.axis, delta, steps, value120, e.source, WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
+    // a touchpad's frame waits for the device's, as in Hyprland: both axes of a two-finger scroll go in one
+    m_axisFramePending = (e.source == WL_POINTER_AXIS_SOURCE_FINGER || e.source == WL_POINTER_AXIS_SOURCE_CONTINUOUS) && m_hookFrame;
+    if (!m_axisFramePending)
+        g_pSeatManager->sendPointerFrame();
+}
+
+void CDesktop3D::onPointerFrame() {
+    if (!m_axisFramePending)
+        return;
+    m_axisFramePending = false;
     g_pSeatManager->sendPointerFrame();
 }
 
@@ -2541,8 +2610,8 @@ std::string CDesktop3D::lipSyncStatus() const {
     const auto&       v     = m_lip.visemes();
     const std::string badge = m_mic.on() && !m_badgeBox.empty() ? std::format("[{:.0f}, {:.0f}, {:.0f}, {:.0f}]", m_badgeBox.x, m_badgeBox.y, m_badgeBox.w, m_badgeBox.h) : "null";
     return std::format(
-        R"({{"on": {}, "listening": {}, "microphone": {}, "level": {:.1f}, "formants": [{:.0f}, {:.0f}], "visemes": {{"aa": {:.2f}, "ih": {:.2f}, "ou": {:.2f}, "ee": {:.2f}, "oh": {:.2f}}}, "badge": {}}})",
-        m_lipsync, m_mic.on(), CMicrophone::available(), m_lip.level(), m_lip.f1(), m_lip.f2(), v[0], v[1], v[2], v[3], v[4], badge);
+        R"({{"on": {}, "listening": {}, "microphone": {}, "level": {:.1f}, "formants": [{:.0f}, {:.0f}], "visemes": {{"aa": {:.2f}, "ih": {:.2f}, "ou": {:.2f}, "ee": {:.2f}, "oh": {:.2f}, "pp": {:.2f}, "ff": {:.2f}, "ss": {:.2f}, "ch": {:.2f}}}, "badge": {}}})",
+        m_lipsync, m_mic.on(), CMicrophone::available(), m_lip.level(), m_lip.f1(), m_lip.f2(), v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], badge);
 }
 
 std::string CDesktop3D::menuAction(const SMenuItem& it) {
@@ -2605,10 +2674,10 @@ std::string CDesktop3D::status() {
     }
     const char* modes[] = {"off", "entering", "active", "exiting"};
     return std::format(
-        R"({{"mode": "{}", "monitor": "{}", "view": "{}", "typing": {}, "fly": {}, "feet": [{:.3f}, {:.3f}, {:.3f}], "eye": [{:.3f}, {:.3f}, {:.3f}], "yaw": {:.2f}, "pitch": {:.2f}, "onGround": {}, "panels": {}, "aimed": {}, "fps": {:.1f}, "frames": {}, "minDt": {:.5f}, "sens": {}, "placed": {}, "holding": {}, "world": "{}", "map": "{}", "mapLoading": {}, "avatar": "{}", "avatarLoading": {}, "anim": "{}", "exposure": {:.2f}, "light": {:.3f}, "menu": "{}", "hooks": {{"motion": {}, "warp": {}, "cursor": {}}}}})",
+        R"({{"mode": "{}", "monitor": "{}", "view": "{}", "typing": {}, "fly": {}, "feet": [{:.3f}, {:.3f}, {:.3f}], "eye": [{:.3f}, {:.3f}, {:.3f}], "yaw": {:.2f}, "pitch": {:.2f}, "onGround": {}, "panels": {}, "aimed": {}, "fps": {:.1f}, "frames": {}, "minDt": {:.5f}, "sens": {}, "placed": {}, "holding": {}, "world": "{}", "map": "{}", "mapLoading": {}, "avatar": "{}", "avatarLoading": {}, "anim": "{}", "exposure": {:.2f}, "light": {:.3f}, "menu": "{}", "hooks": {{"motion": {}, "warp": {}, "cursor": {}, "wheel": {}, "frame": {}}}}})",
         modes[m_mode], m_mode != MODE_OFF && m_monitor.lock() ? jsonEscape(m_monitor.lock()->m_name) : "", m_thirdPerson ? "third" : "first", m_typing, m_fly, m_feet.x, m_feet.y, m_feet.z, m_camera.eye.x, m_camera.eye.y, m_camera.eye.z, m_yaw * 180.f / F_PI, m_pitch * 180.f / F_PI, m_onGround,
         m_panels.size(), aimed, m_fps, m_frames, m_minDt, m_sens, m_placements.size(), m_hold.key != 0, jsonEscape(m_world.name), jsonEscape(m_mapPath), m_mapLoader.busy(),
-        jsonEscape(m_avatarPath), m_avatarLoader.busy(), jsonEscape(m_anim.playing()), m_exposure, m_lightAvg, m_menu.open() ? jsonEscape(m_menu.path()) : "", m_hookMoved != nullptr, m_hookWarp != nullptr, m_hookCursor != nullptr);
+        jsonEscape(m_avatarPath), m_avatarLoader.busy(), jsonEscape(m_anim.playing()), m_exposure, m_lightAvg, m_menu.open() ? jsonEscape(m_menu.path()) : "", m_hookMoved != nullptr, m_hookWarp != nullptr, m_hookCursor != nullptr, m_hookWheel != nullptr, m_hookFrame != nullptr);
 }
 
 std::string CDesktop3D::hyprctl(const std::string& request) {

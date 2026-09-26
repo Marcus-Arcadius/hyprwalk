@@ -1,5 +1,6 @@
 # build outputs (the test harness builds into build/test/)
 /build/
+/build-asan/
 /hypr3d.so
 __pycache__/
 *.pyc

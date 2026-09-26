@@ -2,8 +2,9 @@
 # materials: the alpha of UnlitWF's alpha sources and power (an empty mask is Unity's default white) and its inverted
 # alpha, the faces its shaders draw, its emission, the stencils and render queues of its Mask/MaskOut shaders (from
 # their passes, or by GUID), lilToon's and Poiyomi's stencil settings, the four shaders' outlines, UnlitWF's back
-# faces and light clamp. Then a GLB exported and read back: a mask's channel or an inverted alpha baked into the
-# base texture's alpha, and the material extras with the textures they add.
+# faces and light clamp, the four shaders' toon shading and matcaps. Then a GLB exported and read back: a mask's
+# channel or an inverted alpha baked into the base texture's alpha, and the material extras with the textures they
+# add.
 #   blender -b --factory-startup --python-exit-code 1 -P mat_unit.py
 import sys, os, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
@@ -181,6 +182,17 @@ check('UnlitWF: world metres, EDGE lines pushed back ten widths, the mask invert
     m.outline['width'], m.outline['space'], m.outline['shift'], m.outline['color'], m.outline['base'],
     os.path.basename(db.get(OUTMASK['guid']).path) if m.outline['mask'][0] == db.get(OUTMASK['guid']).file else '?',
     m.outline['mask'][1:]), (0.004, 'world', -0.04, (lin5, lin5, lin5, 1.0), 0.1, 'outline mask.png', ('R', True)))
+check('... no colour texture unless _TL_BlendCustom', m.outline['tex'], None)
+OUTCOL = asset('Assets/Tex/outline colour.png')
+m = mats.build('m', OPAQUE, {'_TL_ENABLE'}, -1, {}, {'_MainTex': (TEX, (2, 1), (0.5, 0)),
+                                                      '_TL_CustomColorTex': (OUTCOL, (3, 3), (0, 0))},
+               {'_TL_LineWidth': 0.4, '_TL_BlendCustom': 0.25}, dict(col))
+check('... its custom colour texture, mixed in a quarter, on the main texture\'s uv', (
+    m.outline['tex'][0] == db.get(OUTCOL['guid']).file, m.outline['tex'][1:]), (True, (((2, 1), (0.5, 0)), 0.25)))
+m = mats.build('m', OPAQUE, {'_TL_ENABLE'}, -1, {}, {'_MainTex': (TEX, (1, 1), (0, 0))},
+               {'_TL_LineWidth': 0.4, '_TL_BlendCustom': 0.5}, dict(col))
+check('... without one, towards its white', (m.outline['tex'], m.outline['color']),
+      (None, tuple(round(lin5 + (1 - lin5) * 0.5, 5) for _ in range(3)) + (1.0,)))
 check('... not without _TL_ENABLE', mats.build('m', OPAQUE, {'_ES_ENABLE'}, -1, {}, {}, {'_TL_LineWidth': 0.4},
                                               {}).outline, None)
 check('... not on a shader without an outline pass', mats.build('m', TRANS, {'_TL_ENABLE'}, -1, {}, {},
@@ -192,6 +204,10 @@ check('lilToon\'s outline shader: object space, thinner up close', (m.outline['w
                                                                      m.outline['fix'], m.outline['shift'],
                                                                      m.outline['lit']),
       (0.001, 'object', [0.25, 1.0], -0.002, 1.0))
+m = mat(LILO, {'_OutlineWidth': 0.1, '_TransparentMode': 0}, {'_OutlineColor': (0.5, 0.5, 0.5, 1)},
+        {'_OutlineTex': (TEX, (2, 2), (0, 0))})
+check('... its _OutlineTex, which the colour multiplies, on its own tiling', (
+    m.outline['tex'][0] == db.get(TEX['guid']).file, m.outline['tex'][1:]), (True, (((2, 2), (0, 0)), None)))
 check('... not lilToon without one', mat(LIL, {'_OutlineWidth': 0.1, '_TransparentMode': 0}).outline, None)
 POI = shader('.poiyomi/Poiyomi Toon', [], [('Base', 'Back')])
 m = mat(POI, {'_EnableOutlines': 1, '_LineWidth': 0.5, '_OutlineSpace': 1, '_OutlineMaskChannel': 3,
@@ -199,6 +215,11 @@ m = mat(POI, {'_EnableOutlines': 1, '_LineWidth': 0.5, '_OutlineSpace': 1, '_Out
 check('Poiyomi: its size in cm, world space, the mask\'s alpha', (m.outline['width'], m.outline['space'],
                                                                    m.outline['mask'][1], m.outline['fix']),
       (0.005, 'world', 'A', None))
+m = mat(POI, {'_EnableOutlines': 1, '_LineWidth': 0.5}, {}, {'_OutlineTexture': (OUTCOL, (1, 1), (0, 0.5))})
+check('... its _OutlineTexture, times the colour', (m.outline['tex'][0] == db.get(OUTCOL['guid']).file,
+                                                   m.outline['tex'][1:]), (True, (((1, 1), (0, 0.5)), None)))
+m = mat(POI, {'_EnableOutlines': 1, '_LineWidth': 0.5, '_OutlineTextureUV': 1}, {}, {'_OutlineTexture': (OUTCOL, (1, 1), (0, 0))})
+check('... not on another uv set', m.outline['tex'], None)
 check('... off', mat(POI, {'_EnableOutlines': 0, '_LineWidth': 0.5}).outline, None)
 MTOON = shader('VRM/MToon', [], [('FORWARD', 'Back')])
 m = mat(MTOON, {'_OutlineWidthMode': 1, '_OutlineWidth': 0.4, '_OutlineColorMode': 0, '_BlendMode': 0})
@@ -217,14 +238,76 @@ m = mats.build('m', OPAQUE, {'_BK_ENABLE'}, -1, {}, {'_MainTex': (TEX, (1, 1), (
                {'_BK_BackColor': (0.5, 0.5, 0.5, 1)})
 check('the main texture on the back, tinted', (m.back['tex'] == m.tex, m.back['color'], m.back['xf']),
       (True, (lin5, lin5, lin5, 1.0), ((2, 1), (0, 0))))
-check('... its light between 0.1 and 0.9, the colour 60% saturated', m.light, (0.1, 0.9, 0.6))
+check('... its light between 0.1 (gamma: 0.01 linear) and 0.9, the colour 60% saturated', m.light,
+      (round(u.to_linear(0.1), 4), 0.9, 0.6))
 m = mats.build('m', OPAQUE, set(), -1, {}, {'_BK_BackTex': (BACK, (1, 1), (0, 0))},
                {'_BK_Enable': 1, '_GL_LevelMin': 0.2, '_GL_LevelTweak': 0.5}, {})
 check('a texture of its own (a legacy material: no keywords, the toggle); the minimum tweaked halfway to 1',
-      (m.back['tex'] == db.get(BACK['guid']).file, m.light[0]), (True, 0.6))
+      (m.back['tex'] == db.get(BACK['guid']).file, m.light[0]), (True, round(u.to_linear(0.6), 4)))
 check('none without the keyword', mats.build('m', OPAQUE, {'_TL_ENABLE'}, -1, {}, {}, {'_BK_Enable': 1}, {}).back,
       None)
 check('the light clamp: UnlitWF only', mat(MTOON, {'_BlendMode': 0}).light, None)
+
+print('== toon shading and matcaps')
+CAP = asset('Assets/Tex/matcap.png')
+lin = lambda *c: [round(u.to_linear(x), 5) for x in c]
+gamma = lambda c: max(1.055 * c ** (1 / 2.4) - 0.055, 0.0)
+
+
+def capfile(m):
+    return m.matcap and (m.matcap['tex'] == db.get(CAP['guid']).file, m.matcap['color'], m.matcap['mode'], m.matcap['lit'])
+
+
+m = mats.build('m', OPAQUE, {'_TS_ENABLE'}, -1, {}, {'_MainTex': (TEX, (1, 1), (0, 0))}, {}, {})
+w = [round(1 + 0.75 * (f - 1), 4) for f in lin(0.81, 0.81, 0.9)]
+check('UnlitWF\'s toon shade: 1st / base, 3/4 of the way (its contrast adjusted), half-Lambert 0.4..0.45',
+      (m.toon['shade'], m.toon['base'], m.toon['lo'], m.toon['hi'], m.toon['strength']), (w, True, -0.2, -0.1, 1.0))
+m = mats.build('m', OPAQUE, {'_TS_ENABLE', '_TS_FIXC_ENABLE'}, -1, {}, {}, {'_TS_Power': 2, '_TS_1stFeather': 0},
+               {'_TS_1stColor': (0.5, 0.5, 0.5, 1), '_TS_BaseColor': (1, 1, 1, 1)})
+check('... its contrast fixed and its power 2: black; no feather: a step', (m.toon['shade'], m.toon['hi'] - m.toon['lo'] < 0.003),
+      ([0.0, 0.0, 0.0], True))
+m = mats.build('m', OPAQUE, {'_TL_ENABLE'}, -1, {}, {}, {'_TS_Enable': 1}, {})
+check('... without the keyword, lit the same all round (UnlitWF\'s light has no N·L)', (m.toon['lo'], m.toon['hi'], m.toon['base']),
+      (-1.0, -1.0, True))
+m = mats.build('m', OPAQUE, {'_HL_ENABLE'}, -1, {}, {'_HL_MatcapTex': (CAP, (1, 1), (0, 0))}, {'_HL_CapType': 1}, {})
+check('UnlitWF\'s light cap: added, its grey tint doubled and gamma encoded', capfile(m),
+      (True, [round(gamma(2 * lin(0.5)[0]), 4)] * 3 + [1.0], 'add', 1.0))
+m = mats.build('m', OPAQUE, {'_HL_ENABLE'}, -1, {}, {'_HL_MatcapTex': (CAP, (1, 1), (0, 0))}, {'_HL_Power': 0.5}, {})
+check('... its median cap: the tint as it is', capfile(m), (True, [round(2 * lin(0.5)[0], 4)] * 3 + [0.5], 'median', 1.0))
+m = mat(LIL, {'_TransparentMode': 0, '_UseShadow': 1, '_ShadowStrength': 0.5, '_UseMatCap': 1, '_MatCapBlend': 0.8,
+              '_MatCapBlendMode': 3, '_MatCapEnableLighting': 0.25}, {'_MatCapColor': (1, 1, 1, 0.5)},
+        {'_MatCapTex': (CAP, (1, 1), (0, 0))})
+check('lilToon\'s shadow: the base times _ShadowColor, border 0.5 blur 0.1 (N·L -0.1..0.1), half strength',
+      (m.toon['shade'], m.toon['base'], m.toon['tex'], m.toon['lo'], m.toon['hi'], m.toon['strength']),
+      (lin(0.82, 0.76, 0.85), True, None, -0.1, 0.1, 0.5))
+check('... its matcap multiplied, 0.8 of its 0.5, a quarter lit', capfile(m), (True, [1.0, 1.0, 1.0, 0.4], 'multiply', 0.25))
+m = mat(LIL, {'_TransparentMode': 0, '_UseShadow': 1, '_ShadowBorder': 0.1, '_ShadowBlur': 0.4},
+        tex={'_ShadowColorTex': (MASKTEX, (1, 1), (0, 0))})
+check('... its shadow colour texture in place of the base; the step clamped at half-Lambert 0',
+      (m.toon['base'], m.toon['tex'] == db.get(MASKTEX['guid']).file, m.toon['lo'], m.toon['hi']), (False, True, -1.0, -0.4))
+check('... no shadow, no matcap: none', (mat(LIL, {'_TransparentMode': 0}).toon, mat(LIL, {'_TransparentMode': 0}).matcap),
+      (None, None))
+m = mat(POI, {})
+check('Poiyomi\'s Flat (its default): lit all round', (m.toon['lo'], m.toon['hi'], m.toon['shade'], m.toon['base']),
+      (-1.0, -1.0, [1.0, 1.0, 1.0], True))
+m = mat(POI, {'_LightingMode': 1, '_ShadowBorder': 0.6, '_ShadowBlur': 0.2, '_MatcapEnable': 1, '_MatcapIntensity': 2},
+        {'_ShadowColor': (0.5, 0.5, 0.5, 1)}, {'_Matcap': (CAP, (1, 1), (0, 0))})
+check('... Multilayer Math: lilToon\'s (N·L 0..0.4)', (m.toon['shade'], m.toon['lo'], m.toon['hi']), (lin(0.5, 0.5, 0.5), 0.0, 0.4))
+check('... its matcap in place of the colour (Replace), twice', capfile(m), (True, [1.0, 1.0, 1.0, 2.0], 'mix', 1.0))
+check('... another lighting type: as it is', mat(POI, {'_LightingMode': 6}).toon, None)
+m = mat(POI, {'_MatcapEnable': 1, '_MatcapReplace': 0, '_MatcapAdd': 0.5}, tex={'_Matcap': (CAP, (1, 1), (0, 0))})
+check('... its matcap added, half', capfile(m), (True, [1.0, 1.0, 1.0, 0.5], 'add', 1.0))
+m = mat(MTOON, {'_BlendMode': 0}, tex={'_ShadeTexture': (TEX, (1, 1), (0, 0)), '_SphereAdd': (CAP, (1, 1), (0, 0))})
+check('MToon: its shade colour (default) times _ShadeTexture, N·L from _ShadeShift 0 to 0.1 (toony 0.9)',
+      (m.toon['shade'], m.toon['base'], m.toon['tex'] == m.tex, m.toon['lo'], m.toon['hi']),
+      (lin(0.97, 0.81, 0.86), False, True, 0.0, 0.1))
+check('... _SphereAdd added as it is', capfile(m), (True, [1.0, 1.0, 1.0, 1.0], 'add', 0.0))
+m = mat(MTOON, {'_BlendMode': 0, '_ShadingToonyFactor': 0.8, '_ShadingShiftFactor': -0.1, '_RimLightingMix': 0.5},
+        {'_ShadeColor': (0.5, 0.25, 0.25, 1)}, {'_MatcapTex': (CAP, (1, 1), (0, 0))})
+check('MToon10: N·L -1 + toony - shift .. 1 - toony - shift', (m.toon['shade'], m.toon['lo'], m.toon['hi']),
+      (lin(0.5, 0.25, 0.25), -0.1, 0.3))
+check('... its matcap, lit halfway', capfile(m), (True, [1.0, 1.0, 1.0, 1.0], 'add', 0.5))
+check('none on the Standard shader', mat(shader('Standard', [], [('FORWARD', 'Back')]), {}).toon, None)
 
 print('== inverted alpha: baked into the texture\'s (1 - the alpha, times the colour\'s for the main texture\'s)')
 m = mat(TRANS, {'_AL_Source': 0, '_AL_InvMaskVal': 1, '_AL_Power': 0.5}, {'_Color': (1, 1, 1, 0.8)})
@@ -275,9 +358,12 @@ cases = {
                                    {'_AL_Source': 2}, {'_Color': (1, 1, 1, 1)}),
     'inverted': mats.build('inverted', TRANS, set(), -1, {}, {'_MainTex': T(MAIN)},
                            {'_AL_Source': 0, '_AL_InvMaskVal': 1}, {'_Color': (1, 1, 1, 0.5)}),
+    'toon': mats.build('toon', LIL, set(), -1, {}, {'_MainTex': T(MAIN), '_ShadowColorTex': T(MAIN), '_MatCapTex': T(LMASK)},
+                       {'_TransparentMode': 0, '_UseShadow': 1, '_UseMatCap': 1}, {'_Color': (1, 1, 1, 1)}),
     'outlined': mats.build('outlined', OPAQUE, {'_TL_ENABLE', '_BK_ENABLE'}, 2449, {},
-                           {'_MainTex': T(MAIN), '_TL_MaskTex': T(LMASK), '_BK_BackTex': T(MAIN, (2, 1))},
-                           {'_TL_LineWidth': 0.2, '_GL_LevelMin': 0.1}, {'_BK_BackColor': (1, 0, 0, 1)}),
+                           {'_MainTex': T(MAIN), '_TL_MaskTex': T(LMASK), '_BK_BackTex': T(MAIN, (2, 1)),
+                            '_TL_CustomColorTex': T(MAIN)},
+                           {'_TL_LineWidth': 0.2, '_GL_LevelMin': 0.1, '_TL_BlendCustom': 0.3}, {'_BK_BackColor': (1, 0, 0, 1)}),
 }
 for bpy_coll in (bpy.data.objects, bpy.data.meshes):
     for x in list(bpy_coll):
@@ -335,18 +421,28 @@ check('inverted: 1 - the colour\'s alpha times the texture\'s (to 8 bits)',
 check('... the colour\'s alpha taken in', mats_js['inverted']['pbrMetallicRoughness'].get('baseColorFactor', [1] * 4)[3],
       1.0)
 ex = mats_js['outlined'].get('extras', {})
-check('extras: queue, outline, back, light', sorted(ex), ['hypr3d_back', 'hypr3d_light', 'hypr3d_outline',
-                                                         'hypr3d_queue'])
+check('extras: queue, outline, back, light, toon (flat)', sorted(ex), ['hypr3d_back', 'hypr3d_light', 'hypr3d_outline',
+                                                                      'hypr3d_queue', 'hypr3d_toon'])
 lm = texels(ex['hypr3d_outline']['mask']['index'])
 check('the outline mask added to the GLB, as it is (its lower rows set)', (
     lm.shape[:2], round(float(lm[0, 0, 0]), 2), round(float(lm[3, 0, 0]), 2)), ((4, 4), 0.0, 1.0))
+check('the outline\'s colour texture: the main one\'s, a third of the way', (
+    ex['hypr3d_outline']['texture']['index'] == mats_js['outlined']['pbrMetallicRoughness']['baseColorTexture']['index'],
+    ex['hypr3d_outline']['texture'].get('blend'), ex['hypr3d_outline']['texture'].get('transform')), (True, 0.3, None))
 check('the back texture: the main one\'s, its tiling', (
     ex['hypr3d_back']['texture']['index'] == mats_js['outlined']['pbrMetallicRoughness']['baseColorTexture']['index'],
     ex['hypr3d_back']['texture'].get('transform'), ex['hypr3d_back']['color']),
       (True, {'offset': [0, 0.0], 'scale': [2, 1]}, [1.0, 0.0, 0.0, 1.0]))
-check('the others: UnlitWF\'s light clamp only', sorted((n, tuple(x.get('extras', {}))) for n, x in mats_js.items()
-                                                        if n != 'outlined'),
-      [('inverted', ('hypr3d_light',)), ('red mask', ('hypr3d_light',)), ('small alpha mask', ('hypr3d_light',))])
+tn = mats_js['toon'].get('extras', {})
+check('lilToon\'s toon extras: its shadow colour texture the base\'s (the same file), its matcap added',
+      (sorted(tn), tn['hypr3d_toon'].get('texture', {}).get('index') ==
+       mats_js['toon']['pbrMetallicRoughness']['baseColorTexture']['index'], tn['hypr3d_toon']['base'],
+       tn['hypr3d_matcap']['mode'], texels(tn['hypr3d_matcap']['index']).shape[:2]),
+      (['hypr3d_matcap', 'hypr3d_toon'], True, False, 'add', (4, 4)))
+check('the others: UnlitWF\'s light clamp and flat light only', sorted((n, tuple(x.get('extras', {}))) for n, x in mats_js.items()
+                                                                       if n not in ('outlined', 'toon')),
+      [('inverted', ('hypr3d_light', 'hypr3d_toon')), ('red mask', ('hypr3d_light', 'hypr3d_toon')),
+       ('small alpha mask', ('hypr3d_light', 'hypr3d_toon'))])
 
 print('all passed' if not FAILS else '%d FAILED: %s' % (len(FAILS), ', '.join(FAILS)))
 sys.exit(1 if FAILS else 0)

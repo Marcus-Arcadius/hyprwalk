@@ -506,6 +506,7 @@ vf = vrcf(sc, [{'@class': 'Blinking', 'state': {'actions': [bs('Wink')]}},
                 'state_PP': {'actions': [bs('Smile')]}}])
 check('the blink', vf.blink, {(b1, 'Wink'): 1.0})
 check('the visemes hypr3d has (aa..ou), at their weights', vf.visemes, {'aa': {(b1, 'Blep'): 1.0}, 'oh': {(b1, 'Grr'): 0.6}})
+check('... and the consonants (PP..RR) apart', vf.consonants, {'pp': {(b1, 'Smile'): 1.0}})
 
 print('== material actions: a slot\'s material, a property\'s value; Set an FX Float; exclusive tags of several groups')
 sc = Scene()

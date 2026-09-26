@@ -65,22 +65,23 @@ namespace h3d::gl {
         return p;
     }
 
-    int textureCompression() {
+    bool hasExtension(const char* name) {
         const char* ext = (const char*)glGetString(GL_EXTENSIONS);
         if (!ext)
-            return 0;
-        const auto has = [&](const char* name) {
-            for (const char* p = std::strstr(ext, name); p; p = std::strstr(p + 1, name))
-                if ((p == ext || p[-1] == ' ') && (p[std::strlen(name)] == ' ' || p[std::strlen(name)] == 0))
-                    return true;
             return false;
-        };
+        for (const char* p = std::strstr(ext, name); p; p = std::strstr(p + 1, name))
+            if ((p == ext || p[-1] == ' ') && (p[std::strlen(name)] == ' ' || p[std::strlen(name)] == 0))
+                return true;
+        return false;
+    }
+
+    int textureCompression() {
         int out = 0;
-        if (has("GL_EXT_texture_compression_s3tc"))
+        if (hasExtension("GL_EXT_texture_compression_s3tc"))
             out |= 1;
-        if (has("GL_EXT_texture_compression_s3tc_srgb") || has("GL_NV_sRGB_formats"))
+        if (hasExtension("GL_EXT_texture_compression_s3tc_srgb") || hasExtension("GL_NV_sRGB_formats"))
             out |= 2;
-        if (has("GL_EXT_texture_compression_rgtc"))
+        if (hasExtension("GL_EXT_texture_compression_rgtc"))
             out |= 4;
         return out;
     }

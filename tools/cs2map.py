@@ -418,6 +418,37 @@ def truthy(v):
     return str(v).strip().lower() in ('1', 'true', 'yes')
 
 
+def num(e, key, default):
+    """a number key of an entity (a 0 stays 0)"""
+    try:
+        return float(e.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def sun_channel(sun):
+    """the channel (0-3) of the sun's baked shadow in the lightmaps' direct_light_shadows and the probes' atlas, or -1.
+    CS2's shaders shadow the sun by (1 - dot(those, a mask with a 1 at that channel)) times its realtime shadow on every
+    surface, so with no channel (the key missing, as it is for Dynamic suns and fully baked ones) only the realtime
+    shadow is left. A Baked sun (directlight 1) without baked_light_indexing is fully baked and has none either"""
+    if not sun or 'bakedshadowindex' not in sun:
+        return -1
+    if int(num(sun, 'directlight', 1)) == 1 and not truthy(sun.get('baked_light_indexing', 'true')):
+        return -1
+    c = int(num(sun, 'bakedshadowindex', -1))
+    return c if 0 <= c < 4 else -1
+
+
+def sun_runtime(sun):
+    """whether CS2 lights with the sun at run time: a Dynamic (2) or Stationary (3) one, or a Baked (1) one with a baked
+    shadow channel ("Stationary Light Shadows"). A fully baked sun's direct light is in the lightmaps and the probes
+    already; a disabled or dark one gives none"""
+    if not sun or not truthy(sun.get('enabled', 'true')) or num(sun, 'brightness', 1) * num(sun, 'brightnessscale', 1) <= 0:
+        return False
+    dl = int(num(sun, 'directlight', 1))
+    return dl in (2, 3) or (dl == 1 and sun_channel(sun) >= 0)
+
+
 # ---------------------------------------------------------------- glTF documents
 
 class Doc:
@@ -1234,7 +1265,7 @@ class Export:
             if not got:
                 continue
             sun = next((e for e in sents if e.get('classname') == 'light_environment'), None)
-            channel = int(float(sun.get('bakedshadowindex', 0))) if sun else -1
+            channel = sun_channel(sun)
             got['channel'] = channel
             f = got['files']
             jobs.append({'op': 'rgbe', 'src': f['irradiance'], 'dst': os.path.join(work, f'{key}_irradiance.png'), 'maxsize': 4096})
@@ -1244,8 +1275,10 @@ class Export:
             if got['probes']:
                 p = got['probes']
                 jobs.append({'op': 'atlas_rgbe', 'src': p['irradiance'], 'dst': os.path.join(work, f'{key}_probes.png'), 'cols': 16})
-                jobs.append({'op': 'atlas_channel', 'src': p['shadows'], 'dst': os.path.join(work, f'{key}_probe_shadows.png'), 'cols': 16,
-                             'channel': max(channel, 0)})
+                # (no channel: no probe shadows either, rather than another light's)
+                if 0 <= channel < 4:
+                    jobs.append({'op': 'atlas_channel', 'src': p['shadows'], 'dst': os.path.join(work, f'{key}_probe_shadows.png'), 'cols': 16,
+                                 'channel': channel})
         script = os.path.join(work, 'lighttool.py')
         open(script, 'w').write(LIGHTING_TOOL)
         jobfile = os.path.join(work, 'job.json')
@@ -1274,15 +1307,24 @@ class Export:
                     entry['probes'] = {'irradiance': img(f'{key}_probes.png'), 'shadows': img(f'{key}_probe_shadows.png'),
                                        'size': dims, 'columns': 16,
                                        'volumes': [self.probe_volume(e, to_map) for e in got['probes']['volumes']]}
+                    if not entry['probes']['shadows']:
+                        del entry['probes']['shadows']
             light['sets'].append(entry)
 
-        # the sun: its colour times its brightness, linear, the way CS2's shaders have it
+        # the sun: its colour times its brightness, linear, the way CS2's shaders have it; black when CS2 doesn't light
+        # with it at run time (hypr3d would light a map without one with its own)
         sun = next((e for e in ents if e.get('classname') == 'light_environment' and truthy(e.get('enabled', 'true'))), None)
+        sun = sun or next((e for e in ents if e.get('classname') == 'light_environment'), None)
         if sun:
-            k = float(sun.get('brightness', 1) or 1) * float(sun.get('brightnessscale', 1) or 1)
+            k = num(sun, 'brightness', 1) * num(sun, 'brightnessscale', 1) if sun_runtime(sun) else 0.0
             p, y = (math.radians(a) for a in vec(sun, 'angles')[:2])
             towards = [-math.cos(p) * math.cos(y), -math.cos(p) * math.sin(y), math.sin(p)]
             light['sun'] = {'color': [srgb_to_linear(c / 255.0) * k for c in vec(sun, 'color')], 'direction': to_gltf([c / INCH for c in towards])}
+            if not k:
+                log(f"its sun lights nothing at run time (directlight {sun.get('directlight', 1)}, brightness "
+                    f"{num(sun, 'brightness', 1) * num(sun, 'brightnessscale', 1):g}): the lightmaps and probes have all its light")
+        else:
+            light['sun'] = {'color': [0.0, 0.0, 0.0], 'direction': [0.0, 1.0, 0.0]}
         fog = next((e for e in ents if e.get('classname') == 'env_cubemap_fog' and not truthy(e.get('startdisabled', 'false'))), None)
         if fog:
             g = lambda key, d: float(fog.get(key, d) or d)
