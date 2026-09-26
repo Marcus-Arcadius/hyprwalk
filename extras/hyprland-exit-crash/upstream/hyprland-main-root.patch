@@ -1,0 +1,43 @@
+Subject: [PATCH] compositor: destroy the clients before clearing the window state on exit
+
+CCompositor::cleanup() clears the workspace/window/layer state before
+wl_display_destroy_clients(). After that, a window's last strong reference
+is the render pass of the last frame (CSurfacePassElement's PHLWINDOW). The
+first client to be destroyed unmaps its window, whose snapshot's
+beginRender() clears the pass, and every other window is freed without
+unmapWindow(). ~CWindow() doesn't remove the layout target, so dwindle and
+master keep expired nodes, and master crashes in calculateWorkspace()
+(dwindle is guarded since 338bdbb3). Destroying the clients first, while the
+state still exists, makes every window leave its layout through the normal
+unmap path.
+
+diff --git a/src/Compositor.cpp b/src/Compositor.cpp
+index 122d8774..de87e046 100644
+--- a/src/Compositor.cpp
++++ b/src/Compositor.cpp
+@@ -589,6 +589,14 @@ void CCompositor::cleanup() {
+     // still in a normal working state.
+     g_pPluginSystem->unloadAllPlugins();
+ 
++    // destroy the clients while the windows, workspaces and monitors still exist, so that every
++    // window leaves its layout the normal way (unmap / destroy). With the window state cleared first,
++    // a window's last reference is the last frame's render pass, which the first unmap's snapshot
++    // clears: the other windows are then freed without an unmap, and their layout nodes expire.
++    g_pXWayland.reset();
++
++    wl_display_destroy_clients(g_pCompositor->m_wlDisplay);
++
+     State::Workspace::state()->clear();
+     Desktop::windowState()->clear();
+     Desktop::layerState()->clear();
+@@ -599,10 +607,6 @@ void CCompositor::cleanup() {
+         g_pHyprOpenGL->destroyMonitorResources(m);
+     }
+ 
+-    g_pXWayland.reset();
+-
+-    wl_display_destroy_clients(g_pCompositor->m_wlDisplay);
+-
+     State::monitorState()->finish();
+     State::fallbackState().reset();
+     State::monitorState().reset();

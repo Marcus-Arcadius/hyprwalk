@@ -1,0 +1,162 @@
+{
+ "a_short_M": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 687,
+  "f1_sd": 80,
+  "f2_mean": 1283,
+  "f2_sd": 137
+ },
+ "a_short_F": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 801,
+  "f1_sd": 80,
+  "f2_mean": 1530,
+  "f2_sd": 162
+ },
+ "a_long_M": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 744,
+  "f1_sd": 80,
+  "f2_mean": 1237,
+  "f2_sd": 93
+ },
+ "a_long_F": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 889,
+  "f1_sd": 77,
+  "f2_mean": 1474,
+  "f2_sd": 130
+ },
+ "i_short_M": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 301,
+  "f1_sd": 41,
+  "f2_mean": 2154,
+  "f2_sd": 203
+ },
+ "i_short_F": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 346,
+  "f1_sd": 58,
+  "f2_mean": 2639,
+  "f2_sd": 244
+ },
+ "i_long_M": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 306,
+  "f1_sd": 49,
+  "f2_mean": 2293,
+  "f2_sd": 219
+ },
+ "i_long_F": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 355,
+  "f1_sd": 55,
+  "f2_mean": 2794,
+  "f2_sd": 211
+ },
+ "u_short_M": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 348,
+  "f1_sd": 39,
+  "f2_mean": 1435,
+  "f2_sd": 162
+ },
+ "u_short_F": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 434,
+  "f1_sd": 66,
+  "f2_mean": 1645,
+  "f2_sd": 234
+ },
+ "u_long_M": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 352,
+  "f1_sd": 46,
+  "f2_mean": 1442,
+  "f2_sd": 154
+ },
+ "u_long_F": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 459,
+  "f1_sd": 76,
+  "f2_mean": 1653,
+  "f2_sd": 183
+ },
+ "e_short_M": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 443,
+  "f1_sd": 53,
+  "f2_mean": 1947,
+  "f2_sd": 168
+ },
+ "e_short_F": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 516,
+  "f1_sd": 76,
+  "f2_mean": 2302,
+  "f2_sd": 227
+ },
+ "e_long_M": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 460,
+  "f1_sd": 41,
+  "f2_mean": 2043,
+  "f2_sd": 163
+ },
+ "e_long_F": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 555,
+  "f1_sd": 89,
+  "f2_mean": 2378,
+  "f2_sd": 220
+ },
+ "o_short_M": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 462,
+  "f1_sd": 52,
+  "f2_mean": 949,
+  "f2_sd": 141
+ },
+ "o_short_F": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 526,
+  "f1_sd": 73,
+  "f2_mean": 1127,
+  "f2_sd": 194
+ },
+ "o_long_M": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 455,
+  "f1_sd": 45,
+  "f2_mean": 813,
+  "f2_sd": 95
+ },
+ "o_long_F": {
+  "n": 160,
+  "speakers": 8,
+  "f1_mean": 535,
+  "f1_sd": 79,
+  "f2_mean": 996,
+  "f2_sd": 128
+ }
+}

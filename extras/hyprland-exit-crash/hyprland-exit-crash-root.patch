@@ -1,0 +1,65 @@
+Subject: [PATCH] compositor: destroy the clients before clearing the windows on exit
+
+For Hyprland v0.55.2 (39d7e20). Optional: use it on top of
+hyprland-exit-crash.patch (the layout guards) or on its own. Applies on top
+of astroland's hyprland_clamp_to_border.patch too.
+
+This is the root cause of the crash on exit with tiled windows open.
+CCompositor::cleanup() clears m_workspaces and m_windows first, and only
+then destroys the clients (wl_display_destroy_clients()), when the monitors
+are gone too. After m_windows.clear(), a window's last strong reference is
+the render pass of the last frame (each CSurfacePassElement holds a
+PHLWINDOW). When the first client is destroyed, its window unmaps and makes
+a snapshot. The snapshot's beginRender() clears the render pass, so the
+other windows are freed on the spot, without unmapWindow().
+~CWindow() doesn't take a window's target out of its layout, so dwindle and
+master keep nodes with expired targets and crash in calculateWorkspace()
+when the unmapping window's removeTarget() recalculates. Windows the last
+frame didn't draw are freed by m_windows.clear() itself, the same way.
+
+This destroys the clients first, while the windows, workspaces and monitors
+still exist (the plugins are already unloaded). Every window then leaves its
+layout through the same unmap/destroy path as when a client disconnects at
+runtime. XWayland still goes first, as before, so its X11 windows get their
+destroy (~CXWM emits it for every surface) while they still exist too.
+Clearing m_windows after that frees windows that are no longer in any
+layout.
+
+The old order dates from when m_windows held unique pointers. db91d949
+("compositor: move wl_display_destroy_clients", 2024-04) moved the call
+above g_pInputManager.reset() for the same kind of reason: destroying
+clients reaches managers that must still exist. Since windows became shared
+pointers (bca7804b, 2024-04-27), references other than m_windows can keep
+them alive past m_windows.clear().
+
+diff --git a/src/Compositor.cpp b/src/Compositor.cpp
+index d2fe2f9..087452f 100644
+--- a/src/Compositor.cpp
++++ b/src/Compositor.cpp
+@@ -565,6 +565,14 @@ void CCompositor::cleanup() {
+     // still in a normal working state.
+     g_pPluginSystem->unloadAllPlugins();
+ 
++    // destroy the clients while the windows, workspaces and monitors still exist, so that every
++    // window leaves its layout the normal way (unmap / destroy). With m_windows cleared first, a
++    // window's last reference is the last frame's render pass, which the first unmap's snapshot
++    // clears: the other windows are then freed without an unmap, and their layout nodes expire.
++    g_pXWayland.reset();
++
++    wl_display_destroy_clients(g_pCompositor->m_wlDisplay);
++
+     m_workspaces.clear();
+     m_windows.clear();
+ 
+@@ -572,11 +580,8 @@ void CCompositor::cleanup() {
+         g_pHyprOpenGL->destroyMonitorResources(m);
+     }
+ 
+-    g_pXWayland.reset();
+-
+     m_monitors.clear();
+ 
+-    wl_display_destroy_clients(g_pCompositor->m_wlDisplay);
+     removeAllSignals();
+ 
+     g_pInputManager.reset();

@@ -1,0 +1,87 @@
+Subject: [PATCH] master: avoid crashing on expired weakptr
+
+The same guard as 338bdbb3 ("dwindle: avoid crashing on expired weakptr",
+#15415) in CMasterAlgorithm::calculateWorkspace(): skip a node whose pTarget
+has expired instead of calling setPositionGlobal()/warpPositionSize()
+through it.
+
+CCompositor::cleanup() clears the window state before
+wl_display_destroy_clients(), so a window nothing else holds is freed
+without being unmapped and its node stays in the master layout; when the
+next window unmaps, removeTarget() -> calculateWorkspace() dereferences the
+dead node and Hyprland segfaults on exit / SIGTERM with 2+ tiled windows.
+
+diff --git a/src/layout/algorithm/tiled/master/MasterAlgorithm.cpp b/src/layout/algorithm/tiled/master/MasterAlgorithm.cpp
+index 7e166e57..739440bf 100644
+--- a/src/layout/algorithm/tiled/master/MasterAlgorithm.cpp
++++ b/src/layout/algorithm/tiled/master/MasterAlgorithm.cpp
+@@ -1037,7 +1037,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+             return;
+ 
+         for (const auto& n : m_masterNodesData) {
+-            n->pTarget->warpPositionSize();
++            if (!n->pTarget.expired())
++                n->pTarget->warpPositionSize();
+         }
+     });
+ 
+@@ -1110,7 +1111,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+             PMASTERNODE->position = WORKAREA.pos();
+         }
+ 
+-        PMASTERNODE->pTarget->setPositionGlobal({PMASTERNODE->position, PMASTERNODE->size});
++        if (!PMASTERNODE->pTarget.expired())
++            PMASTERNODE->pTarget->setPositionGlobal({PMASTERNODE->position, PMASTERNODE->size});
+         return;
+     } else if (orientation == ORIENTATION_TOP || orientation == ORIENTATION_BOTTOM) {
+         const float HEIGHT      = STACKWINDOWS != 0 ? WORKAREA.h * PMASTERNODE->percMaster : WORKAREA.h;
+@@ -1137,7 +1139,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+ 
+             nd->size     = Vector2D(WIDTH, HEIGHT);
+             nd->position = WORKAREA.pos() + Vector2D(nextX, nextY);
+-            nd->pTarget->setPositionGlobal({nd->position, nd->size});
++            if (!nd->pTarget.expired())
++                nd->pTarget->setPositionGlobal({nd->position, nd->size});
+ 
+             mastersLeft--;
+             widthLeft -= WIDTH;
+@@ -1174,7 +1177,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+ 
+             nd->size     = Vector2D(WIDTH, HEIGHT);
+             nd->position = (*PIGNORERESERVED && centerMasterWindow ? WORKAREA.pos() - Vector2D(reservedLeft, 0.0) : WORKAREA.pos()) + Vector2D(nextX, nextY);
+-            nd->pTarget->setPositionGlobal({nd->position, nd->size});
++            if (!nd->pTarget.expired())
++                nd->pTarget->setPositionGlobal({nd->position, nd->size});
+ 
+             mastersLeft--;
+             heightLeft -= HEIGHT;
+@@ -1211,7 +1215,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+ 
+             nd->size     = Vector2D(WIDTH, HEIGHT);
+             nd->position = WORKAREA.pos() + Vector2D(nextX, nextY);
+-            nd->pTarget->setPositionGlobal({nd->position, nd->size});
++            if (!nd->pTarget.expired())
++                nd->pTarget->setPositionGlobal({nd->position, nd->size});
+ 
+             slavesLeft--;
+             widthLeft -= WIDTH;
+@@ -1241,7 +1246,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+ 
+             nd->size     = Vector2D(WIDTH, HEIGHT);
+             nd->position = WORKAREA.pos() + Vector2D(nextX, nextY);
+-            nd->pTarget->setPositionGlobal({nd->position, nd->size});
++            if (!nd->pTarget.expired())
++                nd->pTarget->setPositionGlobal({nd->position, nd->size});
+ 
+             slavesLeft--;
+             heightLeft -= HEIGHT;
+@@ -1312,7 +1318,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+ 
+             nd->size     = Vector2D(*PIGNORERESERVED ? (WIDTH - (onRight ? reservedRight : reservedLeft)) : WIDTH, HEIGHT);
+             nd->position = WORKAREA.pos() + Vector2D(nextX, nextY);
+-            nd->pTarget->setPositionGlobal({nd->position, nd->size});
++            if (!nd->pTarget.expired())
++                nd->pTarget->setPositionGlobal({nd->position, nd->size});
+ 
+             if (onRight) {
+                 heightLeftR -= HEIGHT;

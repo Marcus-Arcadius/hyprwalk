@@ -726,8 +726,9 @@ Valve's; this reads your copy of the game for your own use.
   has heard it. `--real DIR` adds recordings of real voices, named for their vowel (`a_*.wav` …
   `o_*.wav`): how often each one's viseme leads, how open it is, and how much of it counted as voiced;
   at least PERCENT (85) of them must lead with their own, at their own level and at each of the
-  levels, where each must open as wide as at its own level. Such recordings stay out of the repo: the
-  ones used here came from Wikimedia Commons and Lingua Libre (public domain, CC0, CC BY and CC BY-SA).
+  levels, where each must open as wide as at its own level. The ones used here are in `extras/speech/in`:
+  from Wikimedia Commons, Lingua Libre and Tofugu/WaniKani, public domain, CC0, CC BY and CC BY-SA
+  (`extras/speech/LICENSES.md` credits each).
 - `tools/test/synth/attenuate.py OUT.wav DB PART... [--noise DBFS]`: WAVs and `silence:SECONDS` one
   after the other, DB decibels down, as a 32-bit float WAV, with white noise all along if asked (a
   microphone's own hiss): how a quieter microphone gives a recording.
@@ -995,8 +996,8 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check
 - Hyprland 0.55.x crashes when it quits with windows open, with or without hypr3d: its dwindle and
   master layouts call a window that's gone. Hyprland 0.56.0 fixed dwindle's (commit 338bdbb3); master's
   still crashes on Hyprland's main branch (e368c13c, September 2026). Guarding master's calls the way
-  338bdbb3 guards dwindle's fixes it (tested in the VM on 0.55.2 and on main); that patch isn't here, as
-  it is Hyprland's code.
+  338bdbb3 guards dwindle's fixes it (tested in the VM on 0.55.2 and on main). That patch, applied nowhere,
+  is in `extras/hyprland-exit-crash`, with how to build Hyprland with it on NixOS.
 - Toon shading takes a toon shader's first shade step only, not its second and third, nor its shade
   and matcap masks. A shadow on a toon surface is looked up 10 cm towards the sun, so shadows cast from
   closer than that (a fringe's on the forehead) don't show on it.
@@ -1030,5 +1031,9 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check
 - The converter's VRCFury support reimplements VRCFury's build behaviour
   ([VRCFury](https://github.com/VRCFury/VRCFury), © 2022 Senky, under its own license). It was written
   after reading VRCFury's source for its save format and behaviour, and contains none of its code.
+- The vowel recordings in `extras/speech` are from Wikimedia Commons, Lingua Libre and Tofugu/WaniKani's
+  pronunciation audio (public domain, CC0, CC BY and CC BY-SA 4.0), and the formant data in
+  `extras/speech/ref` is Kakeru Yazawa's (Zenodo 15227304, CC BY 4.0); `extras/speech/LICENSES.md`
+  credits each. The patches in `extras/` change Hyprland's and aquamarine's code (BSD 3-Clause).
 - VRChat, Modular Avatar, Counter-Strike 2 and Blender belong to their owners. This project has no
   connection with any of them, and it ships none of their assets.

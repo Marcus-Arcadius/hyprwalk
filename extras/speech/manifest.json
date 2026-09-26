@@ -1,0 +1,1950 @@
+[
+ {
+  "file": "wav/a_hakatanoshio.wav",
+  "looped": "in/a_hakatanoshio.wav",
+  "vowel": "a",
+  "kana": "あ",
+  "set": "isolated",
+  "word": "あ",
+  "reading": "あ",
+  "gloss": "kana reading",
+  "context": "kana あ read aloud, 3 short takes",
+  "speaker": "Hakatanoshio117117 (Wikimedia user)",
+  "speaker_slug": "hakatanoshio",
+  "sex": "unknown",
+  "sex_source": "not stated",
+  "f0_median_hz": 123.1,
+  "f0_p10_p90_hz": [
+   119.4,
+   125.2
+  ],
+  "f0_file_median_hz": 122.3,
+  "f0_file_p10_hz": 118.0,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "Commons/ja.wikipedia user with babel \"ja\" (native); set \"Audio files of hiragana (set by Hakatanoshio117117)\"",
+  "source": "https://commons.wikimedia.org/wiki/File:Ja-A.oga",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/e/ed/Ja-A.oga",
+  "raw": "raw/Ja-A.oga",
+  "license": "Public domain",
+  "license_url": null,
+  "attribution": "Hakatanoshio117117, Public domain, via Wikimedia Commons",
+  "author": "Hakatanoshio117117",
+  "credit": "自作",
+  "description": "​「あ」の発音",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 256000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 2.485,
+   "sha1_commons": "d4d046efa05c12229407d2a97d5a422ce97649be"
+  },
+  "duration_s": 2.485,
+  "voiced_s": 0.24,
+  "segments_s": [
+   [
+    0.14,
+    0.22
+   ],
+   [
+    1.135,
+    1.215
+   ],
+   [
+    2.13,
+    2.21
+   ]
+  ],
+  "loop_s": 5.04,
+  "loop_repeats": 21,
+  "peak_dbfs": -9.8,
+  "voiced_rms_dbfs": -25.4,
+  "noise_floor_dbfs": -101.0,
+  "snr_db": 75.6,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   867,
+   1330
+  ],
+  "problems": [
+   "three short takes (about 80 ms of steady vowel each after trimming) with about 0.6 s of digital silence between them in the original; the loop joins the three takes",
+   "sex not documented; the voice's F0 (whole file: median 122.3 Hz, 10th percentile 118.0 Hz) suggests male"
+  ]
+ },
+ {
+  "file": "wav/a_marsian-aka.wav",
+  "looped": "in/a_marsian-aka.wav",
+  "vowel": "a",
+  "kana": "あ",
+  "set": "word",
+  "word": "赤",
+  "reading": "あか",
+  "gloss": "red",
+  "context": "both あ of あか: word-initial (before /k/) and after /k/",
+  "speaker": "marsian (Wikimedia user)",
+  "speaker_slug": "marsian",
+  "sex": "unknown",
+  "sex_source": "not stated",
+  "f0_median_hz": 133.9,
+  "f0_p10_p90_hz": [
+   105.4,
+   189.2
+  ],
+  "f0_file_median_hz": 133.5,
+  "f0_file_p10_hz": 105.1,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "file description: \"recorded by: a native speaker of Japanese\"; \"I, marsian recorded my own voice\"; babel ja",
+  "source": "https://commons.wikimedia.org/wiki/File:Ja-aka-red.ogg",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/e/ec/Ja-aka-red.ogg",
+  "raw": "raw/Ja-aka-red.ogg",
+  "license": "Public domain",
+  "license_url": null,
+  "attribution": "marsian, Public domain, via Wikimedia Commons",
+  "author": "marsian",
+  "credit": "I, marsian recorded my own voice by myself.",
+  "description": "A Japanese soundbite: what?: red in Japanese for what: pronunciation for wikimedia projects recorded by: a native speaker of Japanese mono/stereo: mono format: OggVorbis, VBR, -q 1.00 (nominal bitrate: 60 or 80 or so kbps) recorded and edited with: Audacity 1.3.2-beta; noize removed, normalized; voi",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 60000,
+   "sample_rate": 44100,
+   "channels": 1,
+   "bits_per_sample": null,
+   "duration_s": 1.005,
+   "sha1_commons": "3a7280e9c55c4382bb5c3a5f65d986a10f0742a3"
+  },
+  "duration_s": 1.005,
+  "voiced_s": 0.15,
+  "segments_s": [
+   [
+    0.27,
+    0.345
+   ],
+   [
+    0.46,
+    0.535
+   ]
+  ],
+  "loop_s": 5.1,
+  "loop_repeats": 34,
+  "peak_dbfs": -3.5,
+  "voiced_rms_dbfs": -16.2,
+  "noise_floor_dbfs": -77.2,
+  "snr_db": 61.0,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   745,
+   1181
+  ],
+  "problems": [
+   "the uploader ran Audacity noise removal and normalisation on it",
+   "lossy Vorbis at 60 kbps nominal",
+   "sex not documented; the voice's F0 (whole file: median 133.5 Hz, 10th percentile 105.1 Hz) suggests male"
+  ]
+ },
+ {
+  "file": "wav/a_tofugu-f-atsui.wav",
+  "looped": "in/a_tofugu-f-atsui.wav",
+  "vowel": "a",
+  "kana": "あ",
+  "set": "word",
+  "word": "厚い",
+  "reading": "あつい",
+  "gloss": "thick",
+  "context": "word-initial あ before /ts/ (あつい)",
+  "speaker": "Tofugu/WaniKani female voice",
+  "speaker_slug": "tofugu-f",
+  "sex": "f",
+  "sex_source": "Tofugu README and the Commons file names/descriptions (\"by a native Japanese woman\")",
+  "f0_median_hz": 170.9,
+  "f0_p10_p90_hz": [
+   168.7,
+   179.9
+  ],
+  "f0_file_median_hz": 222.4,
+  "f0_file_p10_hz": 166.3,
+  "sex_guess_from_f0": "f",
+  "age": "adult",
+  "native": true,
+  "native_note": "native Japanese, Kansai accent, amateur voice actor, amateur recording (Tofugu README)",
+  "source": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio/blob/master/lib/ogg/%E5%8E%9A%E3%81%84%E3%80%90%E3%81%82%E3%81%A4%E3%81%84%E3%80%91.ogg",
+  "original_url": "https://raw.githubusercontent.com/tofugu/japanese-vocabulary-pronunciation-audio/master/lib/ogg/%E5%8E%9A%E3%81%84%E3%80%90%E3%81%82%E3%81%A4%E3%81%84%E3%80%91.ogg",
+  "raw": "raw/tofugu-github/厚い【あつい】.ogg",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "attribution": "Tofugu and WaniKani (https://www.tofugu.com, https://www.wanikani.com), CC BY-SA 4.0, via github.com/tofugu/japanese-vocabulary-pronunciation-audio",
+  "author": "Tofugu and WaniKani",
+  "credit": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio (repository licence: CC BY-SA 4.0; README: \"Please attribute to Tofugu and WaniKani\")",
+  "description": "WaniKani vocabulary audio (old recordings), GitHub repository tofugu/japanese-vocabulary-pronunciation-audio",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 192000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 0.915,
+   "sha1_commons": null
+  },
+  "duration_s": 0.895,
+  "voiced_s": 0.12,
+  "segments_s": [
+   [
+    0.105,
+    0.225
+   ]
+  ],
+  "loop_s": 5.04,
+  "loop_repeats": 42,
+  "peak_dbfs": -17.3,
+  "voiced_rms_dbfs": -29.6,
+  "noise_floor_dbfs": -74.0,
+  "snr_db": 44.4,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   812,
+   1699
+  ],
+  "problems": []
+ },
+ {
+  "file": "wav/a_tofugu-m-aka.wav",
+  "looped": "in/a_tofugu-m-aka.wav",
+  "vowel": "a",
+  "kana": "あ",
+  "set": "word",
+  "word": "赤",
+  "reading": "あか",
+  "gloss": "red",
+  "context": "both あ of あか: word-initial (before /k/) and after /k/",
+  "speaker": "Tofugu/WaniKani male voice",
+  "speaker_slug": "tofugu-m",
+  "sex": "m",
+  "sex_source": "Tofugu README and the Commons file names/descriptions (\"by a male native Japanese voice actor\")",
+  "f0_median_hz": 98.1,
+  "f0_p10_p90_hz": [
+   75.9,
+   141.0
+  ],
+  "f0_file_median_hz": 114.6,
+  "f0_file_p10_hz": 72.9,
+  "sex_guess_from_f0": "m",
+  "age": "adult",
+  "native": true,
+  "native_note": "native Japanese, Tokyo accent, professional voice actor, professional recording (Tofugu README)",
+  "source": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio/blob/master/lib/ogg/%E8%B5%A4%E3%80%90%E3%81%82%E3%81%8B%E3%80%91.ogg",
+  "original_url": "https://raw.githubusercontent.com/tofugu/japanese-vocabulary-pronunciation-audio/master/lib/ogg/%E8%B5%A4%E3%80%90%E3%81%82%E3%81%8B%E3%80%91.ogg",
+  "raw": "raw/tofugu-github/赤【あか】.ogg",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "attribution": "Tofugu and WaniKani (https://www.tofugu.com, https://www.wanikani.com), CC BY-SA 4.0, via github.com/tofugu/japanese-vocabulary-pronunciation-audio",
+  "author": "Tofugu and WaniKani",
+  "credit": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio (repository licence: CC BY-SA 4.0; README: \"Please attribute to Tofugu and WaniKani\")",
+  "description": "WaniKani vocabulary audio (old recordings), GitHub repository tofugu/japanese-vocabulary-pronunciation-audio",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 192000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 0.758,
+   "sha1_commons": null
+  },
+  "duration_s": 0.753,
+  "voiced_s": 0.115,
+  "segments_s": [
+   [
+    0.175,
+    0.225
+   ],
+   [
+    0.385,
+    0.45
+   ]
+  ],
+  "loop_s": 5.06,
+  "loop_repeats": 44,
+  "peak_dbfs": -9.2,
+  "voiced_rms_dbfs": -26.4,
+  "noise_floor_dbfs": -92.8,
+  "snr_db": 66.4,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   913,
+   1435
+  ],
+  "problems": [
+   "rough check only: my LPC estimate F1/F2 913/1435 Hz is +2.8/+1.1 SD off the Tokyo male /a/ mean 687/1283 Hz (Yazawa & Kondo 2019): an unusual token or an estimation slip, not a wrong vowel"
+  ]
+ },
+ {
+  "file": "wav/i_firipinjin.wav",
+  "looped": "in/i_firipinjin.wav",
+  "vowel": "i",
+  "kana": "い",
+  "set": "isolated",
+  "word": "い",
+  "reading": "い",
+  "gloss": "kana reading",
+  "context": "kana い read aloud (non-native beginner)",
+  "speaker": "フィリピン人 (Lingua Libre speaker Q1575602)",
+  "speaker_slug": "firipinjin",
+  "sex": "m",
+  "sex_source": "Lingua Libre profile (P8 male) and file page speakerGender=male",
+  "f0_median_hz": 109.7,
+  "f0_p10_p90_hz": [
+   107.2,
+   231.4
+  ],
+  "f0_file_median_hz": 110.7,
+  "f0_file_p10_hz": 103.5,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": false,
+  "native_note": "NOT native: Lingua Libre profile gives Japanese = beginner; native Tagalog and English",
+  "source": "https://commons.wikimedia.org/wiki/File:LL-Q5287_(jpn)-%E3%83%95%E3%82%A3%E3%83%AA%E3%83%94%E3%83%B3%E4%BA%BA-%E3%81%84.wav",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/6/6f/LL-Q5287_%28jpn%29-%E3%83%95%E3%82%A3%E3%83%AA%E3%83%94%E3%83%B3%E4%BA%BA-%E3%81%84.wav",
+  "raw": "raw/LL-Q5287_(jpn)-フィリピン人-い.wav",
+  "license": "CC0",
+  "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+  "attribution": "フィリピン人 (Lingua Libre speaker and recorder), CC0, via Wikimedia Commons",
+  "author": "Speaker: フィリピン人 Recorder: フィリピン人",
+  "credit": "Own work",
+  "description": "Audio pronunciation file from the Lingua Libre project.",
+  "original": {
+   "container": "wav",
+   "codec": "pcm_s16le",
+   "bit_rate": 768000,
+   "sample_rate": 48000,
+   "channels": 1,
+   "bits_per_sample": 16,
+   "duration_s": 0.627,
+   "sha1_commons": "72f0fccfd0df6a91d5f681454d1c1758a0a126cc"
+  },
+  "duration_s": 0.627,
+  "voiced_s": 0.165,
+  "segments_s": [
+   [
+    0.23,
+    0.395
+   ]
+  ],
+  "loop_s": 5.115,
+  "loop_repeats": 31,
+  "peak_dbfs": -16.4,
+  "voiced_rms_dbfs": -29.3,
+  "noise_floor_dbfs": -76.3,
+  "snr_db": 47.0,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   304,
+   2507
+  ],
+  "problems": [
+   "non-native speaker (Japanese level: beginner)"
+  ]
+ },
+ {
+  "file": "wav/i_hakatanoshio.wav",
+  "looped": "in/i_hakatanoshio.wav",
+  "vowel": "i",
+  "kana": "い",
+  "set": "isolated",
+  "word": "い",
+  "reading": "い",
+  "gloss": "kana reading",
+  "context": "kana い read aloud",
+  "speaker": "Hakatanoshio117117 (Wikimedia user)",
+  "speaker_slug": "hakatanoshio",
+  "sex": "unknown",
+  "sex_source": "not stated",
+  "f0_median_hz": 124.0,
+  "f0_p10_p90_hz": [
+   62.9,
+   127.1
+  ],
+  "f0_file_median_hz": 123.3,
+  "f0_file_p10_hz": 62.9,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "Commons/ja.wikipedia user with babel \"ja\" (native); set \"Audio files of hiragana (set by Hakatanoshio117117)\"",
+  "source": "https://commons.wikimedia.org/wiki/File:Japanese_I.ogg",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/a/ac/Japanese_I.ogg",
+  "raw": "raw/Japanese_I.ogg",
+  "license": "Public domain",
+  "license_url": null,
+  "attribution": "Hakatanoshio117117, Public domain, via Wikimedia Commons",
+  "author": "Hakatanoshio117117",
+  "credit": "自作",
+  "description": "「い」の発音",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 256000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 2.729,
+   "sha1_commons": "04403a419b37b1bc96615e2ab735b5b74b9ff5bb"
+  },
+  "duration_s": 2.729,
+  "voiced_s": 0.25,
+  "segments_s": [
+   [
+    0.02,
+    0.12
+   ],
+   [
+    1.015,
+    1.095
+   ],
+   [
+    2.015,
+    2.085
+   ]
+  ],
+  "loop_s": 5.0,
+  "loop_repeats": 20,
+  "peak_dbfs": -18.7,
+  "voiced_rms_dbfs": -28.7,
+  "noise_floor_dbfs": -104.0,
+  "snr_db": 75.3,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   254,
+   2123
+  ],
+  "problems": [
+   "three short takes joined in the loop (see a_hakatanoshio)",
+   "sex not documented; the voice's F0 (whole file: median 123.3 Hz, 10th percentile 62.9 Hz) suggests male"
+  ]
+ },
+ {
+  "file": "wav/i_marsian.wav",
+  "looped": "in/i_marsian.wav",
+  "vowel": "i",
+  "kana": "い",
+  "set": "isolated",
+  "word": "良い",
+  "reading": "いい",
+  "gloss": "good",
+  "context": "word いい, one long vowel [iː]",
+  "speaker": "marsian (Wikimedia user)",
+  "speaker_slug": "marsian",
+  "sex": "unknown",
+  "sex_source": "not stated",
+  "f0_median_hz": 137.7,
+  "f0_p10_p90_hz": [
+   103.7,
+   144.1
+  ],
+  "f0_file_median_hz": 136.9,
+  "f0_file_p10_hz": 103.7,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "file description: \"recorded by: a native speaker of Japanese\"; \"I, marsian recorded my own voice\"; babel ja",
+  "source": "https://commons.wikimedia.org/wiki/File:Ja-ii-good.ogg",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/3/31/Ja-ii-good.ogg",
+  "raw": "raw/Ja-ii-good.ogg",
+  "license": "Public domain",
+  "license_url": null,
+  "attribution": "marsian, Public domain, via Wikimedia Commons",
+  "author": "marsian",
+  "credit": "I, marsian recorded my own voice by myself.",
+  "description": "A Japanese soundbite: what?: \"good\" in Japanese (\"ii\" and \"yoi\" are both the reading of 良い. \"ii\" is rather casual and more universal. In addition, \"yoroshii\" is more formal or old-fashioned) for what: pronunciation for wikimedia projects recorded by: a native speaker of Japanese mono/stereo: mono fo",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 60000,
+   "sample_rate": 44100,
+   "channels": 1,
+   "bits_per_sample": null,
+   "duration_s": 1.001,
+   "sha1_commons": "521256de120b910b7db3e63afd3064a5660fa3f9"
+  },
+  "duration_s": 1.001,
+  "voiced_s": 0.2,
+  "segments_s": [
+   [
+    0.28,
+    0.48
+   ]
+  ],
+  "loop_s": 5.0,
+  "loop_repeats": 25,
+  "peak_dbfs": -6.8,
+  "voiced_rms_dbfs": -20.4,
+  "noise_floor_dbfs": -79.3,
+  "snr_db": 58.9,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   314,
+   2295
+  ],
+  "problems": [
+   "the uploader ran Audacity noise removal and normalisation on it",
+   "lossy Vorbis at 60 kbps nominal",
+   "sex not documented; the voice's F0 (whole file: median 136.9 Hz, 10th percentile 103.7 Hz) suggests male"
+  ]
+ },
+ {
+  "file": "wav/i_tofugu-f.wav",
+  "looped": "in/i_tofugu-f.wav",
+  "vowel": "i",
+  "kana": "い",
+  "set": "isolated",
+  "word": "胃",
+  "reading": "い",
+  "gloss": "stomach",
+  "context": "one-vowel word 胃 (い)",
+  "speaker": "Tofugu/WaniKani female voice",
+  "speaker_slug": "tofugu-f",
+  "sex": "f",
+  "sex_source": "Tofugu README and the Commons file names/descriptions (\"by a native Japanese woman\")",
+  "f0_median_hz": 259.6,
+  "f0_p10_p90_hz": [
+   216.8,
+   309.3
+  ],
+  "f0_file_median_hz": 259.6,
+  "f0_file_p10_hz": 209.8,
+  "sex_guess_from_f0": "f",
+  "age": "adult",
+  "native": true,
+  "native_note": "native Japanese, Kansai accent, amateur voice actor, amateur recording (Tofugu README)",
+  "source": "https://commons.wikimedia.org/wiki/File:Ja-WaniKaniTofuguFemale-i.oga",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/6/6b/Ja-WaniKaniTofuguFemale-i.oga",
+  "raw": "raw/Ja-WaniKaniTofuguFemale-i.oga",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+  "attribution": "Tofugu and WaniKani (https://www.tofugu.com, https://www.wanikani.com), CC BY-SA 4.0, via Wikimedia Commons (uploader VioletMother)",
+  "author": "Tofugu and WaniKani",
+  "credit": "Japanese vocabulary pronunciation audio",
+  "description": "Pronunciation of the Japanese word 「胃」(い, i, \"stomach\"), by a native Japanese woman with a Kansai accent; amateur recording..",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 320000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 0.344,
+   "sha1_commons": "aadb535e47b2590dad0074c6223fc3b4db4c71b3"
+  },
+  "duration_s": 0.341,
+  "voiced_s": 0.18,
+  "segments_s": [
+   [
+    0.045,
+    0.225
+   ]
+  ],
+  "loop_s": 5.04,
+  "loop_repeats": 28,
+  "peak_dbfs": -13.7,
+  "voiced_rms_dbfs": -23.8,
+  "noise_floor_dbfs": -63.9,
+  "snr_db": 40.1,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   399,
+   2807
+  ],
+  "problems": [
+   "amateur recording (Tofugu README); Kansai accent"
+  ]
+ },
+ {
+  "file": "wav/i_zsrtrgh.wav",
+  "looped": "in/i_zsrtrgh.wav",
+  "vowel": "i",
+  "kana": "い",
+  "set": "isolated",
+  "word": "いい",
+  "reading": "いい",
+  "gloss": "good",
+  "context": "word いい, one long vowel [iː]",
+  "speaker": "Zsrtrgh (Lingua Libre speaker Q1564396)",
+  "speaker_slug": "zsrtrgh",
+  "sex": "unknown",
+  "sex_source": "Lingua Libre profile has no gender",
+  "f0_median_hz": 101.3,
+  "f0_p10_p90_hz": [
+   83.9,
+   121.1
+  ],
+  "f0_file_median_hz": 106.8,
+  "f0_file_p10_hz": 85.4,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "Lingua Libre profile: Japanese, native",
+  "source": "https://commons.wikimedia.org/wiki/File:LL-Q5287_(jpn)-Zsrtrgh-%E3%81%84%E3%81%84.wav",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/0/06/LL-Q5287_%28jpn%29-Zsrtrgh-%E3%81%84%E3%81%84.wav",
+  "raw": "raw/LL-Q5287_(jpn)-Zsrtrgh-いい.wav",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+  "attribution": "Zsrtrgh (Lingua Libre speaker and recorder), CC BY-SA 4.0, via Wikimedia Commons",
+  "author": "Speaker: Zsrtrgh Recorder: Zsrtrgh",
+  "credit": "Own work",
+  "description": "Audio pronunciation file from the Lingua Libre project.",
+  "original": {
+   "container": "wav",
+   "codec": "pcm_s16le",
+   "bit_rate": 768000,
+   "sample_rate": 48000,
+   "channels": 1,
+   "bits_per_sample": 16,
+   "duration_s": 0.64,
+   "sha1_commons": "ec20990a3dc69a461ef325a65f43b8ce28d2fb66"
+  },
+  "duration_s": 0.64,
+  "voiced_s": 0.165,
+  "segments_s": [
+   [
+    0.25,
+    0.415
+   ]
+  ],
+  "loop_s": 5.115,
+  "loop_repeats": 31,
+  "peak_dbfs": -9.2,
+  "voiced_rms_dbfs": -21.1,
+  "noise_floor_dbfs": -72.1,
+  "snr_db": 51.0,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   249,
+   2349
+  ],
+  "problems": [
+   "sex not documented; the voice's F0 (whole file: median 106.8 Hz, 10th percentile 85.4 Hz) suggests male"
+  ]
+ },
+ {
+  "file": "wav/i_tofugu-m-ichi.wav",
+  "looped": "in/i_tofugu-m-ichi.wav",
+  "vowel": "i",
+  "kana": "い",
+  "set": "word",
+  "word": "一",
+  "reading": "いち",
+  "gloss": "one",
+  "context": "both い of いち: word-initial (before /tɕ/) and after /tɕ/",
+  "speaker": "Tofugu/WaniKani male voice",
+  "speaker_slug": "tofugu-m",
+  "sex": "m",
+  "sex_source": "Tofugu README and the Commons file names/descriptions (\"by a male native Japanese voice actor\")",
+  "f0_median_hz": 133.5,
+  "f0_p10_p90_hz": [
+   105.6,
+   136.1
+  ],
+  "f0_file_median_hz": 132.5,
+  "f0_file_p10_hz": 93.0,
+  "sex_guess_from_f0": "m",
+  "age": "adult",
+  "native": true,
+  "native_note": "native Japanese, Tokyo accent, professional voice actor, professional recording (Tofugu README)",
+  "source": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio/blob/master/lib/ogg/%E4%B8%80%E3%80%90%E3%81%84%E3%81%A1%E3%80%91.ogg",
+  "original_url": "https://raw.githubusercontent.com/tofugu/japanese-vocabulary-pronunciation-audio/master/lib/ogg/%E4%B8%80%E3%80%90%E3%81%84%E3%81%A1%E3%80%91.ogg",
+  "raw": "raw/tofugu-github/一【いち】.ogg",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "attribution": "Tofugu and WaniKani (https://www.tofugu.com, https://www.wanikani.com), CC BY-SA 4.0, via github.com/tofugu/japanese-vocabulary-pronunciation-audio",
+  "author": "Tofugu and WaniKani",
+  "credit": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio (repository licence: CC BY-SA 4.0; README: \"Please attribute to Tofugu and WaniKani\")",
+  "description": "WaniKani vocabulary audio (old recordings), GitHub repository tofugu/japanese-vocabulary-pronunciation-audio",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 192000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 0.575,
+   "sha1_commons": null
+  },
+  "duration_s": 0.556,
+  "voiced_s": 0.13,
+  "segments_s": [
+   [
+    0.06,
+    0.12
+   ],
+   [
+    0.285,
+    0.355
+   ]
+  ],
+  "loop_s": 5.07,
+  "loop_repeats": 39,
+  "peak_dbfs": -16.2,
+  "voiced_rms_dbfs": -28.0,
+  "noise_floor_dbfs": -91.4,
+  "snr_db": 63.4,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   319,
+   2345
+  ],
+  "problems": []
+ },
+ {
+  "file": "wav/i_wadakuramon-ishizuchi.wav",
+  "looped": "in/i_wadakuramon-ishizuchi.wav",
+  "vowel": "i",
+  "kana": "い",
+  "set": "word",
+  "word": "石鎚山",
+  "reading": "いしづちさん",
+  "gloss": "Mount Ishizuchi",
+  "context": "word-initial い before /ɕ/ (いしづち)",
+  "speaker": "Wadakuramon (Wikimedia user)",
+  "speaker_slug": "wadakuramon",
+  "sex": "unknown",
+  "sex_source": "not stated (this uploader's files name both a female and a male native speaker)",
+  "f0_median_hz": 138.9,
+  "f0_p10_p90_hz": [
+   133.9,
+   141.6
+  ],
+  "f0_file_median_hz": 182.6,
+  "f0_file_p10_hz": 109.6,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "file description: ネイティブスピーカーによる (by a native speaker)",
+  "source": "https://commons.wikimedia.org/wiki/File:Ishizuchi-san.ogg",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/6/62/Ishizuchi-san.ogg",
+  "raw": "raw/Ishizuchi-san.ogg",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+  "attribution": "Wadakuramon, CC BY-SA 4.0, via Wikimedia Commons",
+  "author": "Wadakuramon",
+  "credit": "Own work",
+  "description": "ネイティブスピーカーによる石鎚山の発音",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 80000,
+   "sample_rate": 48000,
+   "channels": 1,
+   "bits_per_sample": null,
+   "duration_s": 2.219,
+   "sha1_commons": "ad88af3967db962aaf88aa4cb02cbe15a14014c3"
+  },
+  "duration_s": 2.219,
+  "voiced_s": 0.105,
+  "segments_s": [
+   [
+    0.465,
+    0.57
+   ]
+  ],
+  "loop_s": 5.04,
+  "loop_repeats": 48,
+  "peak_dbfs": -4.7,
+  "voiced_rms_dbfs": -24.0,
+  "noise_floor_dbfs": -56.0,
+  "snr_db": 32.0,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   285,
+   2773
+  ],
+  "problems": [
+   "this uploader's other files name a female and a male native speaker, so the speaker of this one is not certain",
+   "lossy Vorbis at 80 kbps nominal",
+   "rough check only: my LPC estimate F1/F2 285/2773 Hz is -0.4/+3.0 SD off the Tokyo male /i/ mean 301/2154 Hz (Yazawa & Kondo 2019): an unusual token or an estimation slip, not a wrong vowel",
+   "sex not documented; the voice's F0 (whole file: median 182.6 Hz, 10th percentile 109.6 Hz) suggests male"
+  ]
+ },
+ {
+  "file": "wav/u_hakatanoshio.wav",
+  "looped": "in/u_hakatanoshio.wav",
+  "vowel": "u",
+  "kana": "う",
+  "set": "isolated",
+  "word": "う",
+  "reading": "う",
+  "gloss": "kana reading",
+  "context": "kana う read aloud",
+  "speaker": "Hakatanoshio117117 (Wikimedia user)",
+  "speaker_slug": "hakatanoshio",
+  "sex": "unknown",
+  "sex_source": "not stated",
+  "f0_median_hz": 124.3,
+  "f0_p10_p90_hz": [
+   63.3,
+   126.6
+  ],
+  "f0_file_median_hz": 123.5,
+  "f0_file_p10_hz": 63.1,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "Commons/ja.wikipedia user with babel \"ja\" (native); set \"Audio files of hiragana (set by Hakatanoshio117117)\"",
+  "source": "https://commons.wikimedia.org/wiki/File:Japanese_U.ogg",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/c/c9/Japanese_U.ogg",
+  "raw": "raw/Japanese_U.ogg",
+  "license": "Public domain",
+  "license_url": null,
+  "attribution": "Hakatanoshio117117, Public domain, via Wikimedia Commons",
+  "author": "Hakatanoshio117117",
+  "credit": "自作",
+  "description": "「う」の発音",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 256000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 2.659,
+   "sha1_commons": "ccd1bb7a9871a934edf01ea7f1dac6999072643c"
+  },
+  "duration_s": 2.659,
+  "voiced_s": 0.25,
+  "segments_s": [
+   [
+    0.02,
+    0.12
+   ],
+   [
+    1.02,
+    1.1
+   ],
+   [
+    2.015,
+    2.085
+   ]
+  ],
+  "loop_s": 5.0,
+  "loop_repeats": 20,
+  "peak_dbfs": -19.3,
+  "voiced_rms_dbfs": -28.9,
+  "noise_floor_dbfs": -100.8,
+  "snr_db": 71.9,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   278,
+   1854
+  ],
+  "problems": [
+   "three short takes joined in the loop (see a_hakatanoshio)",
+   "rough check only: my LPC estimate F1/F2 278/1854 Hz is -1.8/+2.6 SD off the Tokyo male /u/ mean 348/1435 Hz (Yazawa & Kondo 2019): an unusual token or an estimation slip, not a wrong vowel",
+   "sex not documented; the voice's F0 (whole file: median 123.5 Hz, 10th percentile 63.1 Hz) suggests male"
+  ]
+ },
+ {
+  "file": "wav/u_spacecat2.wav",
+  "looped": "in/u_spacecat2.wav",
+  "vowel": "u",
+  "kana": "う",
+  "set": "isolated",
+  "word": "う",
+  "reading": "う",
+  "gloss": "kana reading",
+  "context": "kana う read aloud",
+  "speaker": "Spacecat2 (Wikimedia user)",
+  "speaker_slug": "spacecat2",
+  "sex": "unknown",
+  "sex_source": "not stated",
+  "f0_median_hz": 270.5,
+  "f0_p10_p90_hz": [
+   236.9,
+   287.2
+  ],
+  "f0_file_median_hz": 267.8,
+  "f0_file_p10_hz": 217.7,
+  "sex_guess_from_f0": "f",
+  "age": null,
+  "native": true,
+  "native_note": "file description: \"pronounced by a native speaker of Japanese\"",
+  "source": "https://commons.wikimedia.org/wiki/File:Ja-U.oga",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/4/4c/Ja-U.oga",
+  "raw": "raw/Ja-U.oga",
+  "license": "Public domain",
+  "license_url": null,
+  "attribution": "Spacecat2~commonswiki, Public domain, via Wikimedia Commons",
+  "author": "No machine-readable author provided. Spacecat2~commonswiki assumed (based on copyright claims).",
+  "credit": "No machine-readable source provided. Own work assumed (based on copyright claims).",
+  "description": "pronounced by a native speaker of Japanese",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 96001,
+   "sample_rate": 44100,
+   "channels": 1,
+   "bits_per_sample": null,
+   "duration_s": 0.406,
+   "sha1_commons": "6a67b45982d6f9198e62963b045f0f4e39d9a689"
+  },
+  "duration_s": 0.406,
+  "voiced_s": 0.29,
+  "segments_s": [
+   [
+    0.05,
+    0.34
+   ]
+  ],
+  "loop_s": 5.22,
+  "loop_repeats": 18,
+  "peak_dbfs": -3.9,
+  "voiced_rms_dbfs": -14.8,
+  "noise_floor_dbfs": -54.6,
+  "snr_db": 39.8,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   453,
+   1636
+  ],
+  "problems": [
+   "lossy Vorbis at 96 kbps nominal",
+   "sex not documented; the voice's F0 (whole file: median 267.8 Hz, 10th percentile 217.7 Hz) suggests female"
+  ]
+ },
+ {
+  "file": "wav/u_aoishin-uchuu.wav",
+  "looped": "in/u_aoishin-uchuu.wav",
+  "vowel": "u",
+  "kana": "う",
+  "set": "word",
+  "word": "宇宙",
+  "reading": "うちゅう",
+  "gloss": "space",
+  "context": "the う of うちゅう: word-initial (before /tɕ/) and the long ゅう after /tɕ/",
+  "speaker": "葵心 (Lingua Libre speaker Q1392056)",
+  "speaker_slug": "aoishin",
+  "sex": "m",
+  "sex_source": "Lingua Libre profile (P8 male) and file page speakerGender=male",
+  "f0_median_hz": 161.0,
+  "f0_p10_p90_hz": [
+   106.2,
+   194.9
+  ],
+  "f0_file_median_hz": 136.6,
+  "f0_file_p10_hz": 74.4,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "Lingua Libre profile: Japanese, native",
+  "source": "https://commons.wikimedia.org/wiki/File:LL-Q5287_(jpn)-%E8%91%B5%E5%BF%83-%E5%AE%87%E5%AE%99.wav",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/a/a4/LL-Q5287_%28jpn%29-%E8%91%B5%E5%BF%83-%E5%AE%87%E5%AE%99.wav",
+  "raw": "raw/LL-Q5287_(jpn)-葵心-宇宙.wav",
+  "license": "CC0",
+  "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+  "attribution": "葵心 (Lingua Libre speaker and recorder), CC0, via Wikimedia Commons",
+  "author": "Speaker: 葵心 Recorder: 葵心",
+  "credit": "Own work",
+  "description": "Audio pronunciation file from the Lingua Libre project.",
+  "original": {
+   "container": "wav",
+   "codec": "pcm_s16le",
+   "bit_rate": 768000,
+   "sample_rate": 48000,
+   "channels": 1,
+   "bits_per_sample": 16,
+   "duration_s": 0.952,
+   "sha1_commons": "ac90a0adfffc3cf335ec3e9e13d38be9f56a7743"
+  },
+  "duration_s": 0.952,
+  "voiced_s": 0.16,
+  "segments_s": [
+   [
+    0.25,
+    0.315
+   ],
+   [
+    0.545,
+    0.64
+   ]
+  ],
+  "loop_s": 5.12,
+  "loop_repeats": 32,
+  "peak_dbfs": -6.7,
+  "voiced_rms_dbfs": -17.0,
+  "noise_floor_dbfs": -59.4,
+  "snr_db": 42.4,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   360,
+   1486
+  ],
+  "problems": []
+ },
+ {
+  "file": "wav/u_doughaque-kuuki.wav",
+  "looped": "in/u_doughaque-kuuki.wav",
+  "vowel": "u",
+  "kana": "う",
+  "set": "word",
+  "word": "空気",
+  "reading": "くうき",
+  "gloss": "air",
+  "context": "the long う [ɯː] of くうき, between /k/ and /k/",
+  "speaker": "Doughaque (Wikimedia user)",
+  "speaker_slug": "doughaque",
+  "sex": "unknown",
+  "sex_source": "not stated",
+  "f0_median_hz": 127.2,
+  "f0_p10_p90_hz": [
+   110.1,
+   129.2
+  ],
+  "f0_file_median_hz": 109.9,
+  "f0_file_p10_hz": 70.9,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "file description: \"recorded by Doughaque, a native Japanese speaker\"; babel ja-N",
+  "source": "https://commons.wikimedia.org/wiki/File:Ja-kuuki.ogg",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/8/87/Ja-kuuki.ogg",
+  "raw": "raw/Ja-kuuki.ogg",
+  "license": "Public domain",
+  "license_url": null,
+  "attribution": "Doughaque, Public domain, via Wikimedia Commons",
+  "author": "Doughaque",
+  "credit": "Own work",
+  "description": "Pronunciation of the Japanese word 「空気」(くうき, kūki, “air”), recorded by Doughaque, a native Japanese speaker.",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 80000,
+   "sample_rate": 44100,
+   "channels": 1,
+   "bits_per_sample": null,
+   "duration_s": 0.464,
+   "sha1_commons": "8daa2f1e0bda92a5a51162416ba5a213426bf815"
+  },
+  "duration_s": 0.462,
+  "voiced_s": 0.11,
+  "segments_s": [
+   [
+    0.075,
+    0.185
+   ]
+  ],
+  "loop_s": 5.06,
+  "loop_repeats": 46,
+  "peak_dbfs": -1.3,
+  "voiced_rms_dbfs": -10.0,
+  "noise_floor_dbfs": -45.8,
+  "snr_db": 35.8,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   358,
+   1695
+  ],
+  "problems": [
+   "between two /k/ closures (velar context), not word-initial",
+   "lossy Vorbis at 80 kbps nominal",
+   "sex not documented; the voice's F0 (whole file: median 109.9 Hz, 10th percentile 70.9 Hz) suggests male"
+  ]
+ },
+ {
+  "file": "wav/u_marsian-utsu.wav",
+  "looped": "in/u_marsian-utsu.wav",
+  "vowel": "u",
+  "kana": "う",
+  "set": "word",
+  "word": "打つ",
+  "reading": "うつ",
+  "gloss": "to hit",
+  "context": "both う of うつ: word-initial (before /ts/) and after /ts/",
+  "speaker": "marsian (Wikimedia user)",
+  "speaker_slug": "marsian",
+  "sex": "unknown",
+  "sex_source": "not stated",
+  "f0_median_hz": 139.3,
+  "f0_p10_p90_hz": [
+   99.1,
+   287.3
+  ],
+  "f0_file_median_hz": 138.9,
+  "f0_file_p10_hz": 99.8,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "file description: \"recorded by: a native speaker of Japanese\"; \"I, marsian recorded my own voice\"; babel ja",
+  "source": "https://commons.wikimedia.org/wiki/File:Ja-utsu.ogg",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/e/e8/Ja-utsu.ogg",
+  "raw": "raw/Ja-utsu.ogg",
+  "license": "Public domain",
+  "license_url": null,
+  "attribution": "marsian, Public domain, via Wikimedia Commons",
+  "author": "marsian",
+  "credit": "I, marsian recorded my own voice by myself.",
+  "description": "A Japanese soundbite: what?: \"to shoot\" 撃つ, \"to beat\" 打つ, \"to kill (an enemy)\" 討つ; \"depression\" (disease) 鬱, in Japanese for what: pronunciation for wikimedia projects recorded by: a native speaker of Japanese mono/stereo: mono format: OggVorbis, VBR, -q 1.00 (nominal bitrate: 60 or 80 or so kbps) r",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 60000,
+   "sample_rate": 44100,
+   "channels": 1,
+   "bits_per_sample": null,
+   "duration_s": 1.022,
+   "sha1_commons": "77460b43136e911a360a5ad9660cc22a79d1e646"
+  },
+  "duration_s": 1.022,
+  "voiced_s": 0.125,
+  "segments_s": [
+   [
+    0.305,
+    0.38
+   ],
+   [
+    0.56,
+    0.61
+   ]
+  ],
+  "loop_s": 5.0,
+  "loop_repeats": 40,
+  "peak_dbfs": -4.2,
+  "voiced_rms_dbfs": -16.6,
+  "noise_floor_dbfs": -71.9,
+  "snr_db": 55.3,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   347,
+   1546
+  ],
+  "problems": [
+   "the uploader ran Audacity noise removal and normalisation on it",
+   "lossy Vorbis at 60 kbps nominal",
+   "sex not documented; the voice's F0 (whole file: median 138.9 Hz, 10th percentile 99.8 Hz) suggests male"
+  ]
+ },
+ {
+  "file": "wav/u_tofugu-f-utsu.wav",
+  "looped": "in/u_tofugu-f-utsu.wav",
+  "vowel": "u",
+  "kana": "う",
+  "set": "word",
+  "word": "撃つ",
+  "reading": "うつ",
+  "gloss": "to shoot",
+  "context": "both う of うつ: word-initial (before /ts/) and after /ts/",
+  "speaker": "Tofugu/WaniKani female voice",
+  "speaker_slug": "tofugu-f",
+  "sex": "f",
+  "sex_source": "Tofugu README and the Commons file names/descriptions (\"by a native Japanese woman\")",
+  "f0_median_hz": 235.1,
+  "f0_p10_p90_hz": [
+   226.5,
+   301.2
+  ],
+  "f0_file_median_hz": 241.3,
+  "f0_file_p10_hz": 223.1,
+  "sex_guess_from_f0": "f",
+  "age": "adult",
+  "native": true,
+  "native_note": "native Japanese, Kansai accent, amateur voice actor, amateur recording (Tofugu README)",
+  "source": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio/blob/master/lib/ogg/%E6%92%83%E3%81%A4%E3%80%90%E3%81%86%E3%81%A4%E3%80%91.ogg",
+  "original_url": "https://raw.githubusercontent.com/tofugu/japanese-vocabulary-pronunciation-audio/master/lib/ogg/%E6%92%83%E3%81%A4%E3%80%90%E3%81%86%E3%81%A4%E3%80%91.ogg",
+  "raw": "raw/tofugu-github/撃つ【うつ】.ogg",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "attribution": "Tofugu and WaniKani (https://www.tofugu.com, https://www.wanikani.com), CC BY-SA 4.0, via github.com/tofugu/japanese-vocabulary-pronunciation-audio",
+  "author": "Tofugu and WaniKani",
+  "credit": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio (repository licence: CC BY-SA 4.0; README: \"Please attribute to Tofugu and WaniKani\")",
+  "description": "WaniKani vocabulary audio (old recordings), GitHub repository tofugu/japanese-vocabulary-pronunciation-audio",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 192000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 0.627,
+   "sha1_commons": null
+  },
+  "duration_s": 0.611,
+  "voiced_s": 0.23,
+  "segments_s": [
+   [
+    0.065,
+    0.175
+   ],
+   [
+    0.37,
+    0.49
+   ]
+  ],
+  "loop_s": 5.06,
+  "loop_repeats": 22,
+  "peak_dbfs": -14.4,
+  "voiced_rms_dbfs": -23.6,
+  "noise_floor_dbfs": -59.9,
+  "snr_db": 36.3,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   464,
+   1905
+  ],
+  "problems": []
+ },
+ {
+  "file": "wav/u_tofugu-m-utsu.wav",
+  "looped": "in/u_tofugu-m-utsu.wav",
+  "vowel": "u",
+  "kana": "う",
+  "set": "word",
+  "word": "打つ",
+  "reading": "うつ",
+  "gloss": "to hit",
+  "context": "both う of うつ: word-initial (before /ts/) and after /ts/",
+  "speaker": "Tofugu/WaniKani male voice",
+  "speaker_slug": "tofugu-m",
+  "sex": "m",
+  "sex_source": "Tofugu README and the Commons file names/descriptions (\"by a male native Japanese voice actor\")",
+  "f0_median_hz": 101.6,
+  "f0_p10_p90_hz": [
+   80.6,
+   140.7
+  ],
+  "f0_file_median_hz": 129.9,
+  "f0_file_p10_hz": 80.4,
+  "sex_guess_from_f0": "m",
+  "age": "adult",
+  "native": true,
+  "native_note": "native Japanese, Tokyo accent, professional voice actor, professional recording (Tofugu README)",
+  "source": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio/blob/master/lib/ogg/%E6%89%93%E3%81%A4%E3%80%90%E3%81%86%E3%81%A4%E3%80%91.ogg",
+  "original_url": "https://raw.githubusercontent.com/tofugu/japanese-vocabulary-pronunciation-audio/master/lib/ogg/%E6%89%93%E3%81%A4%E3%80%90%E3%81%86%E3%81%A4%E3%80%91.ogg",
+  "raw": "raw/tofugu-github/打つ【うつ】.ogg",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "attribution": "Tofugu and WaniKani (https://www.tofugu.com, https://www.wanikani.com), CC BY-SA 4.0, via github.com/tofugu/japanese-vocabulary-pronunciation-audio",
+  "author": "Tofugu and WaniKani",
+  "credit": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio (repository licence: CC BY-SA 4.0; README: \"Please attribute to Tofugu and WaniKani\")",
+  "description": "WaniKani vocabulary audio (old recordings), GitHub repository tofugu/japanese-vocabulary-pronunciation-audio",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 192000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 0.732,
+   "sha1_commons": null
+  },
+  "duration_s": 0.718,
+  "voiced_s": 0.145,
+  "segments_s": [
+   [
+    0.115,
+    0.18
+   ],
+   [
+    0.365,
+    0.445
+   ]
+  ],
+  "loop_s": 5.075,
+  "loop_repeats": 35,
+  "peak_dbfs": -17.2,
+  "voiced_rms_dbfs": -29.2,
+  "noise_floor_dbfs": -92.8,
+  "snr_db": 63.6,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   369,
+   1570
+  ],
+  "problems": []
+ },
+ {
+  "file": "wav/e_aoishin.wav",
+  "looped": "in/e_aoishin.wav",
+  "vowel": "e",
+  "kana": "え",
+  "set": "isolated",
+  "word": "絵",
+  "reading": "え",
+  "gloss": "picture",
+  "context": "one-vowel word 絵 (え)",
+  "speaker": "葵心 (Lingua Libre speaker Q1392056)",
+  "speaker_slug": "aoishin",
+  "sex": "m",
+  "sex_source": "Lingua Libre profile (P8 male) and file page speakerGender=male",
+  "f0_median_hz": 162.7,
+  "f0_p10_p90_hz": [
+   159.7,
+   192.6
+  ],
+  "f0_file_median_hz": 164.5,
+  "f0_file_p10_hz": 159.8,
+  "sex_guess_from_f0": "?",
+  "age": null,
+  "native": true,
+  "native_note": "Lingua Libre profile: Japanese, native",
+  "source": "https://commons.wikimedia.org/wiki/File:LL-Q5287_(jpn)-%E8%91%B5%E5%BF%83-%E7%B5%B5.wav",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/4/43/LL-Q5287_%28jpn%29-%E8%91%B5%E5%BF%83-%E7%B5%B5.wav",
+  "raw": "raw/LL-Q5287_(jpn)-葵心-絵.wav",
+  "license": "CC0",
+  "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+  "attribution": "葵心 (Lingua Libre speaker and recorder), CC0, via Wikimedia Commons",
+  "author": "Speaker: 葵心 Recorder: 葵心",
+  "credit": "Own work",
+  "description": "Audio pronunciation file from the Lingua Libre project.",
+  "original": {
+   "container": "wav",
+   "codec": "pcm_s16le",
+   "bit_rate": 768000,
+   "sample_rate": 48000,
+   "channels": 1,
+   "bits_per_sample": 16,
+   "duration_s": 0.653,
+   "sha1_commons": "88f1db79a175a787c1c9166ff51d891549b75ef8"
+  },
+  "duration_s": 0.653,
+  "voiced_s": 0.155,
+  "segments_s": [
+   [
+    0.245,
+    0.4
+   ]
+  ],
+  "loop_s": 5.115,
+  "loop_repeats": 33,
+  "peak_dbfs": -5.0,
+  "voiced_rms_dbfs": -16.7,
+  "noise_floor_dbfs": -81.2,
+  "snr_db": 64.5,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   437,
+   2018
+  ],
+  "problems": []
+ },
+ {
+  "file": "wav/e_hakatanoshio.wav",
+  "looped": "in/e_hakatanoshio.wav",
+  "vowel": "e",
+  "kana": "え",
+  "set": "isolated",
+  "word": "え",
+  "reading": "え",
+  "gloss": "kana reading",
+  "context": "kana え read aloud, 3 short takes",
+  "speaker": "Hakatanoshio117117 (Wikimedia user)",
+  "speaker_slug": "hakatanoshio",
+  "sex": "unknown",
+  "sex_source": "not stated",
+  "f0_median_hz": 122.4,
+  "f0_p10_p90_hz": [
+   62.8,
+   124.3
+  ],
+  "f0_file_median_hz": 122.0,
+  "f0_file_p10_hz": 62.5,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "Commons/ja.wikipedia user with babel \"ja\" (native); set \"Audio files of hiragana (set by Hakatanoshio117117)\"",
+  "source": "https://commons.wikimedia.org/wiki/File:Ja-E.oga",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/8/86/Ja-E.oga",
+  "raw": "raw/Ja-E.oga",
+  "license": "Public domain",
+  "license_url": null,
+  "attribution": "Hakatanoshio117117, Public domain, via Wikimedia Commons",
+  "author": "Hakatanoshio117117",
+  "credit": "自作",
+  "description": "​「え」の発音",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 256000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 2.694,
+   "sha1_commons": "1cc7b64eb3b9f43a9d0888ea51e55b5fd4261951"
+  },
+  "duration_s": 2.694,
+  "voiced_s": 0.25,
+  "segments_s": [
+   [
+    0.09,
+    0.17
+   ],
+   [
+    1.085,
+    1.175
+   ],
+   [
+    2.08,
+    2.16
+   ]
+  ],
+  "loop_s": 5.0,
+  "loop_repeats": 20,
+  "peak_dbfs": -12.3,
+  "voiced_rms_dbfs": -27.7,
+  "noise_floor_dbfs": -102.5,
+  "snr_db": 74.8,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   438,
+   1973
+  ],
+  "problems": [
+   "three short takes joined in the loop (see a_hakatanoshio)",
+   "sex not documented; the voice's F0 (whole file: median 122.0 Hz, 10th percentile 62.5 Hz) suggests male"
+  ]
+ },
+ {
+  "file": "wav/e_tofugu-m.wav",
+  "looped": "in/e_tofugu-m.wav",
+  "vowel": "e",
+  "kana": "え",
+  "set": "isolated",
+  "word": "絵",
+  "reading": "え",
+  "gloss": "picture",
+  "context": "one-vowel word 絵 (え)",
+  "speaker": "Tofugu/WaniKani male voice",
+  "speaker_slug": "tofugu-m",
+  "sex": "m",
+  "sex_source": "Tofugu README and the Commons file names/descriptions (\"by a male native Japanese voice actor\")",
+  "f0_median_hz": 120.6,
+  "f0_p10_p90_hz": [
+   116.9,
+   122.8
+  ],
+  "f0_file_median_hz": 120.9,
+  "f0_file_p10_hz": 116.9,
+  "sex_guess_from_f0": "m",
+  "age": "adult",
+  "native": true,
+  "native_note": "native Japanese, Tokyo accent, professional voice actor, professional recording (Tofugu README)",
+  "source": "https://commons.wikimedia.org/wiki/File:Ja-WaniKaniTofuguMale-e.ogg",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/8/89/Ja-WaniKaniTofuguMale-e.ogg",
+  "raw": "raw/Ja-WaniKaniTofuguMale-e.ogg",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+  "attribution": "Tofugu and WaniKani (https://www.tofugu.com, https://www.wanikani.com), CC BY-SA 4.0, via Wikimedia Commons (uploader VioletMother)",
+  "author": "Tofugu and WaniKani",
+  "credit": "Japanese vocabulary pronunciation audio",
+  "description": "Pronunciation of the Japanese word 「絵」(え, e, \"picture\"), by a male native Japanese voice actor with Tokyo accent; professional recording.",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 192000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 0.575,
+   "sha1_commons": "9ff3d84bcedcb2bbfc825701a6af9a544e188c8b"
+  },
+  "duration_s": 0.565,
+  "voiced_s": 0.17,
+  "segments_s": [
+   [
+    0.15,
+    0.32
+   ]
+  ],
+  "loop_s": 5.1,
+  "loop_repeats": 30,
+  "peak_dbfs": -10.1,
+  "voiced_rms_dbfs": -24.0,
+  "noise_floor_dbfs": -90.0,
+  "snr_db": 66.0,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   464,
+   2107
+  ],
+  "problems": []
+ },
+ {
+  "file": "wav/e_quatrogatos-eiko.wav",
+  "looped": "in/e_quatrogatos-eiko.wav",
+  "vowel": "e",
+  "kana": "え",
+  "set": "word",
+  "word": "英子",
+  "reading": "えいこ",
+  "gloss": "given name Eiko (松田英子, given name first)",
+  "context": "word-initial long え [eː] before /k/ (えいこ)",
+  "speaker": "Quatrogatos (Wikimedia user)",
+  "speaker_slug": "quatrogatos",
+  "sex": "unknown",
+  "sex_source": "not stated",
+  "f0_median_hz": 270.5,
+  "f0_p10_p90_hz": [
+   264.0,
+   280.9
+  ],
+  "f0_file_median_hz": 193.6,
+  "f0_file_p10_hz": 168.0,
+  "sex_guess_from_f0": "f",
+  "age": null,
+  "native": true,
+  "native_note": "file descriptions: \"by a native Japanese speaker\" / ネイティブスピーカーによる",
+  "source": "https://commons.wikimedia.org/wiki/File:Eiko_Matsuda.ogg",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/c/c6/Eiko_Matsuda.ogg",
+  "raw": "raw/Eiko_Matsuda.ogg",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0",
+  "attribution": "Quatrogatos, CC BY 4.0, via Wikimedia Commons",
+  "author": "Quatrogatos",
+  "credit": "Own work",
+  "description": "Pronunciation of the Japanese name Eiko Matsuda by a native Japanese speaker",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 80000,
+   "sample_rate": 48000,
+   "channels": 1,
+   "bits_per_sample": null,
+   "duration_s": 2.283,
+   "sha1_commons": "31453c69c2a8c54a6452da9839d54ae0555cc60c"
+  },
+  "duration_s": 2.283,
+  "voiced_s": 0.15,
+  "segments_s": [
+   [
+    0.19,
+    0.34
+   ]
+  ],
+  "loop_s": 5.1,
+  "loop_repeats": 34,
+  "peak_dbfs": -1.4,
+  "voiced_rms_dbfs": -11.9,
+  "noise_floor_dbfs": -49.5,
+  "snr_db": 37.6,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   560,
+   2512
+  ],
+  "problems": [
+   "cut from a recording of the name 'Eiko Matsuda' (given name first)",
+   "lossy Vorbis at 80 kbps nominal",
+   "sex not documented; the voice's F0 (whole file: median 193.6 Hz, 10th percentile 168.0 Hz) suggests female"
+  ]
+ },
+ {
+  "file": "wav/e_tofugu-f-ekken.wav",
+  "looped": "in/e_tofugu-f-ekken.wav",
+  "vowel": "e",
+  "kana": "え",
+  "set": "word",
+  "word": "越権",
+  "reading": "えっけん",
+  "gloss": "overstepping authority",
+  "context": "word-initial え before /kk/ (えっけん)",
+  "speaker": "Tofugu/WaniKani female voice",
+  "speaker_slug": "tofugu-f",
+  "sex": "f",
+  "sex_source": "Tofugu README and the Commons file names/descriptions (\"by a native Japanese woman\")",
+  "f0_median_hz": 177.9,
+  "f0_p10_p90_hz": [
+   172.0,
+   184.5
+  ],
+  "f0_file_median_hz": 247.2,
+  "f0_file_p10_hz": 172.5,
+  "sex_guess_from_f0": "f",
+  "age": "adult",
+  "native": true,
+  "native_note": "native Japanese, Kansai accent, amateur voice actor, amateur recording (Tofugu README)",
+  "source": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio/blob/master/lib/ogg/%E8%B6%8A%E6%A8%A9%E3%80%90%E3%81%88%E3%81%A3%E3%81%91%E3%82%93%E3%80%91.ogg",
+  "original_url": "https://raw.githubusercontent.com/tofugu/japanese-vocabulary-pronunciation-audio/master/lib/ogg/%E8%B6%8A%E6%A8%A9%E3%80%90%E3%81%88%E3%81%A3%E3%81%91%E3%82%93%E3%80%91.ogg",
+  "raw": "raw/tofugu-github/越権【えっけん】.ogg",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "attribution": "Tofugu and WaniKani (https://www.tofugu.com, https://www.wanikani.com), CC BY-SA 4.0, via github.com/tofugu/japanese-vocabulary-pronunciation-audio",
+  "author": "Tofugu and WaniKani",
+  "credit": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio (repository licence: CC BY-SA 4.0; README: \"Please attribute to Tofugu and WaniKani\")",
+  "description": "WaniKani vocabulary audio (old recordings), GitHub repository tofugu/japanese-vocabulary-pronunciation-audio",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 192000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 0.732,
+   "sha1_commons": null
+  },
+  "duration_s": 0.718,
+  "voiced_s": 0.095,
+  "segments_s": [
+   [
+    0.045,
+    0.14
+   ]
+  ],
+  "loop_s": 5.035,
+  "loop_repeats": 53,
+  "peak_dbfs": -14.6,
+  "voiced_rms_dbfs": -24.7,
+  "noise_floor_dbfs": -72.1,
+  "snr_db": 47.4,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   505,
+   2332
+  ],
+  "problems": [
+   "short: 95 ms of vowel (the loop repeats it 53 times)"
+  ]
+ },
+ {
+  "file": "wav/o_aoishin.wav",
+  "looped": "in/o_aoishin.wav",
+  "vowel": "o",
+  "kana": "お",
+  "set": "isolated",
+  "word": "黄",
+  "reading": "おう",
+  "gloss": "yellow (on reading)",
+  "context": "reading おう of 黄, one long vowel [oː]",
+  "speaker": "葵心 (Lingua Libre speaker Q1392056)",
+  "speaker_slug": "aoishin",
+  "sex": "m",
+  "sex_source": "Lingua Libre profile (P8 male) and file page speakerGender=male",
+  "f0_median_hz": 158.7,
+  "f0_p10_p90_hz": [
+   60.9,
+   407.3
+  ],
+  "f0_file_median_hz": 125.4,
+  "f0_file_p10_hz": 60.9,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "Lingua Libre profile: Japanese, native",
+  "source": "https://commons.wikimedia.org/wiki/File:LL-Q5287_(jpn)-%E8%91%B5%E5%BF%83-%E9%BB%84_(%E3%81%8A%E3%81%86).wav",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/6/6a/LL-Q5287_%28jpn%29-%E8%91%B5%E5%BF%83-%E9%BB%84_%28%E3%81%8A%E3%81%86%29.wav",
+  "raw": "raw/LL-Q5287_(jpn)-葵心-黄_(おう).wav",
+  "license": "CC0",
+  "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+  "attribution": "葵心 (Lingua Libre speaker and recorder), CC0, via Wikimedia Commons",
+  "author": "Speaker: 葵心 Recorder: 葵心",
+  "credit": "Own work",
+  "description": "Audio pronunciation file from the Lingua Libre project.",
+  "original": {
+   "container": "wav",
+   "codec": "pcm_s16le",
+   "bit_rate": 768000,
+   "sample_rate": 48000,
+   "channels": 1,
+   "bits_per_sample": 16,
+   "duration_s": 0.691,
+   "sha1_commons": "ebbf7f30130641a5065dd59e0a774fbccf56a4ce"
+  },
+  "duration_s": 0.691,
+  "voiced_s": 0.175,
+  "segments_s": [
+   [
+    0.25,
+    0.425
+   ]
+  ],
+  "loop_s": 5.075,
+  "loop_repeats": 29,
+  "peak_dbfs": -4.7,
+  "voiced_rms_dbfs": -15.0,
+  "noise_floor_dbfs": -91.2,
+  "snr_db": 76.2,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   429,
+   776
+  ],
+  "problems": []
+ },
+ {
+  "file": "wav/o_hakatanoshio.wav",
+  "looped": "in/o_hakatanoshio.wav",
+  "vowel": "o",
+  "kana": "お",
+  "set": "isolated",
+  "word": "お",
+  "reading": "お",
+  "gloss": "kana reading",
+  "context": "kana お read aloud",
+  "speaker": "Hakatanoshio117117 (Wikimedia user)",
+  "speaker_slug": "hakatanoshio",
+  "sex": "unknown",
+  "sex_source": "not stated",
+  "f0_median_hz": 125.1,
+  "f0_p10_p90_hz": [
+   68.9,
+   127.7
+  ],
+  "f0_file_median_hz": 123.4,
+  "f0_file_p10_hz": 62.5,
+  "sex_guess_from_f0": "m",
+  "age": null,
+  "native": true,
+  "native_note": "Commons/ja.wikipedia user with babel \"ja\" (native); set \"Audio files of hiragana (set by Hakatanoshio117117)\"",
+  "source": "https://commons.wikimedia.org/wiki/File:Japanese_O.ogg",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/3/3b/Japanese_O.ogg",
+  "raw": "raw/Japanese_O.ogg",
+  "license": "Public domain",
+  "license_url": null,
+  "attribution": "Hakatanoshio117117, Public domain, via Wikimedia Commons",
+  "author": "Hakatanoshio117117",
+  "credit": "自作",
+  "description": "「お」の発音",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 256000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 2.519,
+   "sha1_commons": "25610a7bb11b015b2f5e9bfc4519c99ae5b2c584"
+  },
+  "duration_s": 2.519,
+  "voiced_s": 0.29,
+  "segments_s": [
+   [
+    0.03,
+    0.12
+   ],
+   [
+    1.03,
+    1.13
+   ],
+   [
+    2.02,
+    2.12
+   ]
+  ],
+  "loop_s": 5.22,
+  "loop_repeats": 18,
+  "peak_dbfs": -15.7,
+  "voiced_rms_dbfs": -28.0,
+  "noise_floor_dbfs": -98.9,
+  "snr_db": 70.9,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   345,
+   909
+  ],
+  "problems": [
+   "three short takes joined in the loop (see a_hakatanoshio)",
+   "sex not documented; the voice's F0 (whole file: median 123.4 Hz, 10th percentile 62.5 Hz) suggests male"
+  ]
+ },
+ {
+  "file": "wav/o_spacecat2.wav",
+  "looped": "in/o_spacecat2.wav",
+  "vowel": "o",
+  "kana": "お",
+  "set": "isolated",
+  "word": "お",
+  "reading": "お",
+  "gloss": "kana reading",
+  "context": "kana お read aloud",
+  "speaker": "Spacecat2 (Wikimedia user)",
+  "speaker_slug": "spacecat2",
+  "sex": "unknown",
+  "sex_source": "not stated",
+  "f0_median_hz": 233.5,
+  "f0_p10_p90_hz": [
+   213.6,
+   238.8
+  ],
+  "f0_file_median_hz": 233.2,
+  "f0_file_p10_hz": 207.7,
+  "sex_guess_from_f0": "f",
+  "age": null,
+  "native": true,
+  "native_note": "file description: \"pronounced by a native speaker of Japanese\"",
+  "source": "https://commons.wikimedia.org/wiki/File:Ja-O.oga",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/2/21/Ja-O.oga",
+  "raw": "raw/Ja-O.oga",
+  "license": "Public domain",
+  "license_url": null,
+  "attribution": "Spacecat2~commonswiki, Public domain, via Wikimedia Commons",
+  "author": "No machine-readable author provided. Spacecat2~commonswiki assumed (based on copyright claims).",
+  "credit": "No machine-readable source provided. Own work assumed (based on copyright claims).",
+  "description": "Pronounced by a native speaker of Japanese",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 96001,
+   "sample_rate": 44100,
+   "channels": 1,
+   "bits_per_sample": null,
+   "duration_s": 0.354,
+   "sha1_commons": "94131360f33055f1df85341c0d51b240622c69eb"
+  },
+  "duration_s": 0.351,
+  "voiced_s": 0.255,
+  "segments_s": [
+   [
+    0.045,
+    0.3
+   ]
+  ],
+  "loop_s": 5.1,
+  "loop_repeats": 20,
+  "peak_dbfs": -5.0,
+  "voiced_rms_dbfs": -13.5,
+  "noise_floor_dbfs": -49.5,
+  "snr_db": 36.0,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   697,
+   1079
+  ],
+  "problems": [
+   "the file is only 0.35 s and the vowel starts and ends at its edges (little silence to estimate noise from)",
+   "lossy Vorbis at 96 kbps nominal",
+   "sex not documented; the voice's F0 (whole file: median 233.2 Hz, 10th percentile 207.7 Hz) suggests female"
+  ]
+ },
+ {
+  "file": "wav/o_tofugu-f.wav",
+  "looped": "in/o_tofugu-f.wav",
+  "vowel": "o",
+  "kana": "お",
+  "set": "isolated",
+  "word": "尾",
+  "reading": "お",
+  "gloss": "tail",
+  "context": "one-vowel word 尾 (お)",
+  "speaker": "Tofugu/WaniKani female voice",
+  "speaker_slug": "tofugu-f",
+  "sex": "f",
+  "sex_source": "Tofugu README and the Commons file names/descriptions (\"by a native Japanese woman\")",
+  "f0_median_hz": 239.7,
+  "f0_p10_p90_hz": [
+   206.6,
+   377.6
+  ],
+  "f0_file_median_hz": 242.0,
+  "f0_file_p10_hz": 197.1,
+  "sex_guess_from_f0": "f",
+  "age": "adult",
+  "native": true,
+  "native_note": "native Japanese, Kansai accent, amateur voice actor, amateur recording (Tofugu README)",
+  "source": "https://commons.wikimedia.org/wiki/File:Ja-WaniKaniTofuguFemale-o.ogg",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/a/a4/Ja-WaniKaniTofuguFemale-o.ogg",
+  "raw": "raw/Ja-WaniKaniTofuguFemale-o.ogg",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+  "attribution": "Tofugu and WaniKani (https://www.tofugu.com, https://www.wanikani.com), CC BY-SA 4.0, via Wikimedia Commons (uploader VioletMother)",
+  "author": "Tofugu and WaniKani",
+  "credit": "Japanese vocabulary pronunciation audio",
+  "description": "Pronunciation of the Japanese word 「尾」(お, o, \"tail\"), by a native Japanese woman with a Kansai accent; amateur recording.",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 320000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 0.447,
+   "sha1_commons": "25a907c70d688ec38ffe8fdb411b3dbad81ebb30"
+  },
+  "duration_s": 0.444,
+  "voiced_s": 0.235,
+  "segments_s": [
+   [
+    0.05,
+    0.285
+   ]
+  ],
+  "loop_s": 5.17,
+  "loop_repeats": 22,
+  "peak_dbfs": -12.6,
+  "voiced_rms_dbfs": -22.5,
+  "noise_floor_dbfs": -86.5,
+  "snr_db": 64.0,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   551,
+   911
+  ],
+  "problems": [
+   "amateur recording (Tofugu README); Kansai accent"
+  ]
+ },
+ {
+  "file": "wav/o_tofugu-m.wav",
+  "looped": "in/o_tofugu-m.wav",
+  "vowel": "o",
+  "kana": "お",
+  "set": "isolated",
+  "word": "王",
+  "reading": "おう",
+  "gloss": "king",
+  "context": "word 王 (おう), said as one long vowel [oː]",
+  "speaker": "Tofugu/WaniKani male voice",
+  "speaker_slug": "tofugu-m",
+  "sex": "m",
+  "sex_source": "Tofugu README and the Commons file names/descriptions (\"by a male native Japanese voice actor\")",
+  "f0_median_hz": 135.5,
+  "f0_p10_p90_hz": [
+   82.5,
+   445.1
+  ],
+  "f0_file_median_hz": 132.1,
+  "f0_file_p10_hz": 81.2,
+  "sex_guess_from_f0": "m",
+  "age": "adult",
+  "native": true,
+  "native_note": "native Japanese, Tokyo accent, professional voice actor, professional recording (Tofugu README)",
+  "source": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio/blob/master/lib/ogg/%E7%8E%8B%E3%80%90%E3%81%8A%E3%81%86%E3%80%91.ogg",
+  "original_url": "https://raw.githubusercontent.com/tofugu/japanese-vocabulary-pronunciation-audio/master/lib/ogg/%E7%8E%8B%E3%80%90%E3%81%8A%E3%81%86%E3%80%91.ogg",
+  "raw": "raw/tofugu-github/王【おう】.ogg",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "attribution": "Tofugu and WaniKani (https://www.tofugu.com, https://www.wanikani.com), CC BY-SA 4.0, via github.com/tofugu/japanese-vocabulary-pronunciation-audio",
+  "author": "Tofugu and WaniKani",
+  "credit": "https://github.com/tofugu/japanese-vocabulary-pronunciation-audio (repository licence: CC BY-SA 4.0; README: \"Please attribute to Tofugu and WaniKani\")",
+  "description": "WaniKani vocabulary audio (old recordings), GitHub repository tofugu/japanese-vocabulary-pronunciation-audio",
+  "original": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "bit_rate": 192000,
+   "sample_rate": 44100,
+   "channels": 2,
+   "bits_per_sample": null,
+   "duration_s": 0.601,
+   "sha1_commons": null
+  },
+  "duration_s": 0.579,
+  "voiced_s": 0.255,
+  "segments_s": [
+   [
+    0.075,
+    0.33
+   ]
+  ],
+  "loop_s": 5.1,
+  "loop_repeats": 20,
+  "peak_dbfs": -10.5,
+  "voiced_rms_dbfs": -22.5,
+  "noise_floor_dbfs": -91.3,
+  "snr_db": 68.8,
+  "clipped_samples": 0,
+  "rough_f1_f2_hz": [
+   479,
+   799
+  ],
+  "problems": []
+ }
+]

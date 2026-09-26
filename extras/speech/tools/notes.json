@@ -1,0 +1,16 @@
+{
+ "a_hakatanoshio": {"problems": ["three short takes (about 80 ms of steady vowel each after trimming) with about 0.6 s of digital silence between them in the original; the loop joins the three takes"]},
+ "i_hakatanoshio": {"problems": ["three short takes joined in the loop (see a_hakatanoshio)"]},
+ "u_hakatanoshio": {"problems": ["three short takes joined in the loop (see a_hakatanoshio)"]},
+ "e_hakatanoshio": {"problems": ["three short takes joined in the loop (see a_hakatanoshio)"]},
+ "o_hakatanoshio": {"problems": ["three short takes joined in the loop (see a_hakatanoshio)"]},
+ "o_spacecat2": {"problems": ["the file is only 0.35 s and the vowel starts and ends at its edges (little silence to estimate noise from)"]},
+ "i_tofugu-f": {"problems": ["amateur recording (Tofugu README); Kansai accent"]},
+ "o_tofugu-f": {"problems": ["amateur recording (Tofugu README); Kansai accent"]},
+ "i_marsian": {"problems": ["the uploader ran Audacity noise removal and normalisation on it"]},
+ "a_marsian-aka": {"problems": ["the uploader ran Audacity noise removal and normalisation on it"]},
+ "u_marsian-utsu": {"problems": ["the uploader ran Audacity noise removal and normalisation on it"]},
+ "u_doughaque-kuuki": {"problems": ["between two /k/ closures (velar context), not word-initial"]},
+ "e_quatrogatos-eiko": {"problems": ["cut from a recording of the name 'Eiko Matsuda' (given name first)"]},
+ "i_wadakuramon-ishizuchi": {"problems": ["this uploader's other files name a female and a male native speaker, so the speaker of this one is not certain"]}
+}

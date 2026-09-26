@@ -1,0 +1,136 @@
+Subject: [PATCH] dwindle, master: don't lay out an expired target (crash on exit)
+
+For Hyprland v0.55.2 (39d7e20). Applies on top of astroland's
+hyprland_clamp_to_border.patch too (that one only touches src/render).
+
+Hyprland 0.55.2 segfaults when it quits (hl.dsp.exit(), or SIGTERM: a
+logout, `systemctl stop`) with two or more tiled windows open in the dwindle
+or the master layout:
+
+  #0 Layout::ITarget::setPositionGlobal(CBox const&)
+  #1 Layout::Tiled::C{Dwindle,Master}Algorithm::calculateWorkspace()
+  #2 Layout::Tiled::C{Dwindle,Master}Algorithm::removeTarget(SP<ITarget>)
+     ... CSpace::remove <- ITarget::assignToSpace <- CLayoutManager::removeTarget
+  #7 Desktop::View::CWindow::unmapWindow()
+     ... CXDGSurfaceResource destroyed <- wl_client_destroy
+ #19 wl_display_destroy_clients
+ #20 CCompositor::cleanup()
+
+At that point a window has only two strong owners: CCompositor::m_windows,
+and the renderer's render pass from the last frame (every CSurfacePassElement
+holds a PHLWINDOW; the pass is only cleared by the next beginRender()).
+CCompositor::cleanup() clears m_windows before wl_display_destroy_clients().
+When the first client is destroyed, its window unmaps, and unmapWindow()
+makes a snapshot of it. The snapshot's beginRender() clears the render pass,
+which drops the last reference to every other window. Those windows are
+destroyed right there, without unmapWindow(). ~CWindow() doesn't take a
+window's target out of its layout, so its node stays, with an expired
+pTarget (a WP<ITarget>). unmapWindow() then calls removeTarget(), and
+calculateWorkspace() calls setPositionGlobal() through the expired pointer,
+with a null `this`. (Windows the last frame didn't draw are already freed
+by m_windows.clear() and leave dead nodes the same way.)
+
+dwindle: the source hunk of upstream 338bdbb3 ("dwindle: avoid crashing on
+expired weakptr", #15415, Tom Englund, first released in v0.56.0), without
+its hyprtester change.
+
+master: the same guard in CMasterAlgorithm::calculateWorkspace(), which
+upstream main (e368c13c) still lacks. It covers every setPositionGlobal() on
+a node's pTarget (the single master, two master-column loops, three stack
+loops), and the warpPositionSize() loop of the function's scope guard. That
+last one is reached only from resizeTarget(), not from cleanup, but it's the
+same pattern, so it's guarded too. As with 338bdbb3, an expired node still
+takes its slot in the arithmetic. That only happens during teardown, or
+transiently, as 338bdbb3's commit message describes.
+
+Scrolling and monocle don't crash (tested). The plugin API hash is the git
+commit's, and this doesn't change it, so plugins built for 0.55.2 keep
+loading.
+
+diff --git a/src/layout/algorithm/tiled/dwindle/DwindleAlgorithm.cpp b/src/layout/algorithm/tiled/dwindle/DwindleAlgorithm.cpp
+index ff1b1b4..6df35b9 100644
+--- a/src/layout/algorithm/tiled/dwindle/DwindleAlgorithm.cpp
++++ b/src/layout/algorithm/tiled/dwindle/DwindleAlgorithm.cpp
+@@ -49,7 +49,7 @@ void SDwindleNodeData::recalcSizePosRecursive(bool force, bool horizontalOverrid
+ 
+         children[0]->recalcSizePosRecursive(force);
+         children[1]->recalcSizePosRecursive(force);
+-    } else
++    } else if (!pTarget.expired())
+         pTarget->setPositionGlobal(box);
+ }
+ 
+diff --git a/src/layout/algorithm/tiled/master/MasterAlgorithm.cpp b/src/layout/algorithm/tiled/master/MasterAlgorithm.cpp
+index b4d4eea..227b1c5 100644
+--- a/src/layout/algorithm/tiled/master/MasterAlgorithm.cpp
++++ b/src/layout/algorithm/tiled/master/MasterAlgorithm.cpp
+@@ -948,7 +948,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+             return;
+ 
+         for (const auto& n : m_masterNodesData) {
+-            n->pTarget->warpPositionSize();
++            if (!n->pTarget.expired())
++                n->pTarget->warpPositionSize();
+         }
+     });
+ 
+@@ -1021,7 +1022,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+             PMASTERNODE->position = WORKAREA.pos();
+         }
+ 
+-        PMASTERNODE->pTarget->setPositionGlobal({PMASTERNODE->position, PMASTERNODE->size});
++        if (!PMASTERNODE->pTarget.expired())
++            PMASTERNODE->pTarget->setPositionGlobal({PMASTERNODE->position, PMASTERNODE->size});
+         return;
+     } else if (orientation == ORIENTATION_TOP || orientation == ORIENTATION_BOTTOM) {
+         const float HEIGHT      = STACKWINDOWS != 0 ? WORKAREA.h * PMASTERNODE->percMaster : WORKAREA.h;
+@@ -1048,7 +1050,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+ 
+             nd->size     = Vector2D(WIDTH, HEIGHT);
+             nd->position = WORKAREA.pos() + Vector2D(nextX, nextY);
+-            nd->pTarget->setPositionGlobal({nd->position, nd->size});
++            if (!nd->pTarget.expired())
++                nd->pTarget->setPositionGlobal({nd->position, nd->size});
+ 
+             mastersLeft--;
+             widthLeft -= WIDTH;
+@@ -1085,7 +1088,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+ 
+             nd->size     = Vector2D(WIDTH, HEIGHT);
+             nd->position = (*PIGNORERESERVED && centerMasterWindow ? WORKAREA.pos() - Vector2D(reservedLeft, 0.0) : WORKAREA.pos()) + Vector2D(nextX, nextY);
+-            nd->pTarget->setPositionGlobal({nd->position, nd->size});
++            if (!nd->pTarget.expired())
++                nd->pTarget->setPositionGlobal({nd->position, nd->size});
+ 
+             mastersLeft--;
+             heightLeft -= HEIGHT;
+@@ -1122,7 +1126,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+ 
+             nd->size     = Vector2D(WIDTH, HEIGHT);
+             nd->position = WORKAREA.pos() + Vector2D(nextX, nextY);
+-            nd->pTarget->setPositionGlobal({nd->position, nd->size});
++            if (!nd->pTarget.expired())
++                nd->pTarget->setPositionGlobal({nd->position, nd->size});
+ 
+             slavesLeft--;
+             widthLeft -= WIDTH;
+@@ -1152,7 +1157,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+ 
+             nd->size     = Vector2D(WIDTH, HEIGHT);
+             nd->position = WORKAREA.pos() + Vector2D(nextX, nextY);
+-            nd->pTarget->setPositionGlobal({nd->position, nd->size});
++            if (!nd->pTarget.expired())
++                nd->pTarget->setPositionGlobal({nd->position, nd->size});
+ 
+             slavesLeft--;
+             heightLeft -= HEIGHT;
+@@ -1229,7 +1235,8 @@ void CMasterAlgorithm::calculateWorkspace() {
+ 
+             nd->size     = Vector2D(*PIGNORERESERVED ? (WIDTH - (onRight ? reservedRight : reservedLeft)) : WIDTH, HEIGHT);
+             nd->position = WORKAREA.pos() + Vector2D(nextX, nextY);
+-            nd->pTarget->setPositionGlobal({nd->position, nd->size});
++            if (!nd->pTarget.expired())
++                nd->pTarget->setPositionGlobal({nd->position, nd->size});
+ 
+             if (onRight) {
+                 heightLeftR -= HEIGHT;

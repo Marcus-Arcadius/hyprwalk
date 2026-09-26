@@ -1,0 +1,1577 @@
+{
+ "a_hakatanoshio": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 256000,
+   "avg_bit_rate": 73721,
+   "duration_s": 2.485
+  },
+  "clip": {
+   "max_abs": 0.33338361978530884,
+   "n_full_scale": 0,
+   "channel_corr": 0.9997720662531416
+  },
+  "wav": "wav/a_hakatanoshio.wav",
+  "looped": "in/a_hakatanoshio.wav",
+  "duration_s": 2.485,
+  "voiced_s": 0.24,
+  "segments_s": [
+   [
+    0.14,
+    0.22
+   ],
+   [
+    1.135,
+    1.215
+   ],
+   [
+    2.13,
+    2.21
+   ]
+  ],
+  "loop_s": 5.04,
+  "loop_repeats": 21,
+  "cycle_s": 0.24,
+  "f0_median_hz": 123.1,
+  "f0_p10_p90_hz": [
+   119.4,
+   125.2
+  ],
+  "rough_f1_f2_hz": [
+   867,
+   1330
+  ],
+  "peak_dbfs": -9.8,
+  "voiced_rms_dbfs": -25.4,
+  "noise_floor_dbfs": -101.0,
+  "f0_file_median_hz": 122.3,
+  "f0_file_p10_hz": 118.0,
+  "snr_db": 75.6,
+  "nuclei_s": null,
+  "take": null
+ },
+ "i_hakatanoshio": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 256000,
+   "avg_bit_rate": 52045,
+   "duration_s": 2.729
+  },
+  "clip": {
+   "max_abs": 0.11884832382202148,
+   "n_full_scale": 0,
+   "channel_corr": 0.9996849981695434
+  },
+  "wav": "wav/i_hakatanoshio.wav",
+  "looped": "in/i_hakatanoshio.wav",
+  "duration_s": 2.729,
+  "voiced_s": 0.25,
+  "segments_s": [
+   [
+    0.02,
+    0.12
+   ],
+   [
+    1.015,
+    1.095
+   ],
+   [
+    2.015,
+    2.085
+   ]
+  ],
+  "loop_s": 5.0,
+  "loop_repeats": 20,
+  "cycle_s": 0.25,
+  "f0_median_hz": 124.0,
+  "f0_p10_p90_hz": [
+   62.9,
+   127.1
+  ],
+  "rough_f1_f2_hz": [
+   254,
+   2123
+  ],
+  "peak_dbfs": -18.7,
+  "voiced_rms_dbfs": -28.7,
+  "noise_floor_dbfs": -104.0,
+  "f0_file_median_hz": 123.3,
+  "f0_file_p10_hz": 62.9,
+  "snr_db": 75.3,
+  "nuclei_s": null,
+  "take": null
+ },
+ "u_hakatanoshio": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 256000,
+   "avg_bit_rate": 39695,
+   "duration_s": 2.659
+  },
+  "clip": {
+   "max_abs": 0.11086402833461761,
+   "n_full_scale": 0,
+   "channel_corr": 0.9995805749150708
+  },
+  "wav": "wav/u_hakatanoshio.wav",
+  "looped": "in/u_hakatanoshio.wav",
+  "duration_s": 2.659,
+  "voiced_s": 0.25,
+  "segments_s": [
+   [
+    0.02,
+    0.12
+   ],
+   [
+    1.02,
+    1.1
+   ],
+   [
+    2.015,
+    2.085
+   ]
+  ],
+  "loop_s": 5.0,
+  "loop_repeats": 20,
+  "cycle_s": 0.25,
+  "f0_median_hz": 124.3,
+  "f0_p10_p90_hz": [
+   63.3,
+   126.6
+  ],
+  "rough_f1_f2_hz": [
+   278,
+   1854
+  ],
+  "peak_dbfs": -19.3,
+  "voiced_rms_dbfs": -28.9,
+  "noise_floor_dbfs": -100.8,
+  "f0_file_median_hz": 123.5,
+  "f0_file_p10_hz": 63.1,
+  "snr_db": 71.9,
+  "nuclei_s": null,
+  "take": null
+ },
+ "e_hakatanoshio": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 256000,
+   "avg_bit_rate": 62955,
+   "duration_s": 2.694
+  },
+  "clip": {
+   "max_abs": 0.2475166618824005,
+   "n_full_scale": 0,
+   "channel_corr": 0.9997350175228262
+  },
+  "wav": "wav/e_hakatanoshio.wav",
+  "looped": "in/e_hakatanoshio.wav",
+  "duration_s": 2.694,
+  "voiced_s": 0.25,
+  "segments_s": [
+   [
+    0.09,
+    0.17
+   ],
+   [
+    1.085,
+    1.175
+   ],
+   [
+    2.08,
+    2.16
+   ]
+  ],
+  "loop_s": 5.0,
+  "loop_repeats": 20,
+  "cycle_s": 0.25,
+  "f0_median_hz": 122.4,
+  "f0_p10_p90_hz": [
+   62.8,
+   124.3
+  ],
+  "rough_f1_f2_hz": [
+   438,
+   1973
+  ],
+  "peak_dbfs": -12.3,
+  "voiced_rms_dbfs": -27.7,
+  "noise_floor_dbfs": -102.5,
+  "f0_file_median_hz": 122.0,
+  "f0_file_p10_hz": 62.5,
+  "snr_db": 74.8,
+  "nuclei_s": null,
+  "take": null
+ },
+ "o_hakatanoshio": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 256000,
+   "avg_bit_rate": 61917,
+   "duration_s": 2.519
+  },
+  "clip": {
+   "max_abs": 0.16680216789245605,
+   "n_full_scale": 0,
+   "channel_corr": 0.999593636406881
+  },
+  "wav": "wav/o_hakatanoshio.wav",
+  "looped": "in/o_hakatanoshio.wav",
+  "duration_s": 2.519,
+  "voiced_s": 0.29,
+  "segments_s": [
+   [
+    0.03,
+    0.12
+   ],
+   [
+    1.03,
+    1.13
+   ],
+   [
+    2.02,
+    2.12
+   ]
+  ],
+  "loop_s": 5.22,
+  "loop_repeats": 18,
+  "cycle_s": 0.29,
+  "f0_median_hz": 125.1,
+  "f0_p10_p90_hz": [
+   68.9,
+   127.7
+  ],
+  "rough_f1_f2_hz": [
+   345,
+   909
+  ],
+  "peak_dbfs": -15.7,
+  "voiced_rms_dbfs": -28.0,
+  "noise_floor_dbfs": -98.9,
+  "f0_file_median_hz": 123.4,
+  "f0_file_p10_hz": 62.5,
+  "snr_db": 70.9,
+  "nuclei_s": null,
+  "take": null
+ },
+ "u_spacecat2": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 1,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 96001,
+   "avg_bit_rate": 171891,
+   "duration_s": 0.406
+  },
+  "clip": {
+   "max_abs": 0.6343836784362793,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/u_spacecat2.wav",
+  "looped": "in/u_spacecat2.wav",
+  "duration_s": 0.406,
+  "voiced_s": 0.29,
+  "segments_s": [
+   [
+    0.05,
+    0.34
+   ]
+  ],
+  "loop_s": 5.22,
+  "loop_repeats": 18,
+  "cycle_s": 0.29,
+  "f0_median_hz": 270.5,
+  "f0_p10_p90_hz": [
+   236.9,
+   287.2
+  ],
+  "rough_f1_f2_hz": [
+   453,
+   1636
+  ],
+  "peak_dbfs": -3.9,
+  "voiced_rms_dbfs": -14.8,
+  "noise_floor_dbfs": -54.6,
+  "f0_file_median_hz": 267.8,
+  "f0_file_p10_hz": 217.7,
+  "snr_db": 39.8,
+  "nuclei_s": null,
+  "take": null
+ },
+ "o_spacecat2": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 1,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 96001,
+   "avg_bit_rate": 177394,
+   "duration_s": 0.354
+  },
+  "clip": {
+   "max_abs": 0.5640841722488403,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/o_spacecat2.wav",
+  "looped": "in/o_spacecat2.wav",
+  "duration_s": 0.351,
+  "voiced_s": 0.255,
+  "segments_s": [
+   [
+    0.045,
+    0.3
+   ]
+  ],
+  "loop_s": 5.1,
+  "loop_repeats": 20,
+  "cycle_s": 0.255,
+  "f0_median_hz": 233.5,
+  "f0_p10_p90_hz": [
+   213.6,
+   238.8
+  ],
+  "rough_f1_f2_hz": [
+   697,
+   1079
+  ],
+  "peak_dbfs": -5.0,
+  "voiced_rms_dbfs": -13.5,
+  "noise_floor_dbfs": -49.5,
+  "f0_file_median_hz": 233.2,
+  "f0_file_p10_hz": 207.7,
+  "snr_db": 36.0,
+  "nuclei_s": null,
+  "take": null
+ },
+ "i_tofugu-f": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 320000,
+   "avg_bit_rate": 331749,
+   "duration_s": 0.344
+  },
+  "clip": {
+   "max_abs": 0.20724591612815857,
+   "n_full_scale": 0,
+   "channel_corr": 1.0
+  },
+  "wav": "wav/i_tofugu-f.wav",
+  "looped": "in/i_tofugu-f.wav",
+  "duration_s": 0.341,
+  "voiced_s": 0.18,
+  "segments_s": [
+   [
+    0.045,
+    0.225
+   ]
+  ],
+  "loop_s": 5.04,
+  "loop_repeats": 28,
+  "cycle_s": 0.18,
+  "f0_median_hz": 259.6,
+  "f0_p10_p90_hz": [
+   216.8,
+   309.3
+  ],
+  "rough_f1_f2_hz": [
+   399,
+   2807
+  ],
+  "peak_dbfs": -13.7,
+  "voiced_rms_dbfs": -23.8,
+  "noise_floor_dbfs": -63.9,
+  "f0_file_median_hz": 259.6,
+  "f0_file_p10_hz": 209.8,
+  "snr_db": 40.1,
+  "nuclei_s": null,
+  "take": null
+ },
+ "o_tofugu-f": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 320000,
+   "avg_bit_rate": 313264,
+   "duration_s": 0.447
+  },
+  "clip": {
+   "max_abs": 0.23250028491020203,
+   "n_full_scale": 0,
+   "channel_corr": 0.9999999999999999
+  },
+  "wav": "wav/o_tofugu-f.wav",
+  "looped": "in/o_tofugu-f.wav",
+  "duration_s": 0.444,
+  "voiced_s": 0.235,
+  "segments_s": [
+   [
+    0.05,
+    0.285
+   ]
+  ],
+  "loop_s": 5.17,
+  "loop_repeats": 22,
+  "cycle_s": 0.235,
+  "f0_median_hz": 239.7,
+  "f0_p10_p90_hz": [
+   206.6,
+   377.6
+  ],
+  "rough_f1_f2_hz": [
+   551,
+   911
+  ],
+  "peak_dbfs": -12.6,
+  "voiced_rms_dbfs": -22.5,
+  "noise_floor_dbfs": -86.5,
+  "f0_file_median_hz": 242.0,
+  "f0_file_p10_hz": 197.1,
+  "snr_db": 64.0,
+  "nuclei_s": null,
+  "take": null
+ },
+ "e_tofugu-m": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 192000,
+   "avg_bit_rate": 217973,
+   "duration_s": 0.575
+  },
+  "clip": {
+   "max_abs": 0.31444501876831055,
+   "n_full_scale": 0,
+   "channel_corr": 1.0
+  },
+  "wav": "wav/e_tofugu-m.wav",
+  "looped": "in/e_tofugu-m.wav",
+  "duration_s": 0.565,
+  "voiced_s": 0.17,
+  "segments_s": [
+   [
+    0.15,
+    0.32
+   ]
+  ],
+  "loop_s": 5.1,
+  "loop_repeats": 30,
+  "cycle_s": 0.17,
+  "f0_median_hz": 120.6,
+  "f0_p10_p90_hz": [
+   116.9,
+   122.8
+  ],
+  "rough_f1_f2_hz": [
+   464,
+   2107
+  ],
+  "peak_dbfs": -10.1,
+  "voiced_rms_dbfs": -24.0,
+  "noise_floor_dbfs": -90.0,
+  "f0_file_median_hz": 120.9,
+  "f0_file_p10_hz": 116.9,
+  "snr_db": 66.0,
+  "nuclei_s": null,
+  "take": null
+ },
+ "o_tofugu-m": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 192000,
+   "avg_bit_rate": 164031,
+   "duration_s": 0.601
+  },
+  "clip": {
+   "max_abs": 0.29780423641204834,
+   "n_full_scale": 0,
+   "channel_corr": 0.9999999999999999
+  },
+  "wav": "wav/o_tofugu-m.wav",
+  "looped": "in/o_tofugu-m.wav",
+  "duration_s": 0.579,
+  "voiced_s": 0.255,
+  "segments_s": [
+   [
+    0.075,
+    0.33
+   ]
+  ],
+  "loop_s": 5.1,
+  "loop_repeats": 20,
+  "cycle_s": 0.255,
+  "f0_median_hz": 135.5,
+  "f0_p10_p90_hz": [
+   82.5,
+   445.1
+  ],
+  "rough_f1_f2_hz": [
+   479,
+   799
+  ],
+  "peak_dbfs": -10.5,
+  "voiced_rms_dbfs": -22.5,
+  "noise_floor_dbfs": -91.3,
+  "f0_file_median_hz": 132.1,
+  "f0_file_p10_hz": 81.2,
+  "snr_db": 68.8,
+  "nuclei_s": null,
+  "take": null
+ },
+ "i_marsian": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 1,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 60000,
+   "avg_bit_rate": 65867,
+   "duration_s": 1.001
+  },
+  "clip": {
+   "max_abs": 0.44977736473083496,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/i_marsian.wav",
+  "looped": "in/i_marsian.wav",
+  "duration_s": 1.001,
+  "voiced_s": 0.2,
+  "segments_s": [
+   [
+    0.28,
+    0.48
+   ]
+  ],
+  "loop_s": 5.0,
+  "loop_repeats": 25,
+  "cycle_s": 0.2,
+  "f0_median_hz": 137.7,
+  "f0_p10_p90_hz": [
+   103.7,
+   144.1
+  ],
+  "rough_f1_f2_hz": [
+   314,
+   2295
+  ],
+  "peak_dbfs": -6.8,
+  "voiced_rms_dbfs": -20.4,
+  "noise_floor_dbfs": -79.3,
+  "f0_file_median_hz": 136.9,
+  "f0_file_p10_hz": 103.7,
+  "snr_db": 58.9,
+  "nuclei_s": null,
+  "take": null
+ },
+ "i_zsrtrgh": {
+  "probe": {
+   "container": "wav",
+   "codec": "pcm_s16le",
+   "sample_rate": 48000,
+   "channels": 1,
+   "sample_fmt": "s16",
+   "bits_per_sample": 16,
+   "stream_bit_rate": 768000,
+   "avg_bit_rate": 768550,
+   "duration_s": 0.64
+  },
+  "clip": {
+   "max_abs": 0.348541259765625,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/i_zsrtrgh.wav",
+  "looped": "in/i_zsrtrgh.wav",
+  "duration_s": 0.64,
+  "voiced_s": 0.165,
+  "segments_s": [
+   [
+    0.25,
+    0.415
+   ]
+  ],
+  "loop_s": 5.115,
+  "loop_repeats": 31,
+  "cycle_s": 0.165,
+  "f0_median_hz": 101.3,
+  "f0_p10_p90_hz": [
+   83.9,
+   121.1
+  ],
+  "rough_f1_f2_hz": [
+   249,
+   2349
+  ],
+  "peak_dbfs": -9.2,
+  "voiced_rms_dbfs": -21.1,
+  "noise_floor_dbfs": -72.1,
+  "f0_file_median_hz": 106.8,
+  "f0_file_p10_hz": 85.4,
+  "snr_db": 51.0,
+  "nuclei_s": null,
+  "take": null
+ },
+ "e_aoishin": {
+  "probe": {
+   "container": "wav",
+   "codec": "pcm_s16le",
+   "sample_rate": 48000,
+   "channels": 1,
+   "sample_fmt": "s16",
+   "bits_per_sample": 16,
+   "stream_bit_rate": 768000,
+   "avg_bit_rate": 768538,
+   "duration_s": 0.653
+  },
+  "clip": {
+   "max_abs": 0.55914306640625,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/e_aoishin.wav",
+  "looped": "in/e_aoishin.wav",
+  "duration_s": 0.653,
+  "voiced_s": 0.155,
+  "segments_s": [
+   [
+    0.245,
+    0.4
+   ]
+  ],
+  "loop_s": 5.115,
+  "loop_repeats": 33,
+  "cycle_s": 0.155,
+  "f0_median_hz": 162.7,
+  "f0_p10_p90_hz": [
+   159.7,
+   192.6
+  ],
+  "rough_f1_f2_hz": [
+   437,
+   2018
+  ],
+  "peak_dbfs": -5.0,
+  "voiced_rms_dbfs": -16.7,
+  "noise_floor_dbfs": -81.2,
+  "f0_file_median_hz": 164.5,
+  "f0_file_p10_hz": 159.8,
+  "snr_db": 64.5,
+  "nuclei_s": null,
+  "take": null
+ },
+ "o_aoishin": {
+  "probe": {
+   "container": "wav",
+   "codec": "pcm_s16le",
+   "sample_rate": 48000,
+   "channels": 1,
+   "sample_fmt": "s16",
+   "bits_per_sample": 16,
+   "stream_bit_rate": 768000,
+   "avg_bit_rate": 768509,
+   "duration_s": 0.691
+  },
+  "clip": {
+   "max_abs": 0.580902099609375,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/o_aoishin.wav",
+  "looped": "in/o_aoishin.wav",
+  "duration_s": 0.691,
+  "voiced_s": 0.175,
+  "segments_s": [
+   [
+    0.25,
+    0.425
+   ]
+  ],
+  "loop_s": 5.075,
+  "loop_repeats": 29,
+  "cycle_s": 0.175,
+  "f0_median_hz": 158.7,
+  "f0_p10_p90_hz": [
+   60.9,
+   407.3
+  ],
+  "rough_f1_f2_hz": [
+   429,
+   776
+  ],
+  "peak_dbfs": -4.7,
+  "voiced_rms_dbfs": -15.0,
+  "noise_floor_dbfs": -91.2,
+  "f0_file_median_hz": 125.4,
+  "f0_file_p10_hz": 60.9,
+  "snr_db": 76.2,
+  "nuclei_s": null,
+  "take": null
+ },
+ "i_firipinjin": {
+  "probe": {
+   "container": "wav",
+   "codec": "pcm_s16le",
+   "sample_rate": 48000,
+   "channels": 1,
+   "sample_fmt": "s16",
+   "bits_per_sample": 16,
+   "stream_bit_rate": 768000,
+   "avg_bit_rate": 768561,
+   "duration_s": 0.627
+  },
+  "clip": {
+   "max_abs": 0.151641845703125,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/i_firipinjin.wav",
+  "looped": "in/i_firipinjin.wav",
+  "duration_s": 0.627,
+  "voiced_s": 0.165,
+  "segments_s": [
+   [
+    0.23,
+    0.395
+   ]
+  ],
+  "loop_s": 5.115,
+  "loop_repeats": 31,
+  "cycle_s": 0.165,
+  "f0_median_hz": 109.7,
+  "f0_p10_p90_hz": [
+   107.2,
+   231.4
+  ],
+  "rough_f1_f2_hz": [
+   304,
+   2507
+  ],
+  "peak_dbfs": -16.4,
+  "voiced_rms_dbfs": -29.3,
+  "noise_floor_dbfs": -76.3,
+  "f0_file_median_hz": 110.7,
+  "f0_file_p10_hz": 103.5,
+  "snr_db": 47.0,
+  "nuclei_s": null,
+  "take": null
+ },
+ "u_aoishin-uchuu": {
+  "probe": {
+   "container": "wav",
+   "codec": "pcm_s16le",
+   "sample_rate": 48000,
+   "channels": 1,
+   "sample_fmt": "s16",
+   "bits_per_sample": 16,
+   "stream_bit_rate": 768000,
+   "avg_bit_rate": 768369,
+   "duration_s": 0.952
+  },
+  "clip": {
+   "max_abs": 0.462188720703125,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/u_aoishin-uchuu.wav",
+  "looped": "in/u_aoishin-uchuu.wav",
+  "duration_s": 0.952,
+  "voiced_s": 0.16,
+  "segments_s": [
+   [
+    0.25,
+    0.315
+   ],
+   [
+    0.545,
+    0.64
+   ]
+  ],
+  "loop_s": 5.12,
+  "loop_repeats": 32,
+  "cycle_s": 0.16,
+  "f0_median_hz": 161.0,
+  "f0_p10_p90_hz": [
+   106.2,
+   194.9
+  ],
+  "rough_f1_f2_hz": [
+   360,
+   1486
+  ],
+  "peak_dbfs": -6.7,
+  "voiced_rms_dbfs": -17.0,
+  "noise_floor_dbfs": -59.4,
+  "f0_file_median_hz": 136.6,
+  "f0_file_p10_hz": 74.4,
+  "snr_db": 42.4,
+  "nuclei_s": [
+   [
+    0.245,
+    0.33
+   ],
+   [
+    0.53,
+    0.655
+   ]
+  ],
+  "take": [
+   0,
+   1
+  ]
+ },
+ "a_marsian-aka": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 1,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 60000,
+   "avg_bit_rate": 67477,
+   "duration_s": 1.005
+  },
+  "clip": {
+   "max_abs": 0.6690859198570251,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/a_marsian-aka.wav",
+  "looped": "in/a_marsian-aka.wav",
+  "duration_s": 1.005,
+  "voiced_s": 0.15,
+  "segments_s": [
+   [
+    0.27,
+    0.345
+   ],
+   [
+    0.46,
+    0.535
+   ]
+  ],
+  "loop_s": 5.1,
+  "loop_repeats": 34,
+  "cycle_s": 0.15,
+  "f0_median_hz": 133.9,
+  "f0_p10_p90_hz": [
+   105.4,
+   189.2
+  ],
+  "rough_f1_f2_hz": [
+   745,
+   1181
+  ],
+  "peak_dbfs": -3.5,
+  "voiced_rms_dbfs": -16.2,
+  "noise_floor_dbfs": -77.2,
+  "f0_file_median_hz": 133.5,
+  "f0_file_p10_hz": 105.1,
+  "snr_db": 61.0,
+  "nuclei_s": [
+   [
+    0.265,
+    0.36
+   ],
+   [
+    0.445,
+    0.55
+   ]
+  ],
+  "take": [
+   0,
+   1
+  ]
+ },
+ "u_marsian-utsu": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 1,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 60000,
+   "avg_bit_rate": 72785,
+   "duration_s": 1.022
+  },
+  "clip": {
+   "max_abs": 0.6156939268112183,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/u_marsian-utsu.wav",
+  "looped": "in/u_marsian-utsu.wav",
+  "duration_s": 1.022,
+  "voiced_s": 0.125,
+  "segments_s": [
+   [
+    0.305,
+    0.38
+   ],
+   [
+    0.56,
+    0.61
+   ]
+  ],
+  "loop_s": 5.0,
+  "loop_repeats": 40,
+  "cycle_s": 0.125,
+  "f0_median_hz": 139.3,
+  "f0_p10_p90_hz": [
+   99.1,
+   287.3
+  ],
+  "rough_f1_f2_hz": [
+   347,
+   1546
+  ],
+  "peak_dbfs": -4.2,
+  "voiced_rms_dbfs": -16.6,
+  "noise_floor_dbfs": -71.9,
+  "f0_file_median_hz": 138.9,
+  "f0_file_p10_hz": 99.8,
+  "snr_db": 55.3,
+  "nuclei_s": [
+   [
+    0.3,
+    0.395
+   ],
+   [
+    0.545,
+    0.625
+   ]
+  ],
+  "take": [
+   0,
+   1
+  ]
+ },
+ "u_doughaque-kuuki": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 1,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 80000,
+   "avg_bit_rate": 131438,
+   "duration_s": 0.464
+  },
+  "clip": {
+   "max_abs": 0.8575029373168945,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/u_doughaque-kuuki.wav",
+  "looped": "in/u_doughaque-kuuki.wav",
+  "duration_s": 0.462,
+  "voiced_s": 0.11,
+  "segments_s": [
+   [
+    0.075,
+    0.185
+   ]
+  ],
+  "loop_s": 5.06,
+  "loop_repeats": 46,
+  "cycle_s": 0.11,
+  "f0_median_hz": 127.2,
+  "f0_p10_p90_hz": [
+   110.1,
+   129.2
+  ],
+  "rough_f1_f2_hz": [
+   358,
+   1695
+  ],
+  "peak_dbfs": -1.3,
+  "voiced_rms_dbfs": -10.0,
+  "noise_floor_dbfs": -45.8,
+  "f0_file_median_hz": 109.9,
+  "f0_file_p10_hz": 70.9,
+  "snr_db": 35.8,
+  "nuclei_s": [
+   [
+    0.06,
+    0.2
+   ],
+   [
+    0.33,
+    0.415
+   ]
+  ],
+  "take": [
+   0
+  ]
+ },
+ "a_tofugu-m-aka": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 192000,
+   "avg_bit_rate": 193187,
+   "duration_s": 0.758
+  },
+  "clip": {
+   "max_abs": 0.3481583297252655,
+   "n_full_scale": 0,
+   "channel_corr": 1.0
+  },
+  "wav": "wav/a_tofugu-m-aka.wav",
+  "looped": "in/a_tofugu-m-aka.wav",
+  "duration_s": 0.753,
+  "voiced_s": 0.115,
+  "segments_s": [
+   [
+    0.175,
+    0.225
+   ],
+   [
+    0.385,
+    0.45
+   ]
+  ],
+  "loop_s": 5.06,
+  "loop_repeats": 44,
+  "cycle_s": 0.115,
+  "f0_median_hz": 98.1,
+  "f0_p10_p90_hz": [
+   75.9,
+   141.0
+  ],
+  "rough_f1_f2_hz": [
+   913,
+   1435
+  ],
+  "peak_dbfs": -9.2,
+  "voiced_rms_dbfs": -26.4,
+  "noise_floor_dbfs": -92.8,
+  "f0_file_median_hz": 114.6,
+  "f0_file_p10_hz": 72.9,
+  "snr_db": 66.4,
+  "nuclei_s": [
+   [
+    0.17,
+    0.24
+   ],
+   [
+    0.37,
+    0.465
+   ]
+  ],
+  "take": [
+   0,
+   1
+  ]
+ },
+ "a_tofugu-f-atsui": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 192000,
+   "avg_bit_rate": 172844,
+   "duration_s": 0.915
+  },
+  "clip": {
+   "max_abs": 0.13668221235275269,
+   "n_full_scale": 0,
+   "channel_corr": 0.9997895032449873
+  },
+  "wav": "wav/a_tofugu-f-atsui.wav",
+  "looped": "in/a_tofugu-f-atsui.wav",
+  "duration_s": 0.895,
+  "voiced_s": 0.12,
+  "segments_s": [
+   [
+    0.105,
+    0.225
+   ]
+  ],
+  "loop_s": 5.04,
+  "loop_repeats": 42,
+  "cycle_s": 0.12,
+  "f0_median_hz": 170.9,
+  "f0_p10_p90_hz": [
+   168.7,
+   179.9
+  ],
+  "rough_f1_f2_hz": [
+   812,
+   1699
+  ],
+  "peak_dbfs": -17.3,
+  "voiced_rms_dbfs": -29.6,
+  "noise_floor_dbfs": -74.0,
+  "f0_file_median_hz": 222.4,
+  "f0_file_p10_hz": 166.3,
+  "snr_db": 44.4,
+  "nuclei_s": [
+   [
+    0.1,
+    0.24
+   ],
+   [
+    0.41,
+    0.645
+   ]
+  ],
+  "take": [
+   0
+  ]
+ },
+ "u_tofugu-m-utsu": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 192000,
+   "avg_bit_rate": 171180,
+   "duration_s": 0.732
+  },
+  "clip": {
+   "max_abs": 0.13841460645198822,
+   "n_full_scale": 0,
+   "channel_corr": 0.9999999999999998
+  },
+  "wav": "wav/u_tofugu-m-utsu.wav",
+  "looped": "in/u_tofugu-m-utsu.wav",
+  "duration_s": 0.718,
+  "voiced_s": 0.145,
+  "segments_s": [
+   [
+    0.115,
+    0.18
+   ],
+   [
+    0.365,
+    0.445
+   ]
+  ],
+  "loop_s": 5.075,
+  "loop_repeats": 35,
+  "cycle_s": 0.145,
+  "f0_median_hz": 101.6,
+  "f0_p10_p90_hz": [
+   80.6,
+   140.7
+  ],
+  "rough_f1_f2_hz": [
+   369,
+   1570
+  ],
+  "peak_dbfs": -17.2,
+  "voiced_rms_dbfs": -29.2,
+  "noise_floor_dbfs": -92.8,
+  "f0_file_median_hz": 129.9,
+  "f0_file_p10_hz": 80.4,
+  "snr_db": 63.6,
+  "nuclei_s": [
+   [
+    0.11,
+    0.195
+   ],
+   [
+    0.35,
+    0.46
+   ]
+  ],
+  "take": [
+   0,
+   1
+  ]
+ },
+ "u_tofugu-f-utsu": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 192000,
+   "avg_bit_rate": 198889,
+   "duration_s": 0.627
+  },
+  "clip": {
+   "max_abs": 0.19113995134830475,
+   "n_full_scale": 0,
+   "channel_corr": 0.9999884216247635
+  },
+  "wav": "wav/u_tofugu-f-utsu.wav",
+  "looped": "in/u_tofugu-f-utsu.wav",
+  "duration_s": 0.611,
+  "voiced_s": 0.23,
+  "segments_s": [
+   [
+    0.065,
+    0.175
+   ],
+   [
+    0.37,
+    0.49
+   ]
+  ],
+  "loop_s": 5.06,
+  "loop_repeats": 22,
+  "cycle_s": 0.23,
+  "f0_median_hz": 235.1,
+  "f0_p10_p90_hz": [
+   226.5,
+   301.2
+  ],
+  "rough_f1_f2_hz": [
+   464,
+   1905
+  ],
+  "peak_dbfs": -14.4,
+  "voiced_rms_dbfs": -23.6,
+  "noise_floor_dbfs": -59.9,
+  "f0_file_median_hz": 241.3,
+  "f0_file_p10_hz": 223.1,
+  "snr_db": 36.3,
+  "nuclei_s": [
+   [
+    0.06,
+    0.19
+   ],
+   [
+    0.355,
+    0.505
+   ]
+  ],
+  "take": [
+   0,
+   1
+  ]
+ },
+ "e_tofugu-f-ekken": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 192000,
+   "avg_bit_rate": 179739,
+   "duration_s": 0.732
+  },
+  "clip": {
+   "max_abs": 0.18591530621051788,
+   "n_full_scale": 0,
+   "channel_corr": 0.9999871600802611
+  },
+  "wav": "wav/e_tofugu-f-ekken.wav",
+  "looped": "in/e_tofugu-f-ekken.wav",
+  "duration_s": 0.718,
+  "voiced_s": 0.095,
+  "segments_s": [
+   [
+    0.045,
+    0.14
+   ]
+  ],
+  "loop_s": 5.035,
+  "loop_repeats": 53,
+  "cycle_s": 0.095,
+  "f0_median_hz": 177.9,
+  "f0_p10_p90_hz": [
+   172.0,
+   184.5
+  ],
+  "rough_f1_f2_hz": [
+   505,
+   2332
+  ],
+  "peak_dbfs": -14.6,
+  "voiced_rms_dbfs": -24.7,
+  "noise_floor_dbfs": -72.1,
+  "f0_file_median_hz": 247.2,
+  "f0_file_p10_hz": 172.5,
+  "snr_db": 47.4,
+  "nuclei_s": [
+   [
+    0.04,
+    0.155
+   ],
+   [
+    0.37,
+    0.61
+   ]
+  ],
+  "take": [
+   0
+  ]
+ },
+ "i_tofugu-m-ichi": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 44100,
+   "channels": 2,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 192000,
+   "avg_bit_rate": 173903,
+   "duration_s": 0.575
+  },
+  "clip": {
+   "max_abs": 0.15407025814056396,
+   "n_full_scale": 0,
+   "channel_corr": 1.0
+  },
+  "wav": "wav/i_tofugu-m-ichi.wav",
+  "looped": "in/i_tofugu-m-ichi.wav",
+  "duration_s": 0.556,
+  "voiced_s": 0.13,
+  "segments_s": [
+   [
+    0.06,
+    0.12
+   ],
+   [
+    0.285,
+    0.355
+   ]
+  ],
+  "loop_s": 5.07,
+  "loop_repeats": 39,
+  "cycle_s": 0.13,
+  "f0_median_hz": 133.5,
+  "f0_p10_p90_hz": [
+   105.6,
+   136.1
+  ],
+  "rough_f1_f2_hz": [
+   319,
+   2345
+  ],
+  "peak_dbfs": -16.2,
+  "voiced_rms_dbfs": -28.0,
+  "noise_floor_dbfs": -91.4,
+  "f0_file_median_hz": 132.5,
+  "f0_file_p10_hz": 93.0,
+  "snr_db": 63.4,
+  "nuclei_s": [
+   [
+    0.055,
+    0.135
+   ],
+   [
+    0.27,
+    0.37
+   ]
+  ],
+  "take": [
+   0,
+   1
+  ]
+ },
+ "e_quatrogatos-eiko": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 48000,
+   "channels": 1,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 80000,
+   "avg_bit_rate": 79149,
+   "duration_s": 2.283
+  },
+  "clip": {
+   "max_abs": 0.8472307920455933,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/e_quatrogatos-eiko.wav",
+  "looped": "in/e_quatrogatos-eiko.wav",
+  "duration_s": 2.283,
+  "voiced_s": 0.15,
+  "segments_s": [
+   [
+    0.19,
+    0.34
+   ]
+  ],
+  "loop_s": 5.1,
+  "loop_repeats": 34,
+  "cycle_s": 0.15,
+  "f0_median_hz": 270.5,
+  "f0_p10_p90_hz": [
+   264.0,
+   280.9
+  ],
+  "rough_f1_f2_hz": [
+   560,
+   2512
+  ],
+  "peak_dbfs": -1.4,
+  "voiced_rms_dbfs": -11.9,
+  "noise_floor_dbfs": -49.5,
+  "f0_file_median_hz": 193.6,
+  "f0_file_p10_hz": 168.0,
+  "snr_db": 37.6,
+  "nuclei_s": [
+   [
+    0.185,
+    0.355
+   ],
+   [
+    0.55,
+    0.67
+   ],
+   [
+    1.265,
+    1.38
+   ],
+   [
+    1.485,
+    1.595
+   ],
+   [
+    1.62,
+    1.76
+   ]
+  ],
+  "take": [
+   0
+  ]
+ },
+ "i_wadakuramon-ishizuchi": {
+  "probe": {
+   "container": "ogg",
+   "codec": "vorbis",
+   "sample_rate": 48000,
+   "channels": 1,
+   "sample_fmt": "fltp",
+   "bits_per_sample": null,
+   "stream_bit_rate": 80000,
+   "avg_bit_rate": 83163,
+   "duration_s": 2.219
+  },
+  "clip": {
+   "max_abs": 0.5824658274650574,
+   "n_full_scale": 0,
+   "channel_corr": null
+  },
+  "wav": "wav/i_wadakuramon-ishizuchi.wav",
+  "looped": "in/i_wadakuramon-ishizuchi.wav",
+  "duration_s": 2.219,
+  "voiced_s": 0.105,
+  "segments_s": [
+   [
+    0.465,
+    0.57
+   ]
+  ],
+  "loop_s": 5.04,
+  "loop_repeats": 48,
+  "cycle_s": 0.105,
+  "f0_median_hz": 138.9,
+  "f0_p10_p90_hz": [
+   133.9,
+   141.6
+  ],
+  "rough_f1_f2_hz": [
+   285,
+   2773
+  ],
+  "peak_dbfs": -4.7,
+  "voiced_rms_dbfs": -24.0,
+  "noise_floor_dbfs": -56.0,
+  "f0_file_median_hz": 182.6,
+  "f0_file_p10_hz": 109.6,
+  "snr_db": 32.0,
+  "nuclei_s": [
+   [
+    0.46,
+    0.585
+   ],
+   [
+    0.77,
+    0.92
+   ],
+   [
+    1.03,
+    1.15
+   ],
+   [
+    1.32,
+    1.43
+   ],
+   [
+    1.57,
+    1.795
+   ]
+  ],
+  "take": [
+   0
+  ]
+ }
+}
