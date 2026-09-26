@@ -8,6 +8,8 @@
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/protocols/XDGShell.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/xwayland/XSurface.hpp>
 
 #include <algorithm>
 
@@ -60,8 +62,9 @@ namespace h3d {
                         return;
 
                     SPanelSurface ps;
-                    ps.tex  = s->m_current.texture;
-                    ps.uvTL = uvFromViewport(s, ps.uvBR);
+                    ps.tex     = s->m_current.texture;
+                    ps.uvTL    = uvFromViewport(s, ps.uvBR);
+                    ps.surface = s;
 
                     if (s == root) {
                         ps.box = rootBox;
@@ -142,6 +145,38 @@ namespace h3d {
             }
         }
 
+    }
+
+    // up its WM_TRANSIENT_FOR past other menus, else the app's own window that has the keyboard, else the one it's over
+    PHLWINDOW x11Owner(const PHLWINDOW& w) {
+        const auto xs = w->m_xwaylandSurface.lock();
+        if (!xs)
+            return nullptr;
+        auto up = xs->m_parent.lock();
+        for (int hops = 0; up && up->m_overrideRedirect && hops < 16; ++hops)
+            up = up->m_parent.lock();
+        if (up)
+            for (const auto& o : g_pCompositor->m_windows)
+                if (o && o->m_isMapped && o->m_xwaylandSurface.lock() == up)
+                    return o;
+        const auto focus = Desktop::focusState()->window();
+        const auto at    = w->m_realPosition->value();
+        PHLWINDOW  over;
+        for (const auto& o : g_pCompositor->m_windows) {
+            if (!o || o == w || !o->m_isX11 || o->isX11OverrideRedirect() || !o->m_isMapped || o->isHidden())
+                continue;
+            if (const auto os = o->m_xwaylandSurface.lock(); xs->m_pid > 0 && os && os->m_pid > 0 && os->m_pid != xs->m_pid)
+                continue; // another app's
+            if (o == focus)
+                return o;
+            if (!over && CBox{o->m_realPosition->value(), o->m_realSize->value()}.containsPoint(at))
+                over = o;
+        }
+        return over;
+    }
+
+    namespace {
+
         // windows in `placed` were put somewhere in the world: their workspace
         // fading in and out doesn't apply to them
         void addWindow(std::vector<SPanel>& out, PHLMONITOR mon, PHLWINDOW w, float depth, int& order, const std::unordered_set<uintptr_t>& placed) {
@@ -205,6 +240,7 @@ namespace h3d {
         addLayers(out, mon, 1, DEPTH_BOTTOM, order);
 
         std::vector<PHLWINDOW> tiled, floating, full, special, specialFloating, pinned, elsewhere;
+        std::vector<std::pair<PHLWINDOW, PHLWINDOW>> x11Popups; // (an X11 menu or tooltip, the window it belongs to)
         PHLWINDOW              focusedTiled;
         for (const auto& w : g_pCompositor->m_windows) {
             if (!w || w->isHidden() || (!w->m_isMapped && !w->m_fadingOut))
@@ -213,6 +249,13 @@ namespace h3d {
                 if (w->m_isMapped && always.contains(reinterpret_cast<uintptr_t>(w.get())))
                     elsewhere.push_back(w);
                 continue;
+            }
+
+            if (w->m_isX11 && w->isX11OverrideRedirect()) {
+                if (const auto owner = x11Owner(w)) {
+                    x11Popups.emplace_back(w, owner);
+                    continue;
+                }
             }
 
             if (w->onSpecialWorkspace())
@@ -251,6 +294,44 @@ namespace h3d {
             addWindow(out, mon, w, DEPTH_SPECIAL + 1.f, order, always);
         for (auto& w : elsewhere)
             addWindow(out, mon, w, DEPTH_FLOATING, order, always);
+        // X11 menus and tooltips over the window they belong to, as its popups: carried along when it's placed in the
+        // world (their positions are the X server's, relative to where it is on the desktop)
+        for (const auto& [w, owner] : x11Popups) {
+            const auto   it    = std::ranges::find_if(out, [&](const SPanel& p) { return p.kind == PANEL_WINDOW && p.window.lock() == owner; });
+            const bool   owned = it != out.end();
+            const float  depth = owned ? it->depth + DEPTH_POPUP : DEPTH_FLOATING;
+            const size_t n     = out.size();
+            addWindow(out, mon, w, depth, order, always);
+            if (owned && out.size() > n) {
+                out[n].kind     = PANEL_POPUP;
+                out[n].window   = owner;
+                out[n].rounding = 0;
+            }
+        }
+
+        // an input method's popup (its candidates), over the window typed into, which has the keyboard
+        if (const auto focus = Desktop::focusState()->window()) {
+            const auto   it    = std::ranges::find_if(out, [&](const SPanel& p) { return p.kind == PANEL_WINDOW && p.window.lock() == focus; });
+            const float  depth = it != out.end() ? it->depth + DEPTH_POPUP : DEPTH_OVERLAY;
+            PROTO::compositor->forEachSurface([&](SP<CWLSurfaceResource> surf) {
+                if (!surf || !surf->m_mapped || !drawable(surf))
+                    return;
+                CInputPopup* ime = g_pInputManager->m_relay.popupFromSurface(surf);
+                if (!ime)
+                    return;
+                SPanel p;
+                p.key     = reinterpret_cast<uintptr_t>(ime);
+                p.kind    = PANEL_POPUP;
+                p.window  = focus;
+                p.box     = ime->globalBox().translate(-mon->m_position);
+                p.depth   = depth;
+                p.order   = order++;
+                p.hitRoot = surf;
+                addTree(p, surf, CBox{{0, 0}, p.box.size()}, false);
+                if (!p.surfaces.empty() && p.box.w >= 1 && p.box.h >= 1)
+                    out.emplace_back(std::move(p));
+            });
+        }
 
         if (!fullscreen)
             addLayers(out, mon, 2, DEPTH_TOP, order);

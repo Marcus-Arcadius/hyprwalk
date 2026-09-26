@@ -83,6 +83,7 @@ namespace h3d {
         std::vector<SPanel>* panels    = nullptr; // with poses, in drawing order
         int                  aimed     = -1; // index into panels
         bool                 crosshair = true;
+        bool                 crosshairDot = false; // only its dot: the app's cursor marks the spot
         bool                 typing    = false;
         float                hudAlpha  = 1;
         float                exposure  = 1; // brightens the world (not the windows) in dark places
@@ -215,7 +216,7 @@ namespace h3d {
         void                                     drawBackdrop(const SFrameParams& f, int lightCount, const float* lights);
         void                                     drawAvatar(const SFrameParams& f, const M4& viewProj, int lightCount, const float* lights, bool late);
         void                                     drawAvatarDepth(const SFrameParams& f);
-        void                                     drawPanels(const SFrameParams& f, const M4& viewProj);
+        void                                     drawPanels(const SFrameParams& f, const M4& viewProj, bool front); // front: those over everything
         void                                     drawCrosshair(const SFrameParams& f);
         void                                     drawHud(const SFrameParams& f);
         void                                     drawHudImage(const SFrameParams& f, const SHudImage& m, SHudGL& g);

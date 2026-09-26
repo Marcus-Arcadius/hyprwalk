@@ -577,19 +577,35 @@ namespace h3d {
                 const double     x     = C + rm * std::sin(t), y = C - rm * std::cos(t);
                 const double     maxW  = n <= 2 ? 0.62 * R : std::min(2 * rm * std::sin(HALF_TURN / n) * 0.86, 0.62 * R);
                 const double     a     = it.disabled ? 0.3 : 1;
+                const double     iconPx = (n > 6 ? 0.13 : 0.145) * R;
+                const SPicture*  pic    = it.picture && it.picture->w > 0 && it.picture->h > 0 ? it.picture.get() : nullptr;
                 const SBlock     rows[] = {
-                    block(ctx.get(), it.icon, "emoji", (n > 6 ? 0.13 : 0.145) * R, false, maxW, 1, true),
+                    block(ctx.get(), pic ? "" : it.icon, "emoji", iconPx, false, maxW, 1, true),
                     block(ctx.get(), it.label, "Sans", 0.066 * R, true, maxW, 2),
                     block(ctx.get(), it.hint, "Sans", 0.052 * R, false, maxW, 1),
                 };
                 const SColor colors[] = {WHITE, WHITE, HINT};
                 const double alphas[] = {a, 0.96 * a, 0.7 * a};
                 const double sp       = 0.012 * R;
-                double       total    = -sp;
+                const double picH     = pic ? iconPx * 1.15 : 0; // (a picture fills its box, an emoji not quite)
+                double       total    = pic ? picH : -sp;
                 for (const SBlock& b : rows)
                     if (b.layout)
                         total += b.height + sp;
                 double ty = y - std::max(total, 0.0) / 2;
+                if (pic) {
+                    cairo_surface_t* img = cairo_image_surface_create_for_data((unsigned char*)pic->pixels.data(), CAIRO_FORMAT_ARGB32, pic->w, pic->h, pic->w * 4);
+                    const double     s   = picH / std::max(pic->w, pic->h);
+                    cairo_save(cr);
+                    cairo_translate(cr, x - pic->w * s / 2, ty);
+                    cairo_scale(cr, s, s);
+                    cairo_set_source_surface(cr, img, 0, 0);
+                    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+                    cairo_paint_with_alpha(cr, a);
+                    cairo_restore(cr);
+                    cairo_surface_destroy(img);
+                    ty += picH + sp;
+                }
                 for (size_t k = 0; k < std::size(rows); ++k)
                     if (rows[k].layout) {
                         paint(cr, rows[k], x, ty, colors[k], alphas[k], k == 0);
@@ -775,7 +791,9 @@ namespace h3d {
                     outfit.disabled = true;
                 }
             }
-            p.items = {emotes, faces, hands, outfit, {.label = "Options", .icon = "⚙️", .page = "options"}};
+            // (Apps and Windows: main.cpp's pages)
+            p.items = {emotes, faces, hands, outfit, {.label = "Apps", .icon = "🚀", .page = "apps"}, {.label = "Windows", .icon = "🪟", .page = "windows"},
+                       {.label = "Options", .icon = "⚙️", .page = "options"}};
         } else if (id == "emotes") {
             p.title = "Emotes";
             for (size_t i = 0; a && i < a->emotes().size(); ++i) {

@@ -25,6 +25,15 @@ let
   # the one that's installed, with its closure (not in pure evaluation mode: nix-build is fine)
   hypr = builtins.storePath hyprland;
 
+  # h3dgame.c: a tiny SDL2 game that prints what it gets (the mouse, relative motion, keys, controllers, focus)
+  h3dgame = pkgs.runCommandCC "h3dgame" {
+    nativeBuildInputs = [ pkgs.pkg-config ];
+    buildInputs = [ pkgs.SDL2 ];
+  } ''
+    mkdir -p $out/bin
+    $CC -O2 -Wall ${./h3dgame.c} -o $out/bin/h3dgame $(pkg-config --cflags --libs sdl2)
+  '';
+
   # a VM with a screen of that size
   vm =
     width: height:
@@ -34,7 +43,7 @@ let
 
       virtualisation = {
         inherit cores;
-        memorySize = 4096;
+        memorySize = 6144; # (a browser and OBS on llvmpipe)
         # (no -nographic with virgl: it would take the place of egl-headless, a display that opens no window either)
         graphics = gpu == "virgl";
         diskSize = 8192; # (a sparse image) room for a core dump, so a crash's stack trace can be had
@@ -68,6 +77,7 @@ let
       users.users.alice = {
         isNormalUser = true;
         uid = 1000;
+        password = "h3d"; # (for swaylock, which play mode must give the keyboard to)
         extraGroups = [
           "video"
           "audio"
@@ -77,6 +87,7 @@ let
 
       environment.systemPackages = [
         hypr
+        h3dgame
       ]
       ++ (with pkgs; [
         foot
@@ -84,10 +95,62 @@ let
         grim
         jq
         pipewire
-        python3 # wheel.py: a mouse with a high-resolution wheel, through uinput
+        # wheel.py, touchpad.py and gamepad.py (a mouse, a touchpad and a game controller, through uinput), and
+        # tkapp.py (an X11 app with menus and a tooltip)
+        (python3.withPackages (ps: [ ps.tkinter ]))
         wev # prints the pointer and keyboard events its window gets
         wireplumber
+        xwayland # (Hyprland starts it when it finds it)
+        xev # wev for X11 windows
+        xterm
+        swayidle # the screen blanking, to see that games and videos keep it from it
+        weston # its demo clients: weston-presentation-shm (presentation feedback), weston-dnd
+        # real open-source games: Chocolate Doom (mouse look, the pointer locked) with Freedoom's levels, and
+        # SuperTux (the keyboard, or a controller)
+        chocolate-doom
+        freedoom
+        supertux
+        # everyday apps, open-source stand-ins: two browsers, Electron (Discord's stack), OBS, and what they need:
+        # a notification daemon, the clipboard's tools
+        chromium
+        firefox
+        electron
+        obs-studio
+        mako
+        wl-clipboard
+        fcitx5
+        dbus # (dbus-monitor)
+        swaylock
       ]);
+      security.pam.services.swaylock = { };
+      # The portals' user services want graphical-session.target, which a desktop's session brings up: Hyprland
+      # started this way doesn't, so the checks start this (home-manager's hyprland-session.target is the same)
+      systemd.user.targets.hyprland-session = {
+        description = "Hyprland session (tools/test/vm)";
+        bindsTo = [ "graphical-session.target" ];
+        wants = [ "graphical-session-pre.target" ];
+        after = [ "graphical-session-pre.target" ];
+      };
+      # (what the portal decides, in the journal; xdph's log line by line: to the journal's pipe it'd come in blocks)
+      systemd.user.services.xdg-desktop-portal.environment.G_MESSAGES_DEBUG = "all";
+      systemd.user.services.xdg-desktop-portal-hyprland.environment = {
+        LD_PRELOAD = "${pkgs.coreutils}/libexec/coreutils/libstdbuf.so";
+        _STDBUF_O = "L";
+      };
+      # Freedoom's levels, for Chocolate Doom
+      environment.etc."h3d/freedoom2.wad".source = "${pkgs.freedoom}/share/games/doom/freedoom2.wad";
+      # file dialogs and screen capture through the portals, as a Hyprland desktop has them
+      xdg.portal = {
+        enable = true;
+        extraPortals = with pkgs; [
+          xdg-desktop-portal-hyprland
+          xdg-desktop-portal-gtk
+        ];
+        config.common.default = [
+          "hyprland"
+          "gtk"
+        ];
+      };
 
       # Hyprland on tty1 in a logind session of alice's, as a display manager starts it (the NixOS cage
       # module's way); the checks start and stop it
@@ -126,6 +189,11 @@ let
           StandardOutput = "journal";
           StandardError = "journal";
           PAMName = "hyprland-test";
+          # without it, Hyprland (and all it starts) had CAP_WAKE_ALARM here, which the portals, without it,
+          # may not look into (/proc/PID/root: EACCES), so they refused every app Hyprland started (OBS's screen
+          # capture). A desktop's Hyprland has at most CAP_SYS_NICE, which its apps don't inherit
+          AmbientCapabilities = "";
+          CapabilityBoundingSet = "~CAP_WAKE_ALARM";
         };
       };
       security.pam.services.hyprland-test.text = ''

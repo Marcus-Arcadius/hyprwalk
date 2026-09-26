@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# check.sh OUTDIR [--mic] [--avatar FILE] [--map FILE|--no-map] [--so FILE]: hypr3d.so in the Hyprland you're running
-# now, on your own GPU and monitor: what tools/test/vm can't reach. You run it; it goes through what hyprctl can do.
+# check.sh OUTDIR [--mic] [--avatar FILE] [--map FILE|--no-map] [--app CMD]... [--so FILE]: hypr3d.so in the Hyprland
+# you're running now, on your own GPU and monitor: what tools/test/vm can't reach. You run it; it goes through what
+# hyprctl can do, and asks you to do what only you can.
 #
 #   tools/test/live/check.sh ~/hypr3d-live                  # 3D, an avatar, the menu, a notification, a map
 #   tools/test/live/check.sh ~/hypr3d-live --mic            # and lip sync on your voice
 #   tools/test/live/check.sh ~/hypr3d-live --avatar ~/avatars/me.glb
+#   tools/test/live/check.sh ~/hypr3d-live --no-map --app discord --app "steam steam://rungameid/APPID"
 #
 #   --mic          lip sync on your microphone: say what the notifications ask for (a, i, u, e, o, then "sss", then
 #                  nothing); OUTDIR/lipsync.jsonl gets what it heard. (CHECK_SAY=CMD runs CMD a, CMD i ... CMD s,
@@ -13,6 +15,14 @@
 #   --map FILE     a map to walk into (default: ~/.local/share/hypr3d/maps/de_mirage.glb, if it's there)
 #   --no-map       no map
 #   --so FILE      the plugin to load (default: the repo's hypr3d.so, as ./build.sh left it)
+#   --app CMD      an app of yours (repeatable): a desktop id, an app's name or a command, launched from 3D
+#                  (hyprctl hypr3d launch). Notifications then ask you to play it (P) and stop (Super+Esc), type into
+#                  it (E), point at it (its own cursor), pin it to your view (H) and unpin it, then try what you
+#                  want in it (P, then Super+Esc when done: a call, a screen share, OBS capturing the 3D view); then
+#                  its window is closed, as its close button does (a chat app goes to its tray, a game quits). Frames of each step
+#                  go to OUTDIR/frames. A Steam game (steam steam://rungameid/ID) is the window Steam starts for it,
+#                  not Steam's own. (CHECK_DO=CMD runs CMD STEP WINDOW as each prompt shows: tools/test/vm does the
+#                  steps with hyprctl)
 #
 # On the focused monitor it loads the plugin and compares the desktop before and after, enters 3D, loads the avatar
 # and looks at it, opens the Action Menu and plays an emote, shows a notification over the 3D view, picks up the
@@ -26,7 +36,7 @@
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 UTIL=(python3 "$REPO/tools/test/live/util.py")
-SO="$REPO/hypr3d.so" AVATAR="" MAP="" NOMAP=0 MIC=0 OUT=""
+SO="$REPO/hypr3d.so" AVATAR="" MAP="" NOMAP=0 MIC=0 OUT="" APPS=()
 while (($#)); do
     case "$1" in
         --mic) MIC=1; shift ;;
@@ -34,12 +44,13 @@ while (($#)); do
         --map) MAP="$(realpath "$2")"; shift 2 ;;
         --no-map) NOMAP=1; shift ;;
         --so) SO="$(realpath "$2")"; shift 2 ;;
+        --app) APPS+=("$2"); shift 2 ;;
         -h|--help) sed -n '2,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
         -*) echo "unknown option $1" >&2; exit 2 ;;
         *) OUT="$1"; shift ;;
     esac
 done
-[[ -n "$OUT" ]] || { echo "usage: check.sh OUTDIR [--mic] [--avatar FILE] [--map FILE|--no-map] [--so FILE]" >&2; exit 2; }
+[[ -n "$OUT" ]] || { echo "usage: check.sh OUTDIR [--mic] [--avatar FILE] [--map FILE|--no-map] [--app CMD]... [--so FILE]" >&2; exit 2; }
 die() { echo "check.sh: $*" >&2; exit 1; }
 [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] || die "run it from inside your Hyprland session"
 for c in hyprctl grim python3; do command -v "$c" > /dev/null || die "no $c"; done
@@ -217,6 +228,92 @@ else
     note "no window under the crosshair at the start: carrying one skipped" "$kind"
 fi
 
+# --- your apps: launched from 3D, played, typed into, pointed at, pinned to the view
+playing() { [[ "$(ctl status | js playing)" != null ]]; }
+walking() { [[ "$(ctl status | js playing)" == null && "$(ctl status | js typing)" == false ]]; }
+typing() { [[ "$(ctl status | js typing)" == true && "$(ctl status | js playing)" == null ]]; }
+cursor_on() { [[ "$(ctl status | js cursor)" != null ]]; }
+pinned() { ctl windows | python3 -c 'import json, sys; sys.exit(0 if any(p["address"] == sys.argv[1] and p["pinned"] for p in json.load(sys.stdin)["placed"]) else 1)' "$1"; }
+ask() { # what to do, the step, seconds for it: shown over the 3D view as long as it's waited for
+    say "$1" "$(($3 * 1000))"
+    [[ -n "${CHECK_DO:-}" ]] && $CHECK_DO "$2" "$ADDR" > /dev/null 2>&1 & # (tools/test/vm does it with hyprctl)
+}
+for app in "${APPS[@]}"; do
+    ctl view first > /dev/null
+    before="$(hyprctl -j clients | python3 -c 'import json, sys; print(" ".join(c["address"] for c in json.load(sys.stdin)))')"
+    r="$(ctl launch "$app")"
+    newwin() { # the window that opened for it: its address and class. One hypr3d placed as launched from 3D, else
+        # the first new one (a Steam game's: not Steam's own windows, which open first when Steam wasn't running)
+        hyprctl -j clients | python3 -c 'import json, subprocess, sys
+old, steam = set(sys.argv[1].split()), "steam://rungameid/" in sys.argv[2]
+placed = {p["address"] for p in json.loads(subprocess.run(["hyprctl", "hypr3d", "windows"], capture_output=True, text=True).stdout or "{}").get("placed", [])}
+new = [c for c in json.load(sys.stdin) if c["address"] not in old and c["mapped"] and not (steam and c["class"].lower() == "steam")]
+new.sort(key=lambda c: c["address"] not in placed)
+print(*(new[0]["address"], new[0]["class"]) if new else "")' "$before" "$app"
+    }
+    got() { [[ -n "$(newwin)" ]]; }
+    say "starting $app: its window should open in front of you" 5000
+    wait_for 180 got
+    check "--app $app: launched from 3D, a window opens" $? "$r"
+    read -r ADDR CLS <<< "$(newwin)"
+    [[ -z "$ADDR" ]] && continue
+    sleep 3
+    # (one it doesn't know was launched from 3D, a game Steam starts, opens on the wall: it's brought here)
+    if ! ctl windows | grep -q "\"address\": \"$ADDR\""; then
+        note "$CLS opened on the wall (not known as launched from 3D): brought in front of you"
+        ctl window "$ADDR" bring > /dev/null
+        sleep 1
+    fi
+    note "$CLS" "$(ctl windows | python3 -c 'import json, sys; print([p for p in json.load(sys.stdin)["placed"] if p["address"] == sys.argv[1]])' "$ADDR")"
+    shot "app-$CLS-opened"
+    ask "look at $CLS and press P to play it (a game: look around, move, use your controller)" play 60
+    wait_for 60 playing
+    check "P: playing $CLS" $? "$(ctl play)"
+    note "while playing" "$(ctl play); $(ctl status | js fps) frames a second"
+    sleep 8
+    shot "app-$CLS-playing"
+    ask "Super+Esc stops playing" stop 30
+    wait_for 30 walking
+    check "Super+Esc: walking again, the mouse and keys yours" $?
+    ask "press E, type something into $CLS, then Super+Esc" type 60
+    wait_for 60 typing
+    t=$?
+    shot "app-$CLS-typing"
+    wait_for 60 walking
+    check "E: typing into it, and Super+Esc back to walking" $((t || $?))
+    ask "point the crosshair at $CLS: its own cursor shows where the crosshair is" cursor 20
+    wait_for 20 cursor_on
+    check "its own cursor, drawn on it" $? "$(ctl status | js cursor)"
+    shot "app-$CLS-cursor"
+    ask "press H pointing at $CLS: it pins to your view; look around a bit" pin 45
+    wait_for 45 pinned "$ADDR"
+    check "H: pinned to the view" $?
+    sleep 5
+    shot "app-$CLS-pinned"
+    ctl window "$ADDR" unpin > /dev/null
+    # what only you can judge: a call, a screen share, OBS capturing the 3D view, a controller
+    ask "now try what matters to you in $CLS (a call, a screen share, OBS capturing this view, a controller): P to play it, Super+Esc when you're done (5 minutes at most)" free 30
+    if wait_for 60 playing; then
+        sleep 5
+        shot "app-$CLS-free"
+        note "$CLS, your own try" "$(ctl play); $(ctl status | js fps) frames a second"
+        wait_for 300 walking
+        note "... done" "$(ctl status | js fps) frames a second walking"
+    else
+        note "$CLS: your own try skipped (not played within a minute)"
+    fi
+    say "closing $CLS's window, as its close button does" 4000
+    ctl window "$ADDR" close > /dev/null
+    shut() { ! hyprctl -j clients | grep -q "\"address\": \"$ADDR\""; }
+    if wait_for 20 shut; then
+        note "$CLS: its window closed"
+    else
+        ctl window "$ADDR" wall > /dev/null
+        note "$CLS: its window didn't close (it may ask first): sent back to the wall, open; the desktop checks at the end will see it"
+    fi
+    sleep 1
+done
+
 # --- a map
 if [[ -n "$MAP" ]]; then
     r="$(ctl map "$MAP")"
@@ -245,7 +342,12 @@ if ((MIC)); then
     face_avatar 1.4 -3
     sleep 1
     shot lipsync-badge
-    red="$("${UTIL[@]}" count "$OUT/raw/lipsync-badge.ppm" red 0.6 0 1 0.2)"
+    # (where it's drawn: under Hyprland's notifications, however many there are)
+    box="$(ctl avatar lipsync | python3 -c 'import json, subprocess, sys
+b = json.load(sys.stdin)["badge"] or [0, 0, 0, 0]
+m = next(m for m in json.loads(subprocess.run(["hyprctl", "-j", "monitors"], capture_output=True, text=True).stdout) if m["focused"])
+print((b[0] - 4) / m["width"], (b[1] - 4) / m["height"], (b[0] + b[2] + 4) / m["width"], (b[1] + b[3] + 4) / m["height"])')"
+    red="$("${UTIL[@]}" count "$OUT/raw/lipsync-badge.ppm" red $box)"
     ((red > 20))
     check "its badge in the top right corner" $? "$red red pixels; at $(ctl avatar lipsync | js badge)"
     : > "$OUT/lipsync.jsonl"

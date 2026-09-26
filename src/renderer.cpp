@@ -1589,7 +1589,9 @@ namespace h3d {
         glUniform4f(U(prog, "uClip"), p.clip.x, p.clip.y, p.clip.x + p.clip.w, p.clip.y + p.clip.h);
     }
 
-    void CRenderer::drawPanels(const SFrameParams& f, const M4& viewProj) {
+    void CRenderer::drawPanels(const SFrameParams& f, const M4& viewProj, bool front) {
+        if (front && std::ranges::none_of(*f.panels, [](const SPanel& p) { return p.front; }))
+            return;
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LEQUAL);
         glUseProgram(m_progPanel);
@@ -1598,25 +1600,28 @@ namespace h3d {
         glActiveTexture(GL_TEXTURE0);
         glBindVertexArray(m_quadVAO);
 
-        const auto visible = [&](const SPanel& p) { return p.clip.w >= 1 && p.clip.h >= 1 && m_panelGL.contains(p.key); };
-        const auto front   = [&](const SPanel& p) { return dot(f.eye - p.pose.origin, p.pose.normal) > 0.f; };
+        const auto visible = [&](const SPanel& p) { return p.front == front && p.clip.w >= 1 && p.clip.h >= 1 && m_panelGL.contains(p.key); };
+        const auto facing  = [&](const SPanel& p) { return dot(f.eye - p.pose.origin, p.pose.normal) > 0.f; };
 
         // the opaque parts of panels out in the world go into the depth buffer
         // first, so they hide each other properly where they cross; the ones on
-        // the desktop wall are stacked in parallel and just drawn back to front
+        // the desktop wall are stacked in parallel and just drawn back to front.
+        // The ones in front of everything are drawn last, over it all, in order
         glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
         glDepthMask(GL_TRUE);
         glDisable(GL_BLEND);
         glUniform1f(U(m_progPanel, "uMinAlpha"), 0.96f);
         glUniform4f(U(m_progPanel, "uOutline"), 0, 0, 0, 0);
         for (const auto& p : *f.panels) {
-            if (!p.depthWrite || !visible(p))
+            if (front || !p.depthWrite || !visible(p))
                 continue;
             setPanelUniforms(m_progPanel, p, m_panelGL[p.key]);
             glUniform1f(U(m_progPanel, "uAlpha"), p.alpha);
-            glUniform1f(U(m_progPanel, "uFront"), front(p) ? 1.f : 0.f);
+            glUniform1f(U(m_progPanel, "uFront"), facing(p) ? 1.f : 0.f);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         }
+        if (front)
+            glDisable(GL_DEPTH_TEST);
 
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glDepthMask(GL_FALSE);
@@ -1644,7 +1649,7 @@ namespace h3d {
 
             setPanelUniforms(m_progPanel, p, m_panelGL[p.key]);
             glUniform1f(U(m_progPanel, "uAlpha"), p.alpha);
-            glUniform1f(U(m_progPanel, "uFront"), front(p) ? 1.f : 0.f);
+            glUniform1f(U(m_progPanel, "uFront"), facing(p) ? 1.f : 0.f);
             glUniform4f(U(m_progPanel, "uOutline"), outline[0], outline[1], outline[2], outline[3]);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         }
@@ -1661,7 +1666,7 @@ namespace h3d {
         glBindVertexArray(m_quadVAO);
         const float scale = std::max(1.f, f.monScale);
         glUniform2f(U(m_progCross, "uViewport"), (float)f.width, (float)f.height);
-        glUniform1f(U(m_progCross, "uExtent"), 16.f * scale);
+        glUniform1f(U(m_progCross, "uExtent"), (f.crosshairDot ? 3.5f : 16.f) * scale); // (a dot's quad cuts the arms off)
         glUniform1f(U(m_progCross, "uScale"), scale);
         glUniform1f(U(m_progCross, "uAlpha"), f.hudAlpha);
         if (f.typing) {
@@ -1672,7 +1677,7 @@ namespace h3d {
             glUniform1f(U(m_progCross, "uDot"), 1.f);
         } else {
             glUniform4f(U(m_progCross, "uColor"), 0.35f, 1.0f, 0.4f, 1.f);
-            glUniform1f(U(m_progCross, "uDot"), 0.f);
+            glUniform1f(U(m_progCross, "uDot"), f.crosshairDot ? 1.f : 0.f);
         }
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
@@ -1774,10 +1779,11 @@ namespace h3d {
         drawWorld(f, viewProj, lightCount, lights);
         drawMap(f, viewProj, lightCount, lights, MAP_PASS_OPAQUE);
         drawAvatar(f, viewProj, lightCount, lights, false);
-        drawPanels(f, viewProj);
+        drawPanels(f, viewProj, false);
         // glass and such after the windows: they're mostly on walls behind it
         drawMap(f, viewProj, lightCount, lights, MAP_PASS_BLEND);
         drawAvatar(f, viewProj, lightCount, lights, true);
+        drawPanels(f, viewProj, true);
         drawCrosshair(f);
         drawHud(f);
 

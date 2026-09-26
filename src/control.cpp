@@ -520,8 +520,8 @@ namespace h3d {
         std::string      items;
         for (size_t i = 0; i < p.items.size(); ++i) {
             const auto& it = p.items[i];
-            items += std::format(R"({}{{"slot": {}, "label": "{}", "hint": "{}", "on": {}, "disabled": {}, "submenu": {}}})", i ? ", " : "", i + 1, jsonEscape(it.label),
-                                 jsonEscape(it.hint), it.on, it.disabled, !it.page.empty());
+            items += std::format(R"({}{{"slot": {}, "label": "{}", "hint": "{}", "on": {}, "disabled": {}, "submenu": {}, "picture": {}}})", i ? ", " : "", i + 1,
+                                 jsonEscape(it.label), jsonEscape(it.hint), it.on, it.disabled, !it.page.empty(), it.picture != nullptr);
         }
         // the slot the cursor points at, 0 = the middle, -1 = nothing
         const int   h    = menu.highlighted();

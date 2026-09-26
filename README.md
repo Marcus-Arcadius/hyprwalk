@@ -3,7 +3,10 @@
 A [Hyprland](https://hyprland.org) plugin that turns the desktop into a place you can walk around in.
 While 3D mode is on, your windows hang on a wall in a small courtyard, or in any glTF map, and you
 walk up to them in first person. The crosshair clicks, scrolls and types into whatever it points at.
-You can take a window off the wall and put it anywhere.
+You can take a window off the wall and put it anywhere, pin one to your view, and launch apps
+straight into the world. Games are played there too: play mode gives a window the keyboard, the
+mouse (a locked pointer's relative motion, as games want it) and the buttons, and turns you to face
+it.
 
 With an avatar loaded you can switch to third person. The avatar works much like one in VRChat: it
 has faces, hand gestures, emotes and dances, a radial Action Menu, outfit toggles and sliders, hair
@@ -82,6 +85,9 @@ A plugin runs inside the compositor, so a crash in it takes your session down wi
 | `plugin:hypr3d:avatar_physics` | `true` | hair, skirts and the like swing (spring bones) |
 | `plugin:hypr3d:avatar_emotes` | `""` | more emotes: VRM animations (`.vrma`) or glTF clips; files or folders, separated by commas |
 | `plugin:hypr3d:lipsync` | `false` | lip sync: the microphone moves the avatar's mouth while you are in 3D (below) |
+| `plugin:hypr3d:apps` | `""` | the Action Menu's Apps page: desktop ids, app names or commands, separated by commas (below) |
+| `plugin:hypr3d:app_rules` | `""` | where apps launched from 3D open: `CLASS: DISTANCE HEIGHT [left\|right\|SIDE]`, separated by commas (below) |
+| `plugin:hypr3d:pin_size` | `0.3` | how much of the view's height a window pinned to it takes, 0.05–1 |
 
 Paths may start with `~/`. Maps and avatars load in the background, and a failure shows up as a
 notification. A config reload applies changed values at once; a value changed at run time without one
@@ -105,15 +111,19 @@ compositor shortcuts keep working in 3D.
 | left/right/middle click | click whatever the crosshair points at |
 | wheel | scroll it; in third person, pointing at nothing, zoom the camera |
 | E or Enter | type into the window under the crosshair; Super+Esc goes back to walking |
-| G | pick up the window under the crosshair; G or a left click puts it down where it is, a right click or Esc puts it back where it was; the wheel moves it nearer or further, Ctrl+wheel resizes it |
-| X | send a window you've placed back to the wall |
+| P | play the window under the crosshair: it gets every key, the buttons, the wheel and the mouse, and you face it (below); Super+Esc stops |
+| G | pick up the window under the crosshair; G or a left click puts it down where it is, a right click or Esc puts it back where it was; the wheel moves it nearer or further, Ctrl+wheel scales it, Shift+wheel changes its real size (the app draws itself anew) |
+| X | send a window you've placed back to the wall (and forget the place its app had) |
+| H | pin the window under the crosshair to your view (top right, over the world), or unpin it where it is |
+| Q | the Action Menu's Apps page: launch an app into the world |
+| B | the Action Menu's Windows page: every window, and what to do with it |
 | V | first / third person (needs an avatar) |
 | Tab | the Action Menu |
 | F1–F8 | hand gestures (Neutral, Fist, Open, Point, Victory, Rock'n'roll, Handgun, Thumbs up), as in VRChat's desktop mode: with Left Shift held only the left hand, with Right Shift only the right, otherwise both |
 | Esc | leave 3D |
 
-The Action Menu has pages for emotes, expressions, gestures, the outfit and options (view, physics,
-fly, lip sync, respawn, reset face, stop emote). With it open, the mouse moves its cursor, a left click
+The Action Menu has pages for emotes, expressions, gestures, the outfit, apps, windows and options
+(view, physics, fly, lip sync, respawn, reset face, stop emote). With it open, the mouse moves its cursor, a left click
 picks, a right click goes back and a middle click closes it. The wheel goes round it, 1–8 pick an
 item, Enter picks, Backspace goes back and Esc closes it. WASD still walks.
 
@@ -140,6 +150,201 @@ voice trailing off) pp. Otherwise a consonant keeps the last vowel's shape, less
 Hiss or noise that goes on shuts the mouth. It keeps a quarter of a second of sound at most, to look
 at, and nothing is written anywhere or sent. Leaving 3D, or turning it off, closes the microphone.
 
+## Apps and games in 3D
+
+### Play mode
+
+Point at a window and press P (or `hyprctl hypr3d play on`, the `hypr3d:play` dispatcher,
+`hl.plugin.hypr3d.play()`, or Play on the Windows page). The window then gets everything, as a game
+wants it:
+
+- the keyboard focus (xdg_toplevel's "activated" state, and the focus SDL needs to read a controller)
+  and every key, Esc and Tab included; keys held with Super or Ctrl+Alt still go to Hyprland
+- the buttons and the wheel
+- the mouse as the app asks for it: while it locks the pointer (`zwp_locked_pointer_v1`, SDL's
+  relative mouse mode), only relative motion (`zwp_relative_pointer_v1`), as Hyprland gives it on the
+  2D desktop; while it confines it, a pointer kept in its region; otherwise a pointer that moves over
+  the window and its popups as over a monitor, with the app's own cursor drawn where it is. A tablet
+  covers the window.
+
+The camera leaves you and turns to face the window, filling most of the view (94% of the way it
+fits) and following it if it moves; the crosshair, the aimed window's outline and the Action Menu go
+(the lip sync badge stays while the microphone listens), and the window is drawn over the world, so
+nothing gets in front of it. Windows pinned to the view stay over it. You don't walk while playing;
+your avatar stays where you were.
+
+Play mode ends with **Super+Esc** (the app doesn't get that Esc), when you leave 3D, when the screen
+locks, when the window closes or leaves the 3D view (its workspace hidden), when another window takes
+the keyboard, and when a layer surface does (a launcher, a lock screen). A notification says how to
+stop when it starts. The window's dialogs are played with it: a file chooser (the portal's, or the
+app's own) opens over it, as on the 2D desktop, and has the keyboard; the pointer goes over it, and
+when it closes you're back in the window, still playing. An X11 menu of the app's own can take the
+keyboard too. Pointing at a dialog and pressing P plays the window it belongs to. A window that goes
+fullscreen while it has the keyboard (a browser's video, a game) is played at once, and leaving
+fullscreen ends that; one that maximizes only gets bigger.
+
+Controllers are read by the games themselves, from `/dev/input` (SDL through udev), not through
+Hyprland; SDL drops a controller's events while its window doesn't have the keyboard focus. In play
+mode it has it. Walking, a game still reads its controller for as long as it has the keyboard focus
+(you clicked it last, or typed into it); once another window has it, SDL ignores the controller.
+
+What a game gets from the compositor in 3D: the "activated" state while it has the keyboard,
+`wl_output` enter and the monitor's scale as on the desktop, frame callbacks, presentation feedback
+and FIFO barriers at the pace of the 3D view (Hyprland reports what the 3D view covers as
+"discarded": the plugin reports what it draws as presented instead), and its idle inhibitor keeps the
+screen on even when its workspace is hidden. Direct scanout is off in 3D (see Performance).
+
+A game that locks the pointer keeps the keyboard focus when a new window opens (Hyprland's rule, on
+the 2D desktop too): click the new window, or leave play mode and point at it and press E.
+
+### The app's cursor
+
+In 3D the pointer is where the crosshair is on a window, and that app's own cursor is drawn there, on
+the window: the shape it asked for (`wp_cursor_shape_v1`, from Hyprland's cursor theme) or its own
+cursor surface (an X11 app's comes from XWayland that way), animated ones too. The crosshair shrinks
+to a dot at the cursor's hotspot. An app that hides its cursor (a game) shows none, and the whole
+crosshair comes back while walking; in play mode the app's cursor is the only one. Hyprland's own
+cursor stays off the monitors in 3D (its hardware cursor off, its software cursor not drawn), and
+`cursor:invisible` hides the app's too.
+
+### X11 apps
+
+X11 apps run through XWayland, which Hyprland starts when it finds the `Xwayland` binary. Their
+windows are panels like the others, and get clicks, typing, the wheel and relative motion as on the 2D
+desktop, at any scale. Their menus and tooltips, which X11 makes windows of their own at absolute
+positions (override-redirect), are drawn as popups of the window they belong to, so they go along when
+it's out in the world: found through `WM_TRANSIENT_FOR`, else the app's window that has the keyboard,
+else the one they're over. (Hyprland 0.55.2's own lookup of an X11 window's parent returns a Wayland
+window; the plugin walks `WM_TRANSIENT_FOR` itself.)
+
+### Launching apps into the world
+
+Q, or the Action Menu's Apps page, shows the favourites from `plugin:hypr3d:apps` (desktop ids such as
+`org.mozilla.firefox`, app names such as `Discord`, or commands), then All apps: the XDG desktop
+entries (`applications/*.desktop` in `$XDG_DATA_HOME` and `$XDG_DATA_DIRS`, which on NixOS the plugin
+also looks for without the variable), minus hidden ones, with their icons (PNG or SVG from the icon
+themes, read with hyprgraphics). `hyprctl hypr3d launch WHAT` does the same from a script or a keybind.
+
+An app launched from 3D starts the way Hyprland's `exec` starts things, with `HYPR3D_LAUNCH` set in its
+environment. Its window (one whose process is the one started or a child of it, or has that variable)
+opens in front of you, not on the wall: where its class was put the last time in this world, else as
+`plugin:hypr3d:app_rules` says, else as the built-in rules say:
+
+| Apps | Distance | Height | Side |
+|---|---|---|---|
+| games: `steam_app_*`, `gamescope`, `*.exe`, `steam_proton`, `retroarch`, Minecraft's | 2 m | 1.3 m | |
+| chat and calls: Discord, Vesktop, WebCord, Equibop, Signal, Telegram, Element, Slack, Zoom, Teams | 1.3 m | 0.75 m | 1 m to the left |
+| video players: mpv, VLC, Celluloid, Showtime | 2 m | 1.2 m | |
+| anything else | 1.5 m | 0.9 m | |
+
+```lua
+hl.config({ plugin = { hypr3d = {
+    apps = "firefox, Discord, obs, steam",
+    app_rules = "steam_app_.*: 2.4 1.6, discord: 1.2 0.7 left, org.telegram.desktop: 1.2 0.6 right",
+} } })
+```
+
+A rule is `CLASS: DISTANCE HEIGHT [left|right|SIDE]`: the class a regular expression (the whole of
+it, any case), the distance from your eye and the window's height in metres, and to the side in metres
+(`left` and `right` are 1 m). A window whose app was already running (a second Discord, a Firefox
+that hands the address to the one open) isn't the launched process's: for a minute it's known by the
+class its desktop entry names (`StartupWMClass`, else its id, else the program's name). A Steam game,
+`steam steam://rungameid/ID`, is started by Steam, which may open windows of its own first: its
+window is the one with `SteamAppId=ID` in its environment, as Steam starts every game (native or
+Proton), or of class `steam_app_ID`, as Proton's are; Steam's windows stay where they'd be.
+
+Where you put a window (G, then put it down) is kept for its class, for each map, in
+`$XDG_STATE_HOME/hypr3d/windows/` (`courtyard.conf` for the courtyard): its windows launched from 3D
+open there again, and so does one that opens in 3D, or that's there when you enter 3D, when it's the
+only window of its class. X forgets its place; `hyprctl hypr3d reset-windows forget` forgets them all.
+
+A dialog of a window out in the world (a file chooser from the portal, OBS's properties) opens in front
+of it. Any other window that opens while you're in 3D, on the monitor you're in 3D on (a terminal from
+a keybind, the screen-share portal's picker, a splash screen), opens in front of you too, not out of
+sight on the wall: a floating one as big as it would be on the wall, a tiled one as the app rules
+say. X sends it to the wall.
+
+### The Windows page, pinning, real sizes
+
+B, or the Action Menu's Windows page, lists every window and where it is (on the wall and on which
+workspace, out in the world, or pinned). Picking one gives: Focus (its workspace shown, and the
+keyboard), Bring here (out in front of you), To the wall, Pin to view or Unpin, Bigger and Smaller (its
+real size, a quarter more or a fifth less), Play, and Close. `hyprctl hypr3d window SEL ACTION` does
+the same for a window by address, class or title.
+
+**Pinning** (H on the window under the crosshair, or the Windows page) keeps a window in the top right
+corner of your view, `pin_size` of its height, drawn over the world: a video, or a call, while you walk
+or play. More pinned windows stack down the side. You can still point at a pinned window and click it.
+Unpinning leaves it where it is in the world.
+
+**The real size**: Shift+wheel while you carry a window, Bigger and Smaller, or
+`hyprctl hypr3d window SEL size W H` change the window's size in pixels, and the app draws itself
+anew at it, text as big as before (Ctrl+wheel scales it instead). A tiled window becomes floating on the
+2D desktop for it, as that's the only way a window can be any size.
+
+### Drag and drop
+
+Dragging works in 3D: text, files or a browser's tab go where the crosshair is, over whatever window
+that is, and drop there when you let go; turn with the button held to take it to another window. In
+play mode the pointer drags, within the window played. The dragged thing's icon isn't drawn in 3D
+(Hyprland doesn't give it out); the cursor shows "grabbing" while it lasts.
+
+### Input methods
+
+An input method's candidate popup (`zwp_input_method_v2`'s popup surface, fcitx5's candidate list for
+example) is drawn as a popup of the window being typed into, by its text cursor, and goes along with it.
+
+### What works, app by app
+
+The VM test (`tools/test/vm`, below) runs open-source stand-ins for the apps you'd use; Discord, Steam's
+games and your own OBS setup are for `tools/test/live/check.sh --app` on your desktop.
+
+| App | Runs as | Works in 3D | Doesn't |
+|---|---|---|---|
+| games: SDL2 (`h3dgame.c`), Chocolate Doom, SuperTux | Wayland, and X11 through XWayland | play mode: the pointer locked, relative motion (Doom turns with the mouse), keys, buttons, the wheel, fullscreen, a controller | a controller only while the game has the keyboard focus (SDL's rule) |
+| Chromium | Wayland | `<select>` lists, tooltips and the context menu (popups), selecting text and the clipboard (`wl-paste` reads it), typing, drag and drop, touchpad scrolling and pinch zoom, fullscreen, the portal's file dialog (played along with the window) | |
+| Firefox | Wayland | the same; its `<select>` lists and tooltips are subsurfaces of its window, drawn with it | |
+| Electron (Discord's stack) | Wayland, and X11 | the page as in Chromium, the app's own context menu (a native one), notifications (mako) | pinch zoom (Electron turns it off unless the app turns it on); drag and drop inside an X11 Electron window, which doesn't work on the 2D desktop either |
+| OBS Studio | Wayland (Qt) | its menus (popups), its dialogs by it in the world, screen capture through xdg-desktop-portal-hyprland (its picker in front of you, used in 3D; the capture is the 3D view), a placed window captured as a window | a PipeWire source made through obs-websocket, which waits for the portal forever (OBS's, not 3D's: made from OBS's window, or loaded when it starts, it works) |
+| X11 apps: Tk, xterm | XWayland | clicks, typing, the wheel, menus and tooltips as popups (out in the world too), their own cursor, at scales 1, 1.5 and 2 | |
+| input methods: fcitx5 | `zwp_input_method_v2` | its candidate popup, by the text | |
+
+### Performance
+
+In 3D the whole view is drawn every frame: the world, the avatar, and every window, drawn from its
+client's own buffer (nothing is copied). A game in play mode is one of those windows, so its frames
+can't be scanned out directly: Hyprland's direct scanout, which puts a fullscreen window's buffer on
+the screen as it is and draws nothing, is blocked in 3D, and each of the game's frames is drawn into
+the 3D view instead. What that costs the game is the 3D view's own frame (the world and the avatar
+drawn around it) and up to a frame of latency, as with any compositing; `hyprctl hypr3d status` has
+the plugin's own CPU time a frame (`updateMs`, `renderMs`) and `fps`. The test VM can't show the
+difference: Hyprland blocks direct scanout there on the 2D desktop too (`hyprctl monitors` says
+`directScanoutBlockedBy: SW`, its software cursor). Your NVIDIA and a 144 Hz monitor are for
+`tools/test/live/check.sh`, which checks the 3D view keeps up with your monitor.
+
+A game behind the 3D view gets its frame callbacks, presentation feedback and FIFO barriers at the 3D
+view's frame rate, so with vsync it draws exactly as many frames as the 3D view does; without vsync
+(mailbox, or immediate) it draws as fast as it likes, and the 3D view shows the newest each frame.
+Tearing (`wp_tearing_control`) doesn't apply in 3D. In the test VM (a virtual 75 Hz monitor at
+1280×800):
+
+| | 3D view, frames a second | plugin's CPU time a frame | the game, frames a second |
+|---|---|---|---|
+| llvmpipe (software): 4 windows and the game on the wall | 17–21 | 43–51 ms (llvmpipe drawing) | 15–22 |
+| ... in third person, the avatar drawn | 9–10 | 86–100 ms | 8–13 |
+| ... the game played | 21 | 41 ms | 19–21 |
+| ... the game fullscreen and played | 23–29 | 29–38 ms | 18–30 |
+| Intel iGPU (`--gpu virgl`): 4 windows and the game on the wall | 79–83 | 0.2 ms | 76–83 |
+| ... in third person | 79–82 | 0.3 ms | 79–82 |
+| ... the game played | 96–102 | 0.2 ms | 95–103 |
+| ... the game fullscreen and played | 94–99 | 0.5 ms | 90–98 |
+| ... Chocolate Doom played (Wayland or X11) | 92–96 | | |
+
+(Two runs each; the llvmpipe numbers move with the host's load.)
+
+On the 2D desktop the same game drew 150–670 frames a second: in the VM nothing is held to the
+virtual monitor's 75 Hz, the 3D view included.
+
 ## hyprctl
 
 `hyprctl hypr3d` with no arguments prints the state as JSON. Commands:
@@ -148,12 +353,17 @@ at, and nothing is written anywhere or sent. Leaving 3D, or turning it off, clos
 |---|---|
 | `status`, `toggle`, `on`, `off [now]` | the state as JSON; enter and leave 3D |
 | `type [on\|off]` | type into the window under the crosshair, or go back to walking |
+| `play [on\|off\|toggle]` | play the window under the crosshair (P), or stop; without an argument, what's played: its class, the pointer, whether it's locked or confined |
+| `launch WHAT` | start an app into the world: a desktop id, an app's name or a command |
+| `apps` | the desktop entries: id, name, what it runs, its class, whether its icon was found |
+| `window SEL focus\|bring\|wall\|pin\|unpin\|bigger\|smaller\|size W H\|play\|close` | do that to a window, by its address (`0x…`, as `hyprctl clients` has it), class or title |
+| `panels` | everything drawn in 3D, in drawing order: its kind (window, popup, layer), window, box on the desktop, placed, drawn over the world, and its surfaces' boxes (subsurfaces too) |
 | `look dx dy`, `turn yaw pitch`, `tp x y z` | turn by mouse counts, turn to angles in degrees, teleport |
 | `walk secs [forward\|back\|left\|right]`, `jump`, `fly` | move from a script |
 | `click [left\|right\|middle]` | click where the crosshair is |
 | `sens [value]` | mouse sensitivity |
-| `grab`, `place`, `hold dist [scale]`, `reset-windows` | carry windows, and put them all back |
-| `windows` | the windows off the wall: where, how far from your eye and how big (1 = as on the wall), and how far and big the one you carry is held |
+| `grab`, `place`, `hold dist [scale]`, `reset-windows [forget]` | carry windows, and put them all back (`forget`: nor where their classes were put) |
+| `windows` | the windows off the wall: their address, where, how far from your eye, how big (1 = as on the wall) and how tall, held or pinned, how far and big the one you carry is held, and how many places are remembered |
 | `map [path\|none\|reload\|forget\|scale s]` | load a map; `forget` drops the start and desktop place saved for it |
 | `spawn [here]` | go back to the start, or make where you stand the start |
 | `desktop [here [height]]` | where the desktop hangs, or hang it where the crosshair points |
@@ -167,9 +377,14 @@ at, and nothing is written anywhere or sent. Leaving 3D, or turning it off, clos
 | `avatar emote [name\|number\|file\|folder [once\|loop]\|stop]` | play an emote, or load emotes from files; without a name, the list, with each one's speed |
 | `menu [open [page]\|close\|toggle\|back\|pick [n]\|move dx dy\|scroll n]` | drive the Action Menu; without an argument, what it shows (a dial's value, a stick's x and y) |
 
-The `hypr3d:menu` dispatcher toggles the Action Menu. `hypr3d:menu emotes` opens a page, and any
-other argument does what `hyprctl hypr3d menu` does. The Lua functions are
-`hl.plugin.hypr3d.toggle()`, `enter()`, `exit()`, `type()` and `menu([page or command])`.
+The `hypr3d:menu` dispatcher toggles the Action Menu. `hypr3d:menu emotes` opens a page (`apps` and
+`windows` too), and any other argument does what `hyprctl hypr3d menu` does. The `hypr3d:play`
+dispatcher plays the window under the crosshair, or stops. The Lua functions are
+`hl.plugin.hypr3d.toggle()`, `enter()`, `exit()`, `type()`, `play()` and `menu([page or command])`.
+
+The status's `"cursor"` is the app's cursor as it's drawn (where on the window, its size and
+hotspot, or null), `"playing"` what's played, and `"updateMs"` and `"renderMs"` the plugin's own
+time a frame on the CPU (its update, and its drawing's GL calls), averaged.
 
 ## Avatars
 
@@ -484,8 +699,44 @@ Valve's; this reads your copy of the game for your own use.
   - lip sync through PipeWire: `pw-cat` sings the vowels into the virtual microphone, and the
     visemes, the badge, the "hypr3d lip sync" stream in `pw-dump` and its going away when you
     leave 3D or turn lip sync off are checked
+  - play mode (`h3dgame.c`, a small SDL2 game that prints what it gets and draws it): its pointer
+    lock, relative motion to the count, keys (Esc and Tab too), buttons and the wheel reaching it and
+    not the player, the camera facing it and back, the pointer over it without a lock and kept on it,
+    its own cursor, fullscreen, Super+Esc, leaving 3D, a screen lock (swaylock, unlocked by typing into
+    it), and a game controller (`gamepad.py`, an Xbox 360 pad through uinput) read by SDL while it has
+    the keyboard focus, and not once it hasn't
+  - what a game needs from the compositor: the activated state (`wev`), `wl_output` enter and
+    presentation feedback presented, not discarded (`weston-presentation-shm`'s own protocol log),
+    its idle inhibitor on a hidden workspace (`swayidle`), and its frame rate following the 3D view's
+  - X11 apps through XWayland: a Tk app (`tkapp.py`) clicked, typed into and scrolled, its menu bar's
+    menu, right-click menu and tooltip (override-redirect windows) as popups, placed in the world too;
+    SDL's x11 driver in relative mode getting in 3D what it gets on the 2D desktop; xterm's own cursor;
+    at scales 1, 1.5 and 2
+  - apps: the Apps page (desktop entries written for the test, their icons), launching into the world
+    (the built-in rules for a game and a chat app, a config rule for a command), places remembered by
+    class and restored, X forgetting one, the Windows page, pinning, real sizes (Bigger, Shift+wheel),
+    and fullscreen from an app starting play mode
+  - everyday apps, open-source stand-ins: Chromium and Firefox with `page.html` (a `<select>`'s list,
+    a tooltip and the context menu drawn over the window, as popups or, Firefox's list and tooltip,
+    subsurfaces; text selected by dragging copied to the clipboard and read back with `wl-paste`,
+    typing, drag and drop in the page and, walking, out of it with the crosshair onto another window, a
+    touchpad's scrolling and pinch, fullscreen, a file dialog opening by the browser, played along with
+    it and closed with Esc); Electron (`electron/`, Discord's stack) as a
+    Wayland and an X11 client, with its own context menu (a native one, clicked) and a notification
+    (mako), and drag and drop through XWayland compared with the 2D desktop's; OBS (driven through
+    obs-websocket by `obsws.py`): its menu, a dialog by it in the world, screen capture through
+    xdg-desktop-portal-hyprland with its picker used in 3D, the capture showing the 3D view, and a
+    placed window captured as a window
+  - an input method: fcitx5's clipboard list (Ctrl+;) shown while typing into a terminal in 3D, its
+    popup drawn over the window by the text, and gone with Esc
+  - real open-source games: Chocolate Doom with Freedoom's levels (the pointer locked, turned by the
+    mouse, walked by the keys; as a Wayland and an X11 client) and SuperTux (its menu by the keys and
+    by the controller)
+  - frame rates: the 3D view's with four windows and a game, in first and third person, playing,
+    with a window pinned, the plugin's own time a frame, and the game's own frame rate behind it; and
+    a fullscreen game with direct scanout allowed on the 2D desktop against the same game played in 3D
   - `tools/test/live/check.sh`, below, run in the VM with its microphone prompts sung into the test
-    microphone, and stopped with Ctrl+C halfway through
+    microphone and `--app`'s steps done as they're asked for, and stopped with Ctrl+C halfway through
   - that Hyprland exits cleanly with windows open, in the dwindle and the master layout. Hyprland
     0.55.x doesn't: it crashes in both (with or without hypr3d), dwindle's fixed upstream in 0.56.0
     (commit 338bdbb3) and master's not yet, so these checks say "known" there instead of failing, and
@@ -497,19 +748,24 @@ Valve's; this reads your copy of the game for your own use.
   runs only those sections (after section 0, which starts Hyprland). Only synthetic things go into the
   VM: BoothAccessories converted from `booth.py`'s packages (or taken from `--avatars DIR`, as
   `regress.sh --keep` leaves them), `assets.py`'s two files, `litmap.py`'s two courts, the vowels,
-  `wheel.py` and `touchpad.py`, the live check script and `hypr3d.so`. A run takes about thirteen
-  minutes (ten with `--gpu virgl`), nearly all of it in the VMs: Mesa draws in software there, at 6 to
-  13 frames a second (the lit map's first frames take a while more, as llvmpipe compiles its shaders).
-  With `--gpu virgl` a GPU of yours draws instead, through virglrenderer on the render node
+  `wheel.py`, `touchpad.py` and `gamepad.py`, the test apps written here (`h3dgame.c`, `tkapp.py`,
+  `page.html`, `electron/`, `obsws.py`), the live check script and `hypr3d.so`; the apps it runs are
+  open-source ones from nixpkgs (Chromium, Firefox, Electron, OBS Studio, Chocolate Doom with Freedoom's
+  levels, SuperTux, fcitx5, xterm, Tk, weston's demo clients, swayidle, swaylock, mako and the portals).
+  A run has about 450 checks and takes about half an hour (23 minutes with `--gpu virgl`), nearly all
+  of it in the VMs: Mesa draws in software there, at 6 to 22 frames a second (the lit map's first
+  frames take a while more, as llvmpipe compiles its shaders). With `--gpu virgl` a GPU of yours draws
+  instead, through virglrenderer on the render node
   `H3D_RENDERNODE` (`/dev/dri/renderD129` by default, an Intel iGPU here): QEMU's egl-headless
-  display, which opens no window either. The first run builds the VMs in about a minute and fetches
-  about 410 MiB for them (1.3 GiB unpacked, mostly QEMU and a kernel), `--gpu virgl` about 200 MiB
-  more (the full QEMU, 1 GiB unpacked); `OUTDIR/driver` keeps the VMs' closure (4 GiB, most of it
+  display, which opens no window either. The first run builds the VMs in a few minutes and fetches
+  about 410 MiB for them (1.3 GiB unpacked, mostly QEMU and a kernel) and about 890 MiB for the apps
+  (2.2 GiB unpacked, most of it Chromium, Firefox, Electron and OBS), `--gpu virgl` about 200 MiB
+  more (the full QEMU, 1 GiB unpacked); `OUTDIR/driver` keeps the VMs' closure (9.5 GiB, much of it
   already in a NixOS store) alive until `OUTDIR` is deleted. While it runs, the VMs' disks and the
   driver's sockets are in a folder under `/tmp` (`H3D_VM_TMP` picks another), deleted afterwards: the
   test driver puts them in `XDG_RUNTIME_DIR`, a small tmpfs that a core dump fills.
-- `tools/test/live/check.sh OUTDIR [--mic] [--avatar FILE] [--map FILE|--no-map]`: for what only your
-  own desktop can check: your GPU and monitor, and your voice. You run it, in your Hyprland session,
+- `tools/test/live/check.sh OUTDIR [--mic] [--avatar FILE] [--map FILE|--no-map] [--app CMD]...`: for
+  what only your own desktop can check: your GPU and monitor, your voice, and your own apps. You run it, in your Hyprland session,
   and don't touch the mouse or keyboard while it runs. It loads `hypr3d.so` and compares your desktop
   before and after, enters 3D on the focused monitor (and checks it keeps up with your monitor's
   refresh rate), loads an avatar (`--avatar`, else `assets.py`'s ToonTest) and looks at it, opens the
@@ -517,7 +773,14 @@ Valve's; this reads your copy of the game for your own use.
   crosshair starts on and puts it back, walks into your map (`--map`, else
   `~/.local/share/hypr3d/maps/de_mirage.glb` if you have it), leaves 3D and unloads the plugin. With
   `--mic` it turns lip sync on and asks you, in notifications over the 3D view, to say a, i, u, e and
-  o, then "sss", then nothing, and says which vowel it heard each time. `OUTDIR` gets `results.txt`,
+  o, then "sss", then nothing, and says which vowel it heard each time. Each `--app` (a desktop id, an
+  app's name or a command: `--app discord`, `--app "steam steam://rungameid/APPID"`) is launched into 3D,
+  and notifications ask you to play it (P) and stop (Super+Esc), type into it (E), point at it (its own
+  cursor) and pin it (H), then to try what matters to you in it (P again, Super+Esc when you're done: a
+  call, a screen share, OBS capturing the 3D view, a controller); frames of each step are saved, and
+  its window is closed afterwards, as its close button does (a chat app goes to its tray, a game
+  quits). A Steam game is the window Steam
+  starts for it, not Steam's own. `OUTDIR` gets `results.txt`,
   `frames/` (grim's, and `diff-*.png` showing in red what changed between two), `status/` (hyprctl's
   answers), `lipsync.jsonl` and `hypr3d.log` (the plugin's lines from Hyprland's log). Whatever
   happens, Ctrl+C included (Esc leaves 3D first, so the terminal gets it), it leaves 3D, turns lip
@@ -589,7 +852,24 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check
 - VRChat's own emote animations are proprietary, so the built-in emotes are procedural look-alikes.
   Load real ones as `.vrma` or glTF clips with `avatar_emotes`.
 - In 3D mode, Alt+Tab doesn't reach Hyprland: Tab opens the Action Menu even with Alt held. Only keys
-  with Super or Ctrl+Alt are passed through.
+  with Super or Ctrl+Alt are passed through. That holds in play mode too, so a game never gets
+  Super+anything: that's what keeps Super+Esc (and your own Super shortcuts) working while you play.
+- Direct scanout is off in 3D: a fullscreen game is drawn into the 3D view (its frame copied into a
+  texture, the scene drawn around it) instead of going to the screen as it is. See Performance.
+- A window placed in the world from another monitor's workspace keeps that monitor's `wl_output`, scale
+  and presentation timing; its FIFO barriers are released as that monitor presents.
+- A window is known as launched from 3D by its process (the one started, or a child of it), by
+  `HYPR3D_LAUNCH` in its environment, or, a Steam game's, by `SteamAppId` (or class `steam_app_ID`).
+  An app that hands the launch to an instance already running (a second Discord, a second Firefox
+  without `--new-instance`) is known only by its class, for a minute: its desktop entry's
+  `StartupWMClass` (or id). Otherwise its window opens where Hyprland puts it, on the wall, and the
+  Windows page's "Bring here" brings it.
+- Drag and drop works in 3D, but the dragged thing's icon isn't drawn there (Hyprland keeps it
+  private); the "grabbing" cursor shows instead.
+- Changing a window's real size (Shift+wheel, Bigger, Smaller) makes a tiled window floating on the 2D
+  desktop.
+- Where windows were put is remembered by class, so an app with several windows of one class is put
+  back only when it has one.
 - Lip sync knows five vowels, how loud you are, and four consonants (pp, ff, ss, ch) where the
   avatar has their visemes; not th, dd, kk, nn or rr, and an n's murmur shows as pp, as an m's does.
   Its vowels are Japanese ones, between a man's and a woman's voice (Tokyo speakers' measurements and

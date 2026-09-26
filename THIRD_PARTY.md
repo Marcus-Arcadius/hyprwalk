@@ -137,7 +137,15 @@ from it and adjusted; none of the data is in this repo. It borrows nothing from 
 https://github.com/hyprwm/Hyprland, BSD 3-Clause License, Copyright (c) 2022-2026, vaxerski): nixpkgs'
 `testers.runNixOSTest`, QEMU without VGA and with a virtio GPU. No code of it is copied. The VM itself is built from
 nixpkgs (MIT License) when you run the test, and nothing of it is in this repo; its QEMU (with `--gpu virgl`, the
-full one, with virglrenderer), fonts, PipeWire, foot, grim, wev and Python keep their own licenses.
+full one, with virglrenderer), fonts, PipeWire, foot, grim, wev and Python keep their own licenses, as do the apps
+added for play mode and the everyday apps: XWayland, xterm and xev (MIT/X11), Tk (Tcl/Tk license) through Python,
+SDL2 (sdl2-compat and SDL3, zlib) for `h3dgame.c`, weston's demo clients (MIT), swayidle and mako (MIT), Chocolate
+Doom (GNU GPL v2) with Freedoom's levels (BSD 3-Clause), SuperTux (GNU GPL v3), Chromium (BSD 3-Clause and
+others), Firefox (MPL 2.0), Electron (MIT), OBS Studio (GNU GPL v2), xdg-desktop-portal (LGPL 2.1),
+xdg-desktop-portal-hyprland (BSD 3-Clause), xdg-desktop-portal-gtk (LGPL 2.1), fcitx5 (LGPL 2.1),
+wl-clipboard (GNU GPL v3), swaylock (MIT) and D-Bus's dbus-monitor (AFL 2.1 or GNU GPL v2). They run in the VM only; none of them
+is in this repo or linked into the plugin. `obsws.py` speaks obs-websocket's documented protocol (v5); it's
+written here, from the protocol's description.
 
 `src/main.cpp`'s `onAxis` sends a window the wheel the way Hyprland's `CInputManager::onMouseWheel` does (its scroll
 factors and its discrete scrolling made up for high-resolution wheels, `input:emulate_discrete_scroll`), written
@@ -149,6 +157,24 @@ that a window scrolls the same in 3D as on the desktop.
 aquamarine's `src/backend/Headless.cpp` and `src/backend/Backend.cpp` (https://github.com/hyprwm/aquamarine, BSD
 3-Clause License, Copyright (c) 2024, Hypr Development). No code of it is copied: the plugin only calls its public
 `CBackend::addIdleEvent` and `removeIdleEvent`.
+
+## Apps and games in 3D (src/main.cpp, src/apps.cpp, src/panels.cpp)
+
+- The plugin links hyprgraphics (https://github.com/hyprwm/hyprgraphics, BSD 3-Clause License, Copyright (c) 2024,
+  Hypr Development), which Hyprland itself loads, to read the apps' icons (PNG, SVG and others).
+- Play mode gives a window the mouse the way Hyprland's `CInputManager::onMouseMoved` and `mouseMoveUnified` do
+  (relative motion, then the pointer, kept in a confinement's region, still under a lock), and reads
+  `CPointerConstraint`'s state; the app's cursor comes from Hyprland's `CPointerManager`; presentation feedback for
+  what the 3D view draws follows `CSurfacePassElement` and `CWLSurfaceResource::presentFeedback`; the X11 parent walk
+  replaces what `CWindow::x11TransientFor` meant to do. All of it was written after reading Hyprland 0.55.2's source
+  (https://github.com/hyprwm/Hyprland, BSD 3-Clause License, Copyright (c) 2022-2026, vaxerski); no code of it is
+  copied, the plugin calls Hyprland's public interfaces.
+- The desktop entries and icon themes are read as the freedesktop.org Desktop Entry and Icon Theme specifications
+  describe them; no code of any implementation is used.
+- The idea of games and everyday apps in the world, and of a launcher, a window list and pinning, comes from
+  WaylandCraft (https://github.com/EVV1E/waylandcraft, and its Bedrock port
+  https://github.com/sfdgdrfsrf/WaylandCraft-BE), a Wayland compositor inside Minecraft, GNU GPL v3. Only its README
+  and how it behaves were read; none of its code is here, and none was read for this.
 
 ## VRCFury
 

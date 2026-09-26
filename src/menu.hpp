@@ -4,19 +4,28 @@
 #include "renderer.hpp"
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace h3d {
 
+    // a picture for an item instead of its emoji (an app's icon)
+    struct SPicture {
+        int                   w = 0, h = 0;
+        std::vector<uint32_t> pixels; // cairo's premultiplied ARGB
+    };
+
     // one thing in the Action Menu's ring: a page to open, or something for the owner to do
     struct SMenuItem {
         std::string label;
         std::string hint;                          // a smaller line under it (what it's set to), "" = none
         std::string icon;                          // an emoji, "" = none
+        std::shared_ptr<const SPicture> picture;   // drawn instead of the emoji, null = none
         std::string page;                          // the page it opens, "" = an action
         int         action = 0, arg = 0, arg2 = 0; // the owner's
+        std::string target;                        // the owner's too: what it acts on (a window, an app)
         bool        on = false, disabled = false;
         bool        dial  = false; // a slider: picking it opens a dial (VRChat's radial puppet) that sets value
         int         axes  = 1;     // 2: the dial is a stick (a two-axis puppet) that sets value and value2, -1..1 each
@@ -127,6 +136,21 @@ namespace h3d {
         MA_EMOTE_STOP,
         MA_SLIDER, // arg: the model's slider; its dial sets it
         MA_LIPSYNC, // the microphone moves the mouth, or not
+        // the plugin's own pages (main.cpp): apps and windows
+        MA_LAUNCH, // target: a desktop id, or a command
+        MA_WINDOW, // target: the window's address; arg: eWindowAction
+    };
+
+    // what the Windows page does to a window
+    enum eWindowAction : uint8_t {
+        WA_FOCUS,   // its workspace shown, and the keyboard
+        WA_BRING,   // out in the world, in front of you
+        WA_WALL,    // back on the desktop wall
+        WA_PIN,     // follows your view, in a corner (again: unpinned, where it is)
+        WA_BIGGER,  // its real size, a quarter more (it draws itself anew at that size)
+        WA_SMALLER, // a fifth less
+        WA_PLAY,    // play mode on it
+        WA_CLOSE,   // asked to close
     };
 
     // what the pages show

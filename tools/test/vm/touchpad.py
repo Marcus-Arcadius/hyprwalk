@@ -1,7 +1,8 @@
-# touchpad.py [h|d]D...: a touchpad made through uinput (as root, in tools/test/vm's VM) that scrolls with two
+# touchpad.py [h|d|z]D...: a touchpad made through uinput (as root, in tools/test/vm's VM) that scrolls with two
 # fingers: for each amount, both fingers go down, move D device units together (30 a millimetre; > 0 down, towards
 # you; "h" first: right, "d": down and right at once) in steps of 1 mm, 12 ms apart, stay a moment and lift, 0.5 s
-# before the next. libinput makes finger scrolling of that (wl_pointer axis_source finger, both axes in a frame when
+# before the next. "z" first pinches instead: the fingers move D units apart (< 0: together), each half of it
+# sideways, which libinput makes a pinch gesture of (zwp_pointer_gestures_v1: a browser zooms). libinput makes finger scrolling of that (wl_pointer axis_source finger, both axes in a frame when
 # they move both ways, then axis_stop when they lift). The touchpad goes away afterwards.
 # It's on USB, so libinput pairs it with no keyboard and doesn't disable it while typing.
 import fcntl
@@ -55,7 +56,22 @@ def main(steps):
 
     time.sleep(1.5)  # for libinput, and Hyprland, to take it in
     for step in steps:
-        d = int(step.lstrip('hd'))
+        d = int(step.lstrip('hdz'))
+        if step[0] == 'z':
+            # two fingers from 25 mm apart in the middle, each moving d/2 away from the other
+            x0, y0 = W / 2 - 375, H / 2
+            n = max(1, round(abs(d) / 2 / RES))
+            fingers([(x0, y0), (x0 + 750, y0)], first=True)
+            time.sleep(0.012)
+            for i in range(1, n + 1):
+                h = d / 2 * i / n
+                fingers([(x0 - h, y0), (x0 + 750 + h, y0)])
+                time.sleep(0.012)
+            time.sleep(0.1)
+            emit((EV_ABS, ABS_MT_SLOT, 0), (EV_ABS, ABS_MT_TRACKING_ID, -1), (EV_ABS, ABS_MT_SLOT, 1), (EV_ABS, ABS_MT_TRACKING_ID, -1),
+                 (EV_KEY, BTN_TOUCH, 0), (EV_KEY, BTN_TOOL_DOUBLETAP, 0))
+            time.sleep(0.5)
+            continue
         dx, dy = (d, 0) if step[0] == 'h' else (d, d) if step[0] == 'd' else (0, d)
         # two fingers 25 mm apart, side by side, starting near the edges they move away from
         x0 = (W * 0.1 if dx > 0 else W * 0.9 - 750) if dx else W / 2 - 375

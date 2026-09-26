@@ -3,8 +3,9 @@ SRC      := $(wildcard src/*.cpp)
 OBJ      := $(SRC:src/%.cpp=build/%.o)
 DEP      := $(OBJ:.o=.d)
 
-PKGS     := hyprland pixman-1 libdrm glesv2 egl cairo pangocairo
-LIBS     := glesv2 cairo pangocairo
+PKGS     := hyprland pixman-1 libdrm glesv2 egl cairo pangocairo hyprgraphics
+# (hyprgraphics: the apps' icons, SVG too; Hyprland has it loaded already)
+LIBS     := glesv2 cairo pangocairo hyprgraphics
 # the microphone for lip sync (src/mic.cpp), when build.sh found PipeWire
 ifeq ($(shell pkg-config --exists libpipewire-0.3 && echo yes),yes)
 PKGS     += libpipewire-0.3

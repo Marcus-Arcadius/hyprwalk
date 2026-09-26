@@ -21,9 +21,10 @@ namespace h3d {
 
     // one wl_surface drawn into a panel
     struct SPanelSurface {
-        SP<Render::ITexture> tex;
-        CBox                 box; // logical, relative to the panel's top-left
-        Vector2D             uvTL{0, 0}, uvBR{1, 1};
+        SP<Render::ITexture>   tex;
+        CBox                   box; // logical, relative to the panel's top-left
+        Vector2D               uvTL{0, 0}, uvBR{1, 1};
+        WP<CWLSurfaceResource> surface; // what it shows (none: the app's cursor, drawn over it)
     };
 
     // where a panel is in the world
@@ -81,6 +82,7 @@ namespace h3d {
         bool       placed = false; // somewhere in the world rather than on the desktop wall
         bool       held   = false; // being carried around
         bool       depthWrite = false; // hides what's behind it by depth instead of drawing order
+        bool       front    = false; // drawn over everything, the world included (the window played, and its popups)
         float      sortDist = 0;   // drawing order among placed panels (far first)
         uintptr_t  group    = 0;   // the placed window this panel belongs to (itself or its popup's owner)
     };
@@ -89,4 +91,7 @@ namespace h3d {
     // desktop wall; `spacing` is the distance between stacking levels in meters.
     // Windows in `always` are included even when their workspace isn't shown.
     std::vector<SPanel> collectPanels(PHLMONITOR mon, float spacing, const std::unordered_set<uintptr_t>& always = {});
+
+    // the window an X11 override-redirect one (a menu, a tooltip) belongs to, null = none (a window of its own)
+    PHLWINDOW x11Owner(const PHLWINDOW& w);
 }

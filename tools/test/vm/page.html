@@ -1,0 +1,54 @@
+<!doctype html>
+<!-- page.html: the page tools/test/vm's browsers (Chromium, Firefox) and Electron show. Everything sits at fixed
+     CSS pixels, so a check knows where to point in 3D; what it did shows in the title ("h3d[H]: ..."), which
+     Hyprland reports as the window's title. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>h3d[0]: loading</title>
+<style>
+    html, body { margin: 0; background: #20242c; color: #eee; font: 18px sans-serif; overflow: hidden; }
+    .at { position: absolute; }
+    #text { left: 20px; top: 20px; width: 520px; font-size: 22px; margin: 0; line-height: 30px; }
+    #sel { left: 20px; top: 80px; width: 200px; height: 32px; font-size: 18px; }
+    #tip { left: 260px; top: 80px; width: 160px; height: 32px; }
+    #inp { left: 20px; top: 140px; width: 300px; height: 30px; font-size: 18px; }
+    #file { left: 360px; top: 140px; width: 200px; }
+    #fs { left: 20px; top: 200px; width: 240px; height: 100px; background: linear-gradient(90deg, #e04040, #4040e0); line-height: 100px; text-align: center; }
+    #scroll { left: 300px; top: 200px; width: 240px; height: 180px; overflow: auto; background: #303848; }
+    #scroll div { height: 4000px; background: repeating-linear-gradient(#303848 0 40px, #405070 40px 80px); }
+</style>
+</head>
+<body>
+<p class="at" id="text">The quick brown fox jumps over the lazy dog.</p>
+<select class="at" id="sel"><option>one</option><option>two</option><option>three</option></select>
+<button class="at" id="tip" title="a tooltip">hover me</button>
+<input class="at" id="inp" placeholder="type here">
+<input class="at" id="file" type="file">
+<div class="at" id="fs">click: fullscreen</div>
+<div class="at" id="scroll"><div></div></div>
+<script>
+    // "h3d[H]: what happened", H the page's height (CSS px: logical ones at scale 1): the window's height less it is
+    // how far down the window the page starts, under the browser's own bars
+    let said = "loading";
+    const t = (s) => { said = s; document.title = "h3d[" + innerHeight + "]: " + s; };
+    // (a bar of the browser's that comes or goes moves the page: the title says so)
+    window.addEventListener("resize", () => t(said));
+    const $ = (id) => document.getElementById(id);
+    $("sel").onchange = () => t("selected " + $("sel").value);
+    $("inp").oninput = () => t("typed " + $("inp").value);
+    $("file").onchange = () => t("file " + ($("file").files[0] || {}).name);
+    $("fs").onclick = () => (document.fullscreenElement ? document.exitFullscreen() : $("fs").requestFullscreen());
+    document.onfullscreenchange = () => t("fullscreen " + (document.fullscreenElement ? "on" : "off"));
+    $("scroll").onscroll = () => t("scrolled " + Math.round($("scroll").scrollTop));
+    document.addEventListener("copy", () => setTimeout(() => t("copied " + String(document.getSelection())), 0));
+    document.addEventListener("contextmenu", () => t("context menu"));
+    window.onload = () => t("ready");
+    // (only a pinch's zoom: a resize, going fullscreen, fires this too, and "fullscreen on" is what's wanted then)
+    if (window.visualViewport)
+        visualViewport.onresize = () => Math.abs(visualViewport.scale - 1) > 0.01 && t("zoom " + visualViewport.scale.toFixed(2));
+    document.addEventListener("dragstart", () => t("drag start"));
+    $("inp").addEventListener("drop", (e) => setTimeout(() => t("dropped " + $("inp").value), 0));
+</script>
+</body>
+</html>
