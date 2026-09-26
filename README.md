@@ -670,7 +670,8 @@ It exports a map from your own CS2 install with
 shaders are too new for the installed Source 2 Viewer, it downloads or builds a newer one. It keeps
 the 3D skybox, the sky and CS2's baked lighting: lightmaps, light probes, the sun, fog, the exposure
 range and the tone curve. It also keeps the materials' detail textures, self-illumination and
-blended layers. See `python3 tools/cs2map.py --help` for `--spawn`, `--desktop` and the rest. The maps are
+blended layers, and puts decals back on what they're painted on (Source 2 Viewer 20's glTF export lifts
+them 39 cm off it). See `python3 tools/cs2map.py --help` for `--spawn`, `--desktop` and the rest. The maps are
 Valve's; this reads your copy of the game for your own use.
 
 ### tools/test: the tests
@@ -920,6 +921,10 @@ Valve's; this reads your copy of the game for your own use.
   and hands from where a humanoid clip's own IK goal curves say they were. Unity writes those goals
   from the motion when it imports the clip, so they are Unity's own record of it.
 - `tools/test/synth/fbxread.py FILE.fbx`: prints a binary FBX's model tree (plain python3).
+- `tools/test/synth/decal_unit.py`: `tools/cs2map.py`'s decal fix on small hand-made scenes. Decals
+  lifted 39 cm (on a floor, on a wall, over a curb, and under a node 16 times bigger, as the 3D skybox
+  is) come back to 1 cm off their surface. A material that isn't a decal, decals already 1 cm off,
+  decals with nothing behind them and a lone lifted decal among right ones stay where they are.
 - `tools/test/regress.sh [--base REV|FILE] [--robot PATH] [--items DIR] [--shots]`: converts the
   synthetic avatars, the Booth-style packages (alone, with each outfit and from the zip), VRChat's
   robot sample (if you give its path) and three free Booth items (if you give the folder you
@@ -943,7 +948,7 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/anim_unit.
 blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check.py -- Avatar.zip Dance.anim
 ```
 
-`vowels.py`, `fbxread.py` and the shell scripts run with plain `python3` or `bash`.
+`vowels.py`, `fbxread.py`, `decal_unit.py` and the shell scripts run with plain `python3` or `bash`.
 
 ## Known limits
 

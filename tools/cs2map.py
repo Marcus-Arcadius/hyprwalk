@@ -21,6 +21,8 @@ to suit hypr3d:
   - blended materials keep their second layer, painted in by the vertices the way the game does
     (hypr3d's HYPR3D_materials_blend extension and a _BLEND vertex attribute)
   - foliage drops the wind data Valve keeps in its vertex colours
+  - decals (the bombsite letters, stains, posters) lie 1 cm off what they're on: Source 2 Viewer 20
+    lifts them 39 cm
   - entities that start disabled (the Retakes barriers, for one) are left out
   - there's a start point (hypr3d_spawn) at a team's spawn, and the desktop's wall when you give
     one (hypr3d_desktop); otherwise hypr3d looks for a wall itself
@@ -49,7 +51,7 @@ options:
 Maps are Valve's: this only reads the copy of the game you have, for your own use.
 """
 
-import sys, os, re, io, json, math, struct, shutil, subprocess, tempfile, argparse, glob, zipfile, time
+import sys, os, re, io, json, math, struct, shutil, subprocess, tempfile, argparse, glob, zipfile, time, bisect
 import urllib.request
 
 EXT = 'HYPR3D_materials_blend'
@@ -62,6 +64,9 @@ RELEASES = 'https://api.github.com/repos/ValveResourceFormat/ValveResourceFormat
 VCS_ERROR = 'Only VCS file versions'
 # the lightmaps hypr3d reads: CS2's lightmap format 8.2 (irradiance, its main direction, baked shadows)
 LIGHTMAPS = ('irradiance', 'directional_irradiance', 'direct_light_shadows')
+# glTF accessors: struct's letter for each component type, and how many numbers each type has
+COMPONENT = {5120: 'b', 5121: 'B', 5122: 'h', 5123: 'H', 5125: 'I', 5126: 'f'}
+WIDTH = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'MAT2': 4, 'MAT3': 9, 'MAT4': 16}
 
 # where to start and where the desktop goes, for maps that have been looked at: in the map's own
 # units, as --spawn and --desktop take them
@@ -140,6 +145,33 @@ def apply(m, p):
 
 def column_major(m):
     return [float(m[r][c]) for c in range(4) for r in range(4)]
+
+
+def node_matrix(nd):
+    """a glTF node's own transform, row-major"""
+    if 'matrix' in nd:
+        m = nd['matrix']
+        return [[float(m[c * 4 + r]) for c in range(4)] for r in range(4)]
+    x, y, z, w = nd.get('rotation', [0, 0, 0, 1])
+    s = nd.get('scale', [1, 1, 1])
+    r = [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+         [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+         [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+    return affine([[r[i][k] * s[k] for k in range(3)] for i in range(3)], nd.get('translation', [0, 0, 0]))
+
+
+def invert_affine(m):
+    """the inverse of an affine 4x4 (row-major), or None when it flattens space"""
+    a, b, c = m[0][:3], m[1][:3], m[2][:3]
+    cof = [[b[1] * c[2] - b[2] * c[1], a[2] * c[1] - a[1] * c[2], a[1] * b[2] - a[2] * b[1]],
+           [b[2] * c[0] - b[0] * c[2], a[0] * c[2] - a[2] * c[0], a[2] * b[0] - a[0] * b[2]],
+           [b[0] * c[1] - b[1] * c[0], a[1] * c[0] - a[0] * c[1], a[0] * b[1] - a[1] * b[0]]]
+    det = a[0] * cof[0][0] + a[1] * cof[1][0] + a[2] * cof[2][0]
+    if abs(det) < 1e-12:
+        return None
+    inv = [[cof[i][k] / det for k in range(3)] for i in range(3)]
+    t = [m[i][3] for i in range(3)]
+    return affine(inv, [-sum(inv[i][k] * t[k] for k in range(3)) for i in range(3)])
 
 
 # glTF (meters, y up) -> Source (inches, z up): the inverse of to_gltf
@@ -489,6 +521,47 @@ class Doc:
         if target:
             bv['target'] = target
         return self.add('bufferViews', bv)
+
+    def read(self, ai):
+        """an accessor's numbers, row after row, in one flat tuple"""
+        a = self.j['accessors'][ai]
+        fmt, n = COMPONENT[a['componentType']], WIDTH[a['type']]
+        if 'bufferView' not in a:
+            return (0,) * (a['count'] * n)
+        bv = self.j['bufferViews'][a['bufferView']]
+        row = struct.Struct(f'<{n}{fmt}')
+        stride = bv.get('byteStride') or row.size
+        buf, at = self.buffers[bv['buffer']], bv.get('byteOffset', 0) + a.get('byteOffset', 0)
+        if stride == row.size:
+            return struct.unpack_from(f'<{a["count"] * n}{fmt}', buf, at)
+        return tuple(x for i in range(a['count']) for x in row.unpack_from(buf, at + i * stride))
+
+    def write(self, ai, values):
+        """new numbers for an accessor, in place (laid out as read gives them), with its min and max"""
+        a = self.j['accessors'][ai]
+        fmt, n = COMPONENT[a['componentType']], WIDTH[a['type']]
+        bv = self.j['bufferViews'][a['bufferView']]
+        row = struct.Struct(f'<{n}{fmt}')
+        stride = bv.get('byteStride') or row.size
+        if not isinstance(self.buffers[bv['buffer']], bytearray):
+            self.buffers[bv['buffer']] = bytearray(self.buffers[bv['buffer']])
+        buf, at = self.buffers[bv['buffer']], bv.get('byteOffset', 0) + a.get('byteOffset', 0)
+        values = struct.unpack(f'<{len(values)}{fmt}', struct.pack(f'<{len(values)}{fmt}', *values))  # as stored
+        for i in range(a['count']):
+            row.pack_into(buf, at + i * stride, *values[i * n:(i + 1) * n])
+        if 'min' in a or 'max' in a:
+            a['min'] = [min(values[k::n]) for k in range(n)]
+            a['max'] = [max(values[k::n]) for k in range(n)]
+
+    def placed(self):
+        """(node, its matrix in the scene) for every node of the scene"""
+        stack = [(r, affine()) for r in self.roots]
+        while stack:
+            n, parent = stack.pop()
+            nd = self.j['nodes'][n]
+            m = mat_mul(parent, node_matrix(nd))
+            yield nd, m
+            stack.extend((c, m) for c in nd.get('children', []))
 
     def add_accessor(self, fmt, rows, type_, component, minmax=False):
         data = b''.join(struct.pack('<' + fmt, *r) for r in rows)
@@ -854,6 +927,7 @@ class Export:
         self.drop_disabled(doc, ents)
         if not args.no_skybox:
             self.add_skybox(doc, ents)
+        self.fix_decals(doc)
         self.fix_materials(doc)
         sky = None if args.no_sky else self.add_sky(doc, ents)
         if not args.no_lighting:
@@ -934,6 +1008,193 @@ class Export:
         doc.merge(sky, 'hypr3d_backdrop', [s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, t[0], t[1], t[2], 1])
         self.skybox = {'vpk': vpk, 'path': os.path.splitext(target)[0], 'ents': sents, 'scale': s, 'offset': t}
         log(f'3D skybox: {len(sky.j.get("meshes", []))} meshes at {s:g}x')
+
+    # ------------------------------------------------ decals
+
+    # Source 2 Viewer lifts decals (the materials it takes for overlays) 1 cm off what they're on, along
+    # their normals, so that viewers without depth bias don't show the surface through them. Since release
+    # 20 puts the meters into the vertices, what it adds, 1 cm in Source's inches (0.01 / 0.0254), comes
+    # out as that many meters: the bombsite letters float 39 cm above the floor (a step you walk up onto),
+    # and the 3D skybox's, 16 times bigger, stand 6 m off its walls.
+    DECAL_LIFT = 0.01
+    DECAL_LIFT_WRONG = 0.01 / INCH
+    DECAL_REACH = 0.6  # how far behind a decal to look for what it's on, in its mesh's meters
+
+    @staticmethod
+    def is_decal(v):
+        """the materials Source 2 Viewer lifts (its IsMaterialOverlay)"""
+        ip, s = v.get('IntParams', {}), v.get('ShaderName', '')
+        return any(int(ip.get(k, 0)) == 1 for k in ('F_OVERLAY', 'F_DEPTHBIAS', 'F_DEPTH_BIAS')) or \
+            s.endswith('static_overlay.vfx') or s == 'citadel_overlay.vfx'
+
+    @staticmethod
+    def decal_rays(doc, p, m, count=3):
+        """rays from the middles of a decal's biggest triangles back to what it's on, in the scene: (origin,
+        normal there), the normal as long as the mesh's are in the scene"""
+        P = doc.read(p['attributes']['POSITION'])
+        N = doc.read(p['attributes']['NORMAL'])
+        I = doc.read(p['indices']) if 'indices' in p else range(len(P) // 3)
+        tris = []
+        for t in range(0, len(I) - 2, 3):
+            a, b, c = 3 * I[t], 3 * I[t + 1], 3 * I[t + 2]
+            e = [P[b + i] - P[a + i] for i in range(3)]
+            f = [P[c + i] - P[a + i] for i in range(3)]
+            area = (e[1] * f[2] - e[2] * f[1]) ** 2 + (e[2] * f[0] - e[0] * f[2]) ** 2 + (e[0] * f[1] - e[1] * f[0]) ** 2
+            if area > 0:
+                tris.append((area, a, b, c))
+        out = []
+        for _, a, b, c in sorted(tris, reverse=True)[:count]:
+            mid = [(P[a + i] + P[b + i] + P[c + i]) / 3 for i in range(3)]
+            n = [(N[a + i] + N[b + i] + N[c + i]) / 3 for i in range(3)]
+            out.append((apply(m, mid), [sum(m[i][k] * n[k] for k in range(3)) for i in range(3)]))
+        return out
+
+    def decal_gaps(self, doc, rays, targets):
+        """for each ray (origin o, normal v), how many normals back along it (o - t v) the nearest of the
+        targets' triangles is, up to DECAL_REACH; None when there's none"""
+        j = doc.j
+        near, far = 0.002, self.DECAL_REACH
+        boxes = []
+        for o, v in rays:
+            ends = [[o[i] - t * v[i] for i in range(3)] for t in (near, far)]
+            boxes.append(([min(e[i] for e in ends) for i in range(3)], [max(e[i] for e in ends) for i in range(3)]))
+        # sorted by where they start along x, to find those that reach a mesh
+        order = sorted(range(len(rays)), key=lambda k: boxes[k][0][0])
+        xs = [boxes[k][0][0] for k in order]
+        widest = max((hi[0] - lo[0] for lo, hi in boxes), default=0)
+        gaps = [None] * len(rays)
+        # the world's meshes share vertices by the hundred: each set of them once, in each place it's in
+        groups = {}
+        for p, m in targets:
+            key = (p['attributes']['POSITION'], tuple(x for row in m[:3] for x in row))
+            groups.setdefault(key, (m, []))[1].append(p)
+        spaces = {}  # by matrix: its inverse, and the rays already moved into it
+        for (ai, mkey), (m, prims) in groups.items():
+            a = j['accessors'][ai]
+            if 'min' not in a or 'max' not in a:
+                continue
+            corners = [apply(m, [a['max'][i] if (c >> i) & 1 else a['min'][i] for i in range(3)]) for c in range(8)]
+            lo = [min(q[i] for q in corners) for i in range(3)]
+            hi = [max(q[i] for q in corners) for i in range(3)]
+            mine = [k for k in order[bisect.bisect_left(xs, lo[0] - widest):bisect.bisect_right(xs, hi[0])]
+                    if all(boxes[k][0][i] <= hi[i] and boxes[k][1][i] >= lo[i] for i in range(3))]
+            if not mine:
+                continue
+            if mkey not in spaces:
+                spaces[mkey] = (invert_affine(m), {})
+            inv, moved = spaces[mkey]
+            if not inv:
+                continue
+            # the rays in the mesh's own space, where t still counts the same: their boxes first, sorted by
+            # where they start along x
+            local = []
+            for k in mine:
+                if k not in moved:
+                    o, v = rays[k]
+                    o, d = apply(inv, o), [-sum(inv[i][c] * v[c] for c in range(3)) for i in range(3)]
+                    ends = [[o[i] + t * d[i] for i in range(3)] for t in (near, far)]
+                    moved[k] = (*[f(e[i] for e in ends) for i in range(3) for f in (min, max)], k, *o, *d)
+                local.append(moved[k])
+            local.sort()
+            starts = [r[0] for r in local]
+            wide = max(r[1] - r[0] for r in local)
+            x0, x1 = starts[0], max(r[1] for r in local)
+            y0, y1 = min(r[2] for r in local), max(r[3] for r in local)
+            z0, z1 = min(r[4] for r in local), max(r[5] for r in local)
+            P = doc.read(ai)
+            for p in prims:
+                self.cast_rays(P, doc.read(p['indices']) if 'indices' in p else range(len(P) // 3), local, starts, wide,
+                               (x0, x1, y0, y1, z0, z1), near, far, gaps)
+        return gaps
+
+    @staticmethod
+    def cast_rays(P, I, local, starts, wide, box, near, far, gaps):
+        """the triangles (flat positions P, indices I) against rays in their space, sorted as decal_gaps
+        sorts them: the nearest hit of each goes in gaps"""
+        x0, x1, y0, y1, z0, z1 = box
+        for t in range(0, len(I) - 2, 3):
+            a, b, c = 3 * I[t], 3 * I[t + 1], 3 * I[t + 2]
+            ax, bx, cx = P[a], P[b], P[c]
+            if (ax < x0 and bx < x0 and cx < x0) or (ax > x1 and bx > x1 and cx > x1):
+                continue
+            ay, by, cy = P[a + 1], P[b + 1], P[c + 1]
+            if (ay < y0 and by < y0 and cy < y0) or (ay > y1 and by > y1 and cy > y1):
+                continue
+            az, bz, cz = P[a + 2], P[b + 2], P[c + 2]
+            if (az < z0 and bz < z0 and cz < z0) or (az > z1 and bz > z1 and cz > z1):
+                continue
+            tx0, tx1 = min(ax, bx, cx), max(ax, bx, cx)
+            ty0, ty1 = min(ay, by, cy), max(ay, by, cy)
+            tz0, tz1 = min(az, bz, cz), max(az, bz, cz)
+            near_rays = [r for r in local[bisect.bisect_left(starts, tx0 - wide):bisect.bisect_right(starts, tx1)]
+                         if r[1] >= tx0 and r[2] <= ty1 and r[3] >= ty0 and r[4] <= tz1 and r[5] >= tz0]
+            if not near_rays:
+                continue
+            # Moller-Trumbore
+            e1x, e1y, e1z = bx - ax, by - ay, bz - az
+            e2x, e2y, e2z = cx - ax, cy - ay, cz - az
+            for _, _, _, _, _, _, k, ox, oy, oz, dx, dy, dz in near_rays:
+                hx, hy, hz = dy * e2z - dz * e2y, dz * e2x - dx * e2z, dx * e2y - dy * e2x
+                det = e1x * hx + e1y * hy + e1z * hz
+                if abs(det) < 1e-15:
+                    continue
+                sx, sy, sz = ox - ax, oy - ay, oz - az
+                u = (sx * hx + sy * hy + sz * hz) / det
+                if u < -1e-6 or u > 1 + 1e-6:
+                    continue
+                qx, qy, qz = sy * e1z - sz * e1y, sz * e1x - sx * e1z, sx * e1y - sy * e1x
+                w = (dx * qx + dy * qy + dz * qz) / det
+                if w < -1e-6 or u + w > 1 + 1e-6:
+                    continue
+                hit = (e2x * qx + e2y * qy + e2z * qz) / det
+                if near < hit <= far and (gaps[k] is None or hit < gaps[k]):
+                    gaps[k] = hit
+
+    def fix_decals(self, doc):
+        """puts the decals Source 2 Viewer lifted 39 cm back to 1 cm off what they're on. Whether it did is
+        measured, from each decal back along its normals, so that one that gets it right is left alone."""
+        j = doc.j
+        decal = {i for i, m in enumerate(doc.list('materials')) if self.is_decal(vmat(m))}
+        if not decal:
+            return
+        rays, owner, targets, placed = [], [], [], 0
+        for nd, m in doc.placed():
+            if 'mesh' not in nd:
+                continue
+            for p in j['meshes'][nd['mesh']]['primitives']:
+                if p.get('mode', 4) != 4:
+                    continue
+                if p.get('material') not in decal:
+                    targets.append((p, m))
+                elif 'NORMAL' in p['attributes']:
+                    r = self.decal_rays(doc, p, m)
+                    rays += r
+                    owner += [placed] * len(r)
+                    placed += 1
+        # each decal by its middle ray (they differ where a decal wraps a corner or a step); the lift adds to
+        # what a decal stood off its surface already (de_dust2's window insets: up to 2 cm)
+        found = [[] for _ in range(placed)]
+        for who, gap in zip(owner, self.decal_gaps(doc, rays, targets)):
+            if gap is not None:
+                found[who].append(gap)
+        gaps = [sorted(g)[len(g) // 2] for g in found if g]
+        wrong = sum(1 for g in gaps if -0.004 < g - self.DECAL_LIFT_WRONG < 0.03)
+        right = sum(1 for g in gaps if -0.004 < g - self.DECAL_LIFT < 0.03)
+        if not wrong or wrong <= right or 3 * wrong < len(gaps):
+            log(f'decals: of the {len(gaps)} measured, {right} are 1 cm off what they are on and {wrong} 39 cm; '
+                'leaving them where Source 2 Viewer put them')
+            return
+        # back along the same normals it lifted them by
+        drop, done = self.DECAL_LIFT_WRONG - self.DECAL_LIFT, set()
+        for me in j['meshes']:
+            for p in me['primitives']:
+                at = p['attributes']
+                if p.get('material') in decal and 'NORMAL' in at and at['POSITION'] not in done:
+                    done.add(at['POSITION'])
+                    P, N = doc.read(at['POSITION']), doc.read(at['NORMAL'])
+                    doc.write(at['POSITION'], [P[i] - drop * N[i] for i in range(len(P))])
+        log(f'decals: Source 2 Viewer lifted them 39 cm off what they are on ({wrong} of the {len(gaps)} measured); '
+            f'put {len(done)} mesh{"" if len(done) == 1 else "es"} back to 1 cm')
 
     # ------------------------------------------------ materials
 
