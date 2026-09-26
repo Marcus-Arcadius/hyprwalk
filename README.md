@@ -85,9 +85,12 @@ A plugin runs inside the compositor, so a crash in it takes your session down wi
 | `plugin:hypr3d:avatar_physics` | `true` | hair, skirts and the like swing (spring bones) |
 | `plugin:hypr3d:avatar_emotes` | `""` | more emotes: VRM animations (`.vrma`) or glTF clips; files or folders, separated by commas |
 | `plugin:hypr3d:lipsync` | `false` | lip sync: the microphone moves the avatar's mouth while you are in 3D (below) |
+| `plugin:hypr3d:lipsync_gain` | `auto` | lip sync: how much louder the microphone counts, in dB (−20 to 60); `auto` goes by your voice (below) |
+| `plugin:hypr3d:lipsync_source` | `""` | lip sync: the microphone, by its name or its description as `wpctl status` lists it; `""` is the default one |
 | `plugin:hypr3d:apps` | `""` | the Action Menu's Apps page: desktop ids, app names or commands, separated by commas (below) |
 | `plugin:hypr3d:app_rules` | `""` | where apps launched from 3D open: `CLASS: DISTANCE HEIGHT [left\|right\|SIDE]`, separated by commas (below) |
 | `plugin:hypr3d:pin_size` | `0.3` | how much of the view's height a window pinned to it takes, 0.05–1 |
+| `plugin:hypr3d:monitor` | `""` | the monitor 3D goes on: its name as `hyprctl monitors` lists it (`DP-1`), or `desc:` and the start of its description; `""` is the focused one. The others stay your desktop (below) |
 
 Paths may start with `~/`. Maps and avatars load in the background, and a failure shows up as a
 notification. A config reload applies changed values at once; a value changed at run time without one
@@ -97,8 +100,9 @@ second.
 ## Controls
 
 Enter and leave 3D with the `hypr3d:toggle` dispatcher, `hyprctl hypr3d toggle` or
-`hl.plugin.hypr3d.toggle()`. Keys held with Super, or with Ctrl+Alt, still go to Hyprland, so your
-compositor shortcuts keep working in 3D.
+`hl.plugin.hypr3d.toggle()`. 3D goes on the focused monitor, or on the one `plugin:hypr3d:monitor`
+names (see Two monitors, below). Keys held with Super, or with Ctrl+Alt, still go to Hyprland, so
+your compositor shortcuts keep working in 3D.
 
 | Input | In 3D |
 |---|---|
@@ -114,16 +118,17 @@ compositor shortcuts keep working in 3D.
 | P | play the window under the crosshair: it gets every key, the buttons, the wheel and the mouse, and you face it (below); Super+Esc stops |
 | G | pick up the window under the crosshair; G or a left click puts it down where it is, a right click or Esc puts it back where it was; the wheel moves it nearer or further, Ctrl+wheel scales it, Shift+wheel changes its real size (the app draws itself anew) |
 | X | send a window you've placed back to the wall (and forget the place its app had) |
-| H | pin the window under the crosshair to your view (top right, over the world), or unpin it where it is |
+| H | pin the window under the crosshair to your view (top right, over the world), or the one you carry; H again puts it down where it is |
 | Q | the Action Menu's Apps page: launch an app into the world |
 | B | the Action Menu's Windows page: every window, and what to do with it |
 | V | first / third person (needs an avatar) |
 | Tab | the Action Menu |
 | F1–F8 | hand gestures (Neutral, Fist, Open, Point, Victory, Rock'n'roll, Handgun, Thumbs up), as in VRChat's desktop mode: with Left Shift held only the left hand, with Right Shift only the right, otherwise both |
 | Esc | leave 3D |
+| Super+Esc | with another monitor: the mouse and keyboard to it, the 3D view staying up; Super+Esc there comes back (below) |
 
 The Action Menu has pages for emotes, expressions, gestures, the outfit, apps, windows and options
-(view, physics, fly, lip sync, respawn, reset face, stop emote). With it open, the mouse moves its cursor, a left click
+(view, physics, fly, lip sync, mic gain, respawn, reset face, stop emote). With it open, the mouse moves its cursor, a left click
 picks, a right click goes back and a middle click closes it. The wheel goes round it, 1–8 pick an
 item, Enter picks, Backspace goes back and Esc closes it. WASD still walks.
 
@@ -149,6 +154,58 @@ shows ss, a rounder sh ch, a flat, faint f ff, and a low murmur well under the v
 voice trailing off) pp. Otherwise a consonant keeps the last vowel's shape, less open, for a moment.
 Hiss or noise that goes on shuts the mouth. It keeps a quarter of a second of sound at most, to look
 at, and nothing is written anywhere or sent. Leaving 3D, or turning it off, closes the microphone.
+
+How loud is loud depends on the microphone, so lip sync's gain is automatic: the loud part of your
+voice over the last 15 seconds (the 90th percentile of its voiced moments) is brought to where a
+microphone set up for speech has it (−12 dBFS), up to 50 dB louder, never quieter. A microphone 40 dB
+quieter than that opens the mouth as wide once you've said a syllable, while a whisper right after
+your normal voice stays shut. It goes by the room too: the noise in your pauses (half a second with
+no voice in it) keeps the mouth shut, as does anything under −80 dBFS, and noise that looks voiced
+(a hum, a rumble) doesn't count as your voice. A fixed gain instead: `lipsync_gain = 24` (dB), `hyprctl
+hypr3d avatar lipsync gain 24` or the Mic gain dial in the Action Menu's options (at its start
+automatic, then round to 60 dB); `auto` goes back.
+
+The badge says what the microphone gives: "listening (Yeti X …)" with the one it's linked to, "no
+sound from … (muted?)" when it has sent only exact zeros for 2 seconds (a microphone muted by its own
+button does that, where PipeWire can't see it), "… is muted" when PipeWire has it muted, "no
+microphone linked", or "no … (listening to …)" when the one `lipsync_source` names isn't there and
+WirePlumber gave it the default one. The first of these each time it starts listening comes as a
+notification too, with what to do about it. `hyprctl hypr3d avatar lipsync` has it all: the source
+and its state, mute and volume, the links, how much came and how long it's been exact zeros, the last
+second's peak and RMS, the gain, your voice's level, the room's, and the sources there are.
+
+## Two monitors
+
+3D goes on one monitor, and the others stay your desktop, drawn by Hyprland as always: your bar, your
+windows, notifications. It's the focused monitor, unless `plugin:hypr3d:monitor` names one (or
+`hyprctl hypr3d on MONITOR` does); for 3D always on the right one:
+
+```lua
+hl.config({ plugin = { hypr3d = { monitor = "DP-1" } } })
+```
+
+Entering 3D brings the mouse and keyboard to it, and the cursor if it was on another monitor. They
+go to your desktop and back while the 3D view stays up and goes on (your avatar, its emotes and lip
+sync, the windows out in the world):
+
+- **Super+Esc**, walking: the cursor goes back where it was on the other monitor (else to the middle
+  of the one nearest), and the focus with it. Super+Esc there comes back into 3D.
+- a keybind that moves the focus to another monitor (Hyprland's `movefocus` or `focusmonitor`, as
+  `hl.dsp.focus({ direction = "left" })` has it) goes there, and one that moves it to the 3D monitor
+  comes back
+- the mouse moved onto the 3D monitor comes back: the cursor stays where it came in, and the mouse
+  turns the camera again
+- `hyprctl hypr3d away [on|off|toggle]`, the `hypr3d:away` dispatcher and `hl.plugin.hypr3d.away()`
+  (both toggle), for a keybind of your own
+
+While the mouse is away, the other monitors work as on the 2D desktop: the cursor, clicks, the wheel
+and every key (Esc too: it doesn't leave 3D there), and notifications show there. In 3D the crosshair
+goes and you stand still; typing, play mode and a window you carried end. Opening the Action Menu or
+playing a window from a keybind of yours (`hypr3d:menu`, `hypr3d:play` or their Lua functions) comes
+back into 3D first, and your 3D keybind leaves 3D as ever. The cursor is never on the 3D monitor while it's away: going there comes
+back. Coming into 3D takes the keyboard focus from a window on another monitor, so that a Super
+shortcut (closing a window, say) doesn't act on it unseen; clicking, typing into or playing a window
+in 3D gives it the focus.
 
 ## Apps and games in 3D
 
@@ -272,10 +329,14 @@ keyboard), Bring here (out in front of you), To the wall, Pin to view or Unpin, 
 real size, a quarter more or a fifth less), Play, and Close. `hyprctl hypr3d window SEL ACTION` does
 the same for a window by address, class or title.
 
-**Pinning** (H on the window under the crosshair, or the Windows page) keeps a window in the top right
-corner of your view, `pin_size` of its height, drawn over the world: a video, or a call, while you walk
-or play. More pinned windows stack down the side. You can still point at a pinned window and click it.
-Unpinning leaves it where it is in the world.
+**Pinning** (H on the window under the crosshair or the one you carry, or the Windows page) keeps a
+window in the top right corner of your view, `pin_size` of its height, drawn over the world: a video, or
+a call, while you walk or play. H again puts it down where it is in the world, whatever the crosshair
+points at (it can't point at a pinned window); standing close to a wall, in front of the wall rather than
+in it, nearer and smaller so it looks the same. With more than one pinned (the Windows page stacks them
+down the side), H puts down the last one pinned; Unpin on the Windows page puts down any of them. To
+click in a pinned window, put it down, or play it from the Windows page (Play takes it out of the
+corner).
 
 **The real size**: Shift+wheel while you carry a window, Bigger and Smaller, or
 `hyprctl hypr3d window SEL size W H` change the window's size in pixels, and the app draws itself
@@ -351,7 +412,8 @@ virtual monitor's 75 Hz, the 3D view included.
 
 | Command | |
 |---|---|
-| `status`, `toggle`, `on`, `off [now]` | the state as JSON; enter and leave 3D |
+| `status`, `toggle`, `on [MONITOR]`, `off [now]` | the state as JSON; enter 3D (on that monitor: its name, or `desc:` and its description) and leave it |
+| `away [on\|off\|toggle]` | the mouse and keyboard to your desktop on another monitor, the 3D view staying up (Super+Esc), or back into 3D; `toggle` without an argument. The status's `"away"` says which |
 | `type [on\|off]` | type into the window under the crosshair, or go back to walking |
 | `play [on\|off\|toggle]` | play the window under the crosshair (P), or stop; without an argument, what's played: its class, the pointer, whether it's locked or confined |
 | `launch WHAT` | start an app into the world: a desktop id, an app's name or a command |
@@ -362,7 +424,9 @@ virtual monitor's 75 Hz, the 3D view included.
 | `walk secs [forward\|back\|left\|right]`, `jump`, `fly` | move from a script |
 | `click [left\|right\|middle]` | click where the crosshair is |
 | `sens [value]` | mouse sensitivity |
-| `grab`, `place`, `hold dist [scale]`, `reset-windows [forget]` | carry windows, and put them all back (`forget`: nor where their classes were put) |
+| `grab`, `place`, `hold dist [scale]`, `pin`, `reset-windows [forget]` | carry windows (`pin` is H), and put them all back (`forget`: nor where their classes were put) |
+| `aim [window]` | turn to face a window's middle: that one (address, class or title), else the one nearest to where you look |
+| `log [lines]` | what the plugin logged lately, its notifications too (the last 400 lines; Hyprland's own log has them only with `debug:disable_logs = false`) |
 | `windows` | the windows off the wall: their address, where, how far from your eye, how big (1 = as on the wall) and how tall, held or pinned, how far and big the one you carry is held, and how many places are remembered |
 | `map [path\|none\|reload\|forget\|scale s]` | load a map; `forget` drops the start and desktop place saved for it |
 | `spawn [here]` | go back to the start, or make where you stand the start |
@@ -373,14 +437,16 @@ virtual monitor's 75 Hz, the 3D view included.
 | `avatar gesture [left\|right\|both gesture]` | set a hand gesture |
 | `avatar parts [reset]`, `avatar toggle name [on\|off\|reset]`, `avatar slider name [0..1\|NN%\|reset]`, `avatar slider name x y`, `avatar shape key [weight\|reset]` | the outfit; `parts` lists the toggles, sliders and material variants. A two-axis slider takes x and y, −1..1 or NN% each |
 | `avatar physics [on\|off\|toggle]` | spring bones |
-| `avatar lipsync [on\|off\|toggle]` | lip sync; without an argument, what it hears: the level, the formants and the visemes |
+| `avatar lipsync [on\|off\|toggle\|gain dB\|auto\|source name\|default]` | lip sync, its gain and its microphone; without an argument, what it hears and what the microphone gives: the level, formants and visemes, the badge's text and `"problem"` (none, starting, unlinked, muted, silent, nothing, missing, error), the source (name, description, state, muted, volume), `"linked"`, `"samples"`, `"buffers"`, `"silentFor"` (seconds of exact zeros), `"peak"` and `"rms"` (the last second, dBFS), `"gain"`, `"reference"` (your voice), `"room"`, `"marks"` (shut below, wide open from) and `"sources"` |
 | `avatar emote [name\|number\|file\|folder [once\|loop]\|stop]` | play an emote, or load emotes from files; without a name, the list, with each one's speed |
 | `menu [open [page]\|close\|toggle\|back\|pick [n]\|move dx dy\|scroll n]` | drive the Action Menu; without an argument, what it shows (a dial's value, a stick's x and y) |
 
 The `hypr3d:menu` dispatcher toggles the Action Menu. `hypr3d:menu emotes` opens a page (`apps` and
 `windows` too), and any other argument does what `hyprctl hypr3d menu` does. The `hypr3d:play`
-dispatcher plays the window under the crosshair, or stops. The Lua functions are
-`hl.plugin.hypr3d.toggle()`, `enter()`, `exit()`, `type()`, `play()` and `menu([page or command])`.
+dispatcher plays the window under the crosshair, or stops, and `hypr3d:away` sends the mouse and
+keyboard to another monitor, or brings them back. The Lua functions are
+`hl.plugin.hypr3d.toggle()`, `enter()`, `exit()`, `type()`, `play()`, `away()` and
+`menu([page or command])`.
 
 The status's `"cursor"` is the app's cursor as it's drawn (where on the window, its size and
 hotspot, or null), `"playing"` what's played, and `"updateMs"` and `"renderMs"` the plugin's own
@@ -648,14 +714,23 @@ Valve's; this reads your copy of the game for your own use.
   The seeds are `litmap.py`'s LitCourt for maps, and for avatars BoothAccessories as it is, as a VRM
   0.x and as a VRM 1.0, and `assets.py`'s ToonTest; a case mutates a seed's JSON, its binary data, its
   settings file or its emote file. See the script's header for the rest.
-- `tools/test/harness/lipsync_check.sh AVATAR.glb [WORKDIR] [--real DIR [PERCENT]]`: lip sync on
-  vowels `tools/test/synth/vowels.py` sings (a source-filter model of a man's and a woman's a, i, u,
-  e, o), silence, hiss, a quiet voice, hiss right after a vowel, and an s, sh, f and m between two
-  a's (each must show its consonant viseme and no other), and the avatar's own s viseme following an
-  s. `--real DIR` adds recordings of real voices, named for their vowel (`a_*.wav` … `o_*.wav`): how
-  often each one's viseme leads, how open it is, and how much of it counted as voiced; at least
-  PERCENT (85) of them must lead with their own. Such recordings stay out of the repo: the ones used
-  here came from Wikimedia Commons and Lingua Libre (public domain, CC0, CC BY and CC BY-SA).
+- `tools/test/harness/lipsync_check.sh AVATAR.glb [WORKDIR] [--real DIR [PERCENT]] [--levels "0 20 30 40"]`:
+  lip sync on vowels `tools/test/synth/vowels.py` sings (a source-filter model of a man's and a
+  woman's a, i, u, e, o), silence, hiss, a quiet voice with nothing heard before it, hiss right after
+  a vowel, and an s, sh, f and m between two a's (each must show its consonant viseme and no other),
+  and the avatar's own s viseme following an s. Then all of it as quieter microphones give it
+  (`tools/test/synth/attenuate.py`: each file after a second of silence, `--levels` dB down): the
+  automatic gain must open each vowel as wide as at its own level (0.05 less at most), and silence,
+  hiss and the hiss after a vowel must stay shut. And a whisper (40 dB down): right after a normal
+  voice it stays shut, while on its own, or 16 seconds after the normal voice, it opens once the gain
+  has heard it. `--real DIR` adds recordings of real voices, named for their vowel (`a_*.wav` …
+  `o_*.wav`): how often each one's viseme leads, how open it is, and how much of it counted as voiced;
+  at least PERCENT (85) of them must lead with their own, at their own level and at each of the
+  levels, where each must open as wide as at its own level. Such recordings stay out of the repo: the
+  ones used here came from Wikimedia Commons and Lingua Libre (public domain, CC0, CC BY and CC BY-SA).
+- `tools/test/synth/attenuate.py OUT.wav DB PART... [--noise DBFS]`: WAVs and `silence:SECONDS` one
+  after the other, DB decibels down, as a 32-bit float WAV, with white noise all along if asked (a
+  microphone's own hiss): how a quieter microphone gives a recording.
 - `tools/test/vm/run.sh [--only ITEMS] [--gpu virgl] OUTDIR`: the plugin in a real Hyprland, in NixOS
   VMs (`vm.nix`) built the way Hyprland's own CI tests Hyprland: QEMU with KVM and a virtio GPU that
   Mesa's llvmpipe draws for, the Hyprland you run (the one `build.sh` builds against, or `HYPR_BIN`'s)
@@ -683,6 +758,12 @@ Valve's; this reads your copy of the game for your own use.
   - a second monitor (Hyprland's own headless output): 3D on one while the other stays 2D, then on
     the other; the mouse, the focus, notifications on the focused one, and a monitor going away in 3D
     (and the plugin holding its output for aquamarine's queued frame, below)
+  - 3D on the monitor `plugin:hypr3d:monitor` names (or `desc:`, or `hyprctl hypr3d on MONITOR`)
+    from the other, the cursor and the focus with it; the other monitor used meanwhile: Super+Esc
+    and back, a `movefocus` keybind each way (to a monitor with a window, and to one without), the
+    mouse moved over and back, `hyprctl hypr3d away`, the Action Menu's keybind coming back; what a
+    window there gets meanwhile (wev: the pointer, a click, keys and Esc, the wheel), Hyprland's
+    cursor and notifications there, 3D drawing on; leaving 3D, and the 3D monitor going, while away
   - scales 1.5 and 2: the frame, the crosshair, the Action Menu and the badge drawn at the monitor's
     scale, the dial's mouse counts, aiming, clicking and typing, and the cursor hidden
   - sliders, a material variant and an emote's speed through hyprctl; the Lua functions and the
@@ -696,9 +777,13 @@ Valve's; this reads your copy of the game for your own use.
     the lightmapped floor as the probe-lit props (only the realtime shadow map shadows it)
   - that Hyprland draws its notifications over the 3D view, that the lip sync badge moves below them,
     and that Hyprland draws its windows (rounding, blur, borders) as before once 3D is left
-  - lip sync through PipeWire: `pw-cat` sings the vowels into the virtual microphone, and the
-    visemes, the badge, the "hypr3d lip sync" stream in `pw-dump` and its going away when you
-    leave 3D or turn lip sync off are checked
+  - lip sync through PipeWire: `pw-cat` sings the vowels into the virtual microphone (over its own
+    hiss, white noise at −75 dBFS), at their own level and 30 dB down, and the visemes, the gain
+    (automatic, 0 dB, 30 dB, and the Mic gain dial), the badge, the "hypr3d lip sync" stream in
+    `pw-dump` and its going away when you leave 3D or turn lip sync off are checked. So is what the
+    report and the badge say when the microphone is muted in PipeWire, sends only exact zeros (as one
+    muted by its own button does), is suspended, goes away while it's the default, isn't there when
+    `lipsync_source` names it, or when the stream is left unlinked (WirePlumber's metadata)
   - play mode (`h3dgame.c`, a small SDL2 game that prints what it gets and draws it): its pointer
     lock, relative motion to the count, keys (Esc and Tab too), buttons and the wheel reaching it and
     not the player, the camera facing it and back, the pointer over it without a lock and kept on it,
@@ -772,19 +857,31 @@ Valve's; this reads your copy of the game for your own use.
   Action Menu and plays an emote, shows a notification over the 3D view, picks up the window the
   crosshair starts on and puts it back, walks into your map (`--map`, else
   `~/.local/share/hypr3d/maps/de_mirage.glb` if you have it), leaves 3D and unloads the plugin. With
-  `--mic` it turns lip sync on and asks you, in notifications over the 3D view, to say a, i, u, e and
-  o, then "sss", then nothing, and says which vowel it heard each time. Each `--app` (a desktop id, an
+  `--mic` it turns lip sync on, writes what PipeWire says about your microphone (which one it's linked
+  to, muted or not, what came from it) to `results.txt` and saves `wpctl status`, `wpctl inspect` and
+  `pw-dump` in `audio/` (no sound), then asks you, in notifications over the 3D view, to hold a, i, u, e
+  and o, then "sss", then nothing, and says which vowel it heard each time, at its loudest; exact
+  zeros throughout get "your microphone sent only silence: is it muted?". Each `--app` (a desktop id, an
   app's name or a command: `--app discord`, `--app "steam steam://rungameid/APPID"`) is launched into 3D,
   and notifications ask you to play it (P) and stop (Super+Esc), type into it (E), point at it (its own
   cursor) and pin it (H), then to try what matters to you in it (P again, Super+Esc when you're done: a
   call, a screen share, OBS capturing the 3D view, a controller); frames of each step are saved, and
   its window is closed afterwards, as its close button does (a chat app goes to its tray, a game
   quits). A Steam game is the window Steam
-  starts for it, not Steam's own. `OUTDIR` gets `results.txt`,
-  `frames/` (grim's, and `diff-*.png` showing in red what changed between two), `status/` (hyprctl's
-  answers), `lipsync.jsonl` and `hypr3d.log` (the plugin's lines from Hyprland's log). Whatever
-  happens, Ctrl+C included (Esc leaves 3D first, so the terminal gets it), it leaves 3D, turns lip
-  sync off and unloads the plugin. It won't start while hypr3d is loaded already.
+  starts for it, not Steam's own. When the crosshair starts off any window (on the wallpaper between
+  two), it turns to the nearest one first (`hyprctl hypr3d aim`). Each run goes into a folder of its
+  own, `OUTDIR/run-1`, `run-2` … (`OUTDIR/latest` is the last), with `results.txt`, `frames/` (grim's,
+  and `diff-*.png` showing in red what changed between two and in blue what was left out: what
+  changed on its own between two frames a second apart, a clock or an animated wallpaper, and the
+  terminal it runs in), `status/` (hyprctl's answers), `lipsync.jsonl`, `audio/` and `hypr3d.log`
+  (`hyprctl hypr3d log`, the plugin's own lines, saved before it's unloaded). Whatever happens, Ctrl+C
+  included (Esc leaves 3D first, so the terminal gets it), it leaves 3D, turns lip sync off and
+  unloads the plugin. It won't start while hypr3d is loaded already. `tools/test/live/util_check.py`
+  checks its desktop comparison on made-up frames.
+- `tools/test/live/record_voice.sh [DIR]`: records you holding a, i, u, e and o, then "sss", then
+  silence, 4 seconds each, from your default microphone into `DIR` (`~/h3d-live/voice`), and prints
+  each one's level: for tuning lip sync to your voice offscreen (`lipsync_check.sh --real DIR`). You
+  run it; the files stay where they are.
 - `tools/test/synth/make.py PROJ`: writes a synthetic Unity project for the converter's tests (run it
   under Blender, see below). It holds an unpacked avatar prefab, a variant of an FBX with overrides,
   PSD and TGA textures, and outfits with and without Modular Avatar, including one with VRM bone
@@ -855,7 +952,8 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check
   with Super or Ctrl+Alt are passed through. That holds in play mode too, so a game never gets
   Super+anything: that's what keeps Super+Esc (and your own Super shortcuts) working while you play.
 - Direct scanout is off in 3D: a fullscreen game's frames are drawn into the 3D view, the scene around
-  them, instead of going to the screen as they are. See Performance.
+  them, instead of going to the screen as they are. See Performance. It's off on your other monitors
+  too while 3D is up (Hyprland has one switch for all), so a fullscreen game there is composited.
 - A window placed in the world from another monitor's workspace keeps that monitor's `wl_output`, scale
   and presentation timing; its FIFO barriers are released as that monitor presents.
 - A window is known as launched from 3D by its process (the one started, or a child of it), by
@@ -879,6 +977,12 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check
   (`tools/test/vm`), and on those real recordings (26 of 28 lead with their vowel; the consonants
   in their words were looked at, not scored); `tools/test/live/check.sh --mic` tries it on your
   voice.
+- The automatic gain goes by the voice it hears once it has heard a pause (the room), and only up to
+  50 dB. Another voice near you (a TV, a call on speakers) counts as yours when you're quiet, and a
+  voice less than about 10 dB over the room's noise opens the mouth only now and then; a fixed
+  `lipsync_gain` is steadier there. A microphone muted by its own button sends exact zeros, which the
+  badge tells from silence; one that sends its own quiet noise instead can't be told from a quiet
+  room.
 - The plugin's Hyprland code (its hooks, dispatchers, hyprctl command, Lua functions and config
   values) is tested in a real Hyprland in a VM (`tools/test/vm`), on a virtual GPU that Mesa draws for
   in software, at scales 1, 1.5 and 2 and with a second (headless) monitor; `tools/test/live/check.sh`

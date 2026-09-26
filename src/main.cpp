@@ -53,6 +53,9 @@
 #include <aquamarine/backend/Backend.hpp>
 
 #include <array>
+#include <ctime>
+#include <deque>
+#include <mutex>
 #include <dlfcn.h>
 #include <filesystem>
 #include <fstream>
@@ -65,17 +68,48 @@
 #include <unordered_set>
 
 namespace h3d {
+    namespace {
+        // the last lines logged, for hyprctl hypr3d log: Hyprland writes its log only with debug:disable_logs off
+        constexpr size_t        LOG_LINES = 400;
+        std::mutex              g_logMutex;
+        std::deque<std::string> g_logLines;
+
+        void remember(const char* level, const std::string& s) {
+            const auto   now = std::chrono::system_clock::now();
+            const time_t t   = std::chrono::system_clock::to_time_t(now);
+            tm           local{};
+            localtime_r(&t, &local);
+            char when[16];
+            std::strftime(when, sizeof(when), "%H:%M:%S", &local);
+            const auto      ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
+            std::lock_guard lock(g_logMutex);
+            g_logLines.push_back(std::format("{}.{:03} {} {}", when, ms, level, s));
+            if (g_logLines.size() > LOG_LINES)
+                g_logLines.pop_front();
+        }
+    }
+
     void log(const std::string& s) {
+        remember("INFO", s);
         Log::logger->log(Log::INFO, "[hypr3d] {}", s);
     }
 
     void notify(const std::string& s, bool error) {
-        if (error)
+        if (error) {
+            remember("ERR", s);
             Log::logger->log(Log::ERR, "[hypr3d] {}", s); // INFO is hidden unless debug logs are on
-        else
+        } else
             log(s);
         if (PHANDLE)
             HyprlandAPI::addNotification(PHANDLE, "[hypr3d] " + s, error ? CHyprColor{1.0, 0.35, 0.35, 1.0} : CHyprColor{0.45, 0.8, 1.0, 1.0}, error ? 8000 : 4000);
+    }
+
+    std::string logLines(size_t n) {
+        std::lock_guard lock(g_logMutex);
+        std::string     out;
+        for (size_t i = g_logLines.size() > n ? g_logLines.size() - n : 0; i < g_logLines.size(); ++i)
+            out += g_logLines[i] + "\n";
+        return out;
     }
 }
 
@@ -202,10 +236,13 @@ namespace {
     SP<Config::Values::CFloatValue>  g_cfgAvatarHeight;
     SP<Config::Values::CBoolValue>   g_cfgAvatarPhysics;
     SP<Config::Values::CBoolValue>   g_cfgLipSync;
+    SP<Config::Values::CStringValue> g_cfgLipSyncGain;   // dB, or auto
+    SP<Config::Values::CStringValue> g_cfgLipSyncSource; // the microphone, "" = the default one
     SP<Config::Values::CStringValue> g_cfgAvatarEmotes;
     SP<Config::Values::CStringValue> g_cfgApps;     // the Apps page's favourites
     SP<Config::Values::CStringValue> g_cfgAppRules; // where apps launched from 3D open
     SP<Config::Values::CFloatValue>  g_cfgPinSize;  // how much of the view's height a pinned window takes
+    SP<Config::Values::CStringValue> g_cfgMonitor;  // the monitor 3D goes on, "" = the focused one
 
     // a file named in the config, "" when unset
     std::string configuredPath(const SP<Config::Values::CStringValue>& value) {
@@ -254,6 +291,31 @@ namespace {
         const float v = g_cfgSpacing ? g_cfgSpacing->value() : 0.f;
         return v > 0.f ? std::min(v, 0.5f) : 0.02f;
     }
+
+    // plugin:hypr3d:monitor as it's set, "" for the focused monitor
+    std::string configuredMonitor() {
+        const std::string v = g_cfgMonitor ? unquote(g_cfgMonitor->value()) : "";
+        return v == "[[EMPTY]]" ? "" : v;
+    }
+
+    // a monitor by its name as hyprctl monitors lists it (DP-1), or by desc: and the start of its description, as
+    // Hyprland's monitor rules take them; null when no monitor that's connected is
+    PHLMONITOR monitorNamed(const std::string& name) {
+        const std::string v = unquote(name);
+        if (v.empty())
+            return nullptr;
+        for (const auto& m : g_pCompositor->m_monitors)
+            if (m && m->m_output && m->matchesStaticSelector(v))
+                return m;
+        return nullptr;
+    }
+
+    // into 3D from another monitor: the keyboard focus doesn't stay with a window there, unseen (Super+Q would close
+    // it); what's clicked, typed into or played in 3D gets it
+    void unfocusOthers(const PHLMONITOR& mon) {
+        if (const auto w = Desktop::focusState()->window(); w && w->m_monitor.lock() != mon)
+            Desktop::focusState()->rawWindowFocus(nullptr, Desktop::FOCUS_REASON_OTHER);
+    }
 }
 
 class CDesktop3D {
@@ -265,6 +327,12 @@ class CDesktop3D {
     void                          exit(bool immediate = false);
     void                          toggle();
     void                          setTyping(bool on);
+    // the mouse and keyboard to the desktop on another monitor, the 3D view staying up on its own (Super+Esc), or
+    // back into 3D
+    std::string                   setAway(bool away);
+    bool                          away() const {
+        return m_away;
+    }
 
     std::string                   hyprctl(const std::string& request);
     // the Action Menu: open [page], close, toggle, back, pick [n], move dx dy, scroll n; none = what it shows
@@ -281,8 +349,8 @@ class CDesktop3D {
     bool                          onRelativeMotion(const IPointer::SMotionEvent& e);
     bool                          onAbsoluteMotion(const Vector2D& abs);
     void                          onPointerFrame();
-    bool                          active() const { // in 3D, or going in or out
-        return m_mode != MODE_OFF;
+    bool                          holdsPointer() const { // in 3D, or going in or out, and the mouse isn't away on another monitor
+        return m_mode != MODE_OFF && !m_away;
     }
     // drawn in 3D this frame: it gets presentation feedback from here, as presented, instead of Hyprland's
     // "discarded" for what the 3D view covers
@@ -341,7 +409,21 @@ class CDesktop3D {
     CMicrophone                   m_mic;
     CLipSync                      m_lip;
     std::vector<float>            m_micSamples;
+    std::string                   m_lipsyncSource;                  // the microphone asked for, "" = the default one
+    std::string                   m_lipsyncSourceConfigured = "\n"; // the config's, last seen
+    std::string                   m_lipsyncGainConfigured   = "\n"; // the same for lipsync_gain
+    // what the microphone is doing, watched a few times a second: for the badge, one notification each time it
+    // starts listening, and hyprctl
+    struct {
+        int         problem  = -1;    // eMicProblem, as the badge has it
+        bool        notified = false; // this time listening
+        std::chrono::steady_clock::time_point looked; // last
+        float       broken = 0;       // seconds the stream has been broken, to open it again
+        std::string error;            // what broke it last (until it's linked again)
+        std::string source;           // the source it was linked to last (node.name)
+    } m_micWatch;
     std::vector<uint32_t>         m_badge;
+    std::string                   m_badgeText; // what m_badge says
     int                           m_badgeW = 0, m_badgeH = 0;
     CBox                          m_badgeBox; // where it was drawn last, output pixels (empty: it wasn't)
     float                         m_badgeScale = 0;
@@ -405,14 +487,29 @@ class CDesktop3D {
         uint32_t acc = 0; // 1/120ths of a notch not sent as a whole one yet
     } m_wheel;            // a high-resolution wheel's notches made up for the window aimed at, as Hyprland does
     bool                         m_axisFramePending = false; // a touchpad's scrolling sent, its frame not yet (the device's)
+    // Away: the mouse and keyboard are the desktop's on another monitor (Super+Esc, or a keybind that moved the focus
+    // and the cursor there), while the 3D view stays up on its own monitor; the cursor coming back onto that one
+    // comes back into 3D. In 3D Hyprland's cursor stays on the 3D monitor, where nothing shows it
+    bool                         m_away = false;
+    bool                         m_awayTold = false;   // how to come back was said, this time in 3D
+    std::optional<Vector2D>      m_desktopAt;          // where the cursor was last on another monitor (Super+Esc goes there)
+    bool                         m_ownMove = false;    // the plugin's own input.mouse.move (a drag moved where you point)
+    UP<SEventLoopDoLaterLock>    m_followLater;        // followCursor() after this frame
 
     // the Action Menu (Tab), like VRChat's: while it's open the mouse moves its cursor, not the camera
     CActionMenu m_menu{[this](const std::string& id) {
                            if (id == "apps" || id == "apps/all" || id == "windows" || id.starts_with("win:"))
                                return ownPage(id); // (the apps and the windows: Hyprland's)
-                           return actionPage(id, {m_avatar.get(), &m_anim, m_avatarLoader.busy(), m_thirdPerson, m_fly, m_lipsync, CMicrophone::available()});
+                           const auto gain = m_lip.gainSetting();
+                           return actionPage(id, {m_avatar.get(), &m_anim, m_avatarLoader.busy(), m_thirdPerson, m_fly, m_lipsync, CMicrophone::available(),
+                                                  gain ? *gain : NAN, m_lip.gain()});
                        },
-                       [this](const SMenuItem& it, float v, float v2) { m_ctl.dial(it, v, v2); }}; // a slider's dial (a stick: both)
+                       [this](const SMenuItem& it, float v, float v2) { // a slider's dial (a stick: both); lip sync's gain
+                           if (it.action == MA_LIPSYNC_GAIN)
+                               m_lip.setGain(v < 0.025f ? std::nullopt : std::optional<float>(std::round(v * MIC_GAIN_MAX)));
+                           else
+                               m_ctl.dial(it, v, v2);
+                       }};
     float       m_menuWheel = 0; // a fraction of a notch
 
     // aiming
@@ -520,7 +617,10 @@ class CDesktop3D {
     std::string                      loadEmoteFile(const std::string& file, int loop); // hyprctl's: made, then played
     std::string                      setLipSync(bool on);
     void                             lipSync(); // every frame: the microphone on or off, what it heard to the mouth
+    void                             watchMicrophone(); // what's wrong with it, if anything: the badge says so
     std::string                      lipSyncStatus() const;
+    std::string                      setLipSyncGain(const std::string& v); // dB, or auto
+    void                             setLipSyncSource(const std::string& v); // a microphone, "" = the default one
     std::vector<std::string>         emoteFiles() const; // the config's, then those added
     void                             loadEmoteFiles(std::vector<std::string> files);
     void                             applyEmotes(SEmoteResult&& res);
@@ -539,6 +639,7 @@ class CDesktop3D {
     PHLWINDOW                        findWindow(const std::string& what) const; // an address (0x...), a class or a title
     std::string                      windowAction(const PHLWINDOW& w, eWindowAction a);
     std::string                      setPinned(const PHLWINDOW& w, bool on);
+    std::string                      togglePin();
     std::string                      resizeReal(const PHLWINDOW& w, const Vector2D& size);
     std::string                      windowsStatus() const;
     void                             checkAppRules();
@@ -574,6 +675,12 @@ class CDesktop3D {
     void                             playMotion(const IPointer::SMotionEvent& e);
     std::string                      playStatus() const;
     void                             lockCursors(bool lock);
+    bool                             onMouseMove(const Vector2D& pos); // Hyprland's pointer move: false = let it go on
+    bool                             cursorAway() const; // should the mouse be away, going by where the cursor is
+    void                             followCursor();     // away or back, as cursorAway() says
+    void                             goAway(bool refocus);
+    void                             comeBack();
+    std::optional<Vector2D>          desktopSpot() const; // where Super+Esc puts the cursor, none = no other monitor
     void                             addAppCursor();
     void                             exitNow();
     void                             restore();
@@ -656,9 +763,10 @@ namespace {
     }
 
     // In 3D the pointer manager keeps the app's cursor image (the plugin draws it on the panel), with the hardware
-    // cursor off: Hyprland's own software cursor isn't drawn on any monitor, but a cursor surface still gets its frames
+    // cursor off: Hyprland's own software cursor isn't drawn on any monitor, but a cursor surface still gets its frames.
+    // (With the mouse away on another monitor, Hyprland draws its cursor as ever)
     void hkSoftCursors(void* self, PHLMONITOR mon, const Time::steady_tp& now, CRegion& damage, std::optional<Vector2D> at, bool force) {
-        if (g_p3D && g_p3D->active()) {
+        if (g_p3D && g_p3D->holdsPointer()) {
             if (const auto surf = g_pPointerManager->currentCursorImage().surface.lock(); surf && surf->resource())
                 surf->resource()->frame(now);
             return;
@@ -695,7 +803,7 @@ namespace {
     // in 3D Hyprland's reasons to hide the cursor (a timeout, a key press) don't count: nothing shows it on a monitor
     // (hkSoftCursors), and the plugin draws the app's own on the panel it's over. cursor:invisible still hides it
     void hkEnsureCursor(void* self) {
-        if (g_p3D && g_p3D->active()) {
+        if (g_p3D && g_p3D->holdsPointer()) {
             static auto PINVISIBLE = CConfigValue<Config::INTEGER>("cursor:invisible");
             // (without the hook that keeps it off the monitors it stays hidden, and so does the app's)
             g_pHyprRenderer->setCursorHidden(*PINVISIBLE != 0 || !g_softCursor);
@@ -794,7 +902,7 @@ void CDesktop3D::init() {
     }));
 
     m_listeners.emplace_back(ev.monitor.added.listen([this](const PHLMONITOR& mon) {
-        if (m_mode != MODE_OFF)
+        if (m_mode != MODE_OFF && !m_away)
             lockCursors(true); // (its hardware cursor off too)
     }));
 
@@ -816,9 +924,10 @@ void CDesktop3D::init() {
 
     m_listeners.emplace_back(ev.input.mouse.axis.listen([this](const IPointer::SAxisEvent& e, Event::SCallbackInfo& info) { onAxis(e, info); }));
 
-    // no pointer refocusing, focus-follows-mouse or cursor warps while in 3D
+    // no pointer refocusing, focus-follows-mouse or cursor warps while in 3D; the cursor put on another monitor (a
+    // keybind's focus) goes away to it, and while away, the cursor coming onto the 3D monitor comes back
     m_listeners.emplace_back(ev.input.mouse.move.listen([this](const Vector2D& pos, Event::SCallbackInfo& info) {
-        if (m_mode != MODE_OFF)
+        if (onMouseMove(pos))
             info.cancelled = true;
     }));
 
@@ -895,6 +1004,13 @@ void CDesktop3D::init() {
         return r.starts_with("error: ") ? SDispatchResult{.success = false, .error = r.substr(7)} : SDispatchResult{};
     });
 
+    // hypr3d:away sends the mouse and keyboard to the desktop on another monitor, the 3D view staying up, or brings
+    // them back (as Super+Esc does)
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hypr3d:away", [this](std::string) {
+        const std::string r = setAway(!m_away);
+        return r.starts_with("error: ") ? SDispatchResult{.success = false, .error = r.substr(7)} : SDispatchResult{};
+    });
+
     checkMapConfig();
     checkAvatarConfig();
     checkAppRules();
@@ -917,6 +1033,7 @@ void CDesktop3D::shutdown() {
     // after this library is gone
     g_pHyprRenderer->m_renderPass.removeAllOfType(C3D_PASS_NAME);
 
+    m_followLater.reset();
     if (m_mode != MODE_OFF) {
         m_mode = MODE_OFF;
         restore();
@@ -1110,6 +1227,16 @@ void CDesktop3D::checkAvatarConfig() {
         m_lipsyncConfigured = lip;
         if (!first || lip)
             setLipSync(lip);
+    }
+    // (like the others: hyprctl's until the config's changes)
+    if (const std::string gain = g_cfgLipSyncGain ? g_cfgLipSyncGain->value() : "auto"; gain != m_lipsyncGainConfigured) {
+        m_lipsyncGainConfigured = gain;
+        if (const std::string r = setLipSyncGain(gain); r.starts_with("error"))
+            notify(r + " (plugin:hypr3d:lipsync_gain)", true);
+    }
+    if (const std::string source = g_cfgLipSyncSource ? g_cfgLipSyncSource->value() : ""; source != m_lipsyncSourceConfigured) {
+        m_lipsyncSourceConfigured = source;
+        setLipSyncSource(source);
     }
 
     // other emotes: the avatar that's there again with them
@@ -1454,6 +1581,12 @@ bool CDesktop3D::enter(PHLMONITOR mon) {
         return false;
     }
 
+    // the monitor asked for, else plugin:hypr3d:monitor's, else the focused one
+    if (const std::string want = configuredMonitor(); !mon && !want.empty()) {
+        mon = monitorNamed(want);
+        if (!mon)
+            notify(std::format("plugin:hypr3d:monitor: no monitor {} is connected, so 3D goes on the focused one", want), true);
+    }
     if (!mon)
         mon = Desktop::focusState()->monitor();
     if (!mon)
@@ -1477,6 +1610,19 @@ bool CDesktop3D::enter(PHLMONITOR mon) {
     m_lastAbs    = {-1, -1};
     m_lastUpdate = std::chrono::steady_clock::now();
     m_keys.fill(false);
+    m_away     = false;
+    m_awayTold = false;
+    m_desktopAt.reset();
+    m_followLater.reset();
+
+    // the mouse and keyboard come to the 3D monitor: the cursor, when it's on another one (Super+Esc takes it back
+    // there), and the focus, so that what opens goes there
+    if (const Vector2D cursor = g_pPointerManager->position(); g_pCompositor->getMonitorFromVector(cursor) != mon) {
+        m_desktopAt = cursor;
+        g_pCompositor->warpCursorTo(mon->middle(), true);
+    }
+    Desktop::focusState()->rawMonitorFocus(mon);
+    unfocusOthers(mon);
 
     g_pHyprRenderer->m_directScanoutBlocked = true;
     lockCursors(true);
@@ -1505,6 +1651,159 @@ void CDesktop3D::lockCursors(bool lock) {
         g_pPointerManager->lockSoftwareForMonitor(mon);
         m_cursorLocks.emplace_back(mon);
     }
+}
+
+// ------------------------------------------------------------ other monitors
+
+// Hyprland's pointer move (the mouse's, or a warp's that simulates one); true keeps it from Hyprland. In 3D the cursor
+// stays where it is and focuses nothing, unless a keybind put it and the focus on another monitor (movefocus,
+// focusmonitor): then the mouse and keyboard go away to that one. Away, the other monitors are the desktop's as ever,
+// and the cursor coming onto the 3D monitor brings them back into 3D
+bool CDesktop3D::onMouseMove(const Vector2D& pos) {
+    if (m_mode == MODE_OFF || m_ownMove)
+        return false;
+    const auto mon = m_monitor.lock();
+    const auto at  = g_pCompositor->getMonitorFromVector(pos);
+    if (m_away) {
+        if (at != mon) {
+            m_desktopAt = pos;
+            return false;
+        }
+        if (m_mode != MODE_ACTIVE)
+            return false; // (leaving 3D: it's the desktop's there in a moment)
+        comeBack();
+        return true;
+    }
+    if (mon && at && at != mon && m_mode == MODE_ACTIVE && !m_play.on && at == Desktop::focusState()->monitor()) {
+        goAway(false); // (this move goes on: what's under the cursor there gets the pointer)
+        m_desktopAt = pos;
+        return false;
+    }
+    return true;
+}
+
+// should the mouse and keyboard be away, going by the cursor: while it's on another monitor, once that one has the
+// focus too (in play mode only the game moves it, by a warp to itself: not away then); back on the 3D monitor
+bool CDesktop3D::cursorAway() const {
+    const auto mon = m_monitor.lock();
+    const auto at  = g_pCompositor->getMonitorFromCursor();
+    if (!mon || !at || at == mon)
+        return false;
+    return m_away || (!m_play.on && at == Desktop::focusState()->monitor());
+}
+
+// away or back as the cursor says, for what moves it without a move Hyprland tells of (a keybind's focus warping it to
+// a monitor with no window, Hyprland's own clamping when a monitor goes)
+void CDesktop3D::followCursor() {
+    if (m_mode != MODE_ACTIVE)
+        return;
+    if (const bool away = cursorAway(); away && !m_away)
+        goAway(true);
+    else if (!away && m_away)
+        comeBack();
+}
+
+void CDesktop3D::goAway(bool refocus) {
+    const auto mon = m_monitor.lock();
+    if (m_mode != MODE_ACTIVE || m_away || !mon)
+        return;
+    m_away = true;
+    // what 3D had of the mouse and keyboard, let go: a window's buttons released to it before the pointer leaves it
+    if (!m_sentButtons.empty()) {
+        const uint32_t t = nowMs();
+        for (uint32_t b : m_sentButtons)
+            g_pSeatManager->sendPointerButton(t, b, WL_POINTER_BUTTON_STATE_RELEASED);
+        g_pSeatManager->sendPointerFrame();
+        m_sentButtons.clear();
+    }
+    m_drag = {};
+    if (m_play.on)
+        setPlay(false);
+    m_typing = false;
+    m_keys.fill(false);
+    m_look    = {};
+    m_lastAbs = {-1, -1};
+    m_menu.hide();
+    if (m_hold.key)
+        place();
+    m_aimed = -1;
+    m_aimSurface.reset();
+    m_pointerAt     = {};
+    m_cursorShown   = false;
+    m_lastSentLocal = {-1, -1};
+    // (a game's pointer lock would hold the cursor where the game is, as Hyprland's keybinds let go of it too)
+    g_pInputManager->unconstrainMouse();
+    // Hyprland's cursor as ever, off the 3D monitor (it's never on it, away)
+    lockCursors(false);
+    g_pHyprRenderer->ensureCursorRenderingMode();
+    if (refocus)
+        g_pInputManager->simulateMouseMovement(); // what's under the cursor gets the pointer (and the keyboard, as input:follow_mouse says)
+    const auto at = g_pCompositor->getMonitorFromCursor();
+    log(std::format("the mouse and keyboard went to {}, 3D stays on {}", at ? at->m_name : "?", mon->m_name));
+    if (!m_awayTold) {
+        m_awayTold = true;
+        notify(std::format("the mouse is on {} now; move it back onto {}, or press Super+Esc, to walk in 3D again", at ? at->m_name : "your desktop", mon->m_name));
+    }
+}
+
+// the cursor came onto the 3D monitor: the mouse and keyboard are 3D's again (the cursor stays where it came in)
+void CDesktop3D::comeBack() {
+    const auto mon = m_monitor.lock();
+    if (!m_away || !mon)
+        return;
+    m_away = false;
+    m_keys.fill(false);
+    m_look    = {};
+    m_lastAbs = {-1, -1};
+    lockCursors(true);
+    g_pHyprRenderer->ensureCursorRenderingMode();
+    Desktop::focusState()->rawMonitorFocus(mon);
+    unfocusOthers(mon);
+    log("the mouse and keyboard came back into 3D on " + mon->m_name);
+}
+
+// where Super+Esc puts the cursor: where it was last on another monitor, if that one is still there, else the middle
+// of the monitor nearest to the 3D one; none when there's no other
+std::optional<Vector2D> CDesktop3D::desktopSpot() const {
+    const auto mon = m_monitor.lock();
+    if (!mon)
+        return std::nullopt;
+    PHLMONITOR nearest;
+    for (const auto& m : g_pCompositor->m_monitors) {
+        if (!m || m == mon || m->m_size.x < 1 || m->m_size.y < 1)
+            continue;
+        if (m_desktopAt && CBox{m->m_position, m->m_size}.containsPoint(*m_desktopAt))
+            return m_desktopAt;
+        if (!nearest || m->middle().distanceSq(mon->middle()) < nearest->middle().distanceSq(mon->middle()))
+            nearest = m;
+    }
+    if (!nearest)
+        return std::nullopt;
+    return nearest->middle();
+}
+
+// Super+Esc, hyprctl hypr3d away, hypr3d:away: the mouse and keyboard to the desktop on another monitor, the 3D view
+// staying up; or back into 3D, the cursor onto the 3D monitor
+std::string CDesktop3D::setAway(bool away) {
+    const auto mon = m_monitor.lock();
+    if (m_mode != MODE_ACTIVE || !mon)
+        return "error: not in 3D";
+    if (!away) {
+        if (m_away) {
+            if (g_pCompositor->getMonitorFromCursor() != mon)
+                g_pCompositor->warpCursorTo(mon->middle(), true); // (the focus too)
+            comeBack();
+        }
+        return "in 3D";
+    }
+    if (m_away)
+        return "away";
+    const auto to = desktopSpot();
+    if (!to)
+        return "error: there's no other monitor for the mouse to go to";
+    g_pCompositor->warpCursorTo(*to, true); // (the focus too)
+    goAway(true);
+    return "away";
 }
 
 void CDesktop3D::exit(bool immediate) {
@@ -1551,6 +1850,7 @@ void CDesktop3D::exitNow() {
     endPlay();
     m_play.t = 0;
     m_drawnSurfaces.clear();
+    m_followLater.reset();
     lipSync(); // out of 3D: the microphone closes (update() no longer runs)
     if (!m_restoreLater)
         m_restoreLater = g_pEventLoopManager->doLaterLock([this] {
@@ -1590,6 +1890,7 @@ void CDesktop3D::restore() {
     m_sentButtons.clear();
     m_drag   = {};
     m_typing = false;
+    m_away   = false;
     endPlay();
     m_play.t = 0;
     m_keys.fill(false);
@@ -1618,7 +1919,7 @@ void CDesktop3D::restore() {
 }
 
 void CDesktop3D::setTyping(bool on) {
-    if (m_mode != MODE_ACTIVE)
+    if (m_mode != MODE_ACTIVE || m_away)
         return;
     if (!on && m_play.on) {
         setPlay(false); // Super+Esc ends play mode too
@@ -1831,7 +2132,7 @@ void CDesktop3D::update() {
             if (const auto res = s.surface.lock())
                 m_drawnSurfaces.insert(res.get());
 
-    if (m_mode == MODE_ACTIVE) {
+    if (m_mode == MODE_ACTIVE && !m_away) {
         if (m_play.on)
             aimPlay();
         else
@@ -1843,6 +2144,14 @@ void CDesktop3D::update() {
         m_pointerAt   = {};
         m_cursorShown = false;
     }
+
+    // the mouse went to another monitor or came back without a move Hyprland tells of (a keybind's focus warping the
+    // cursor to a monitor with no window on it): followed after this frame
+    if (m_mode == MODE_ACTIVE && !m_followLater && cursorAway() != m_away)
+        m_followLater = g_pEventLoopManager->doLaterLock([this] {
+            m_followLater.reset(); // safe: the queue already moved this callback out
+            followCursor();
+        });
 }
 
 bool CDesktop3D::overlaps(const V3& feet, float height) const {
@@ -2370,6 +2679,10 @@ void CDesktop3D::aim() {
         const CBox& c = p.clip;
         if (local.x < c.x || local.y < c.y || local.x > c.x + c.w || local.y > c.y + c.h)
             continue;
+        // where it takes no input, through it to what's behind, as on the 2D desktop (a shell's overlay over the whole
+        // screen, which takes input only at its edges)
+        if (p.hitRoot && !p.hitRoot->at(local * p.hitScale - p.hitOffset, true).first)
+            continue;
         // later panels are on top when at the same depth
         if (t <= best + 1e-4f) {
             best      = t;
@@ -2446,7 +2759,9 @@ void CDesktop3D::updatePointer(uint32_t timeMs, bool frame) {
             const auto hl = Desktop::View::CWLSurface::fromResource(surf);
             if (const auto box = hl ? hl->getSurfaceBoxGlobal() : std::nullopt) {
                 Event::SCallbackInfo info;
+                m_ownMove = true; // (a window on another monitor's workspace: the mouse doesn't go away there)
                 Event::bus()->m_events.input.mouse.move.emit(box->pos() + local, info);
+                m_ownMove = false;
             }
         }
         return;
@@ -2493,6 +2808,8 @@ std::string CDesktop3D::setPlay(bool on) {
         return "playing";
     if (m_mode != MODE_ACTIVE)
         return "error: not in 3D";
+    if (m_away)
+        setAway(false); // (played from a keybind or a script with the mouse on another monitor: back into 3D)
     if (m_aimed < 0 || m_aimed >= (int)m_panels.size() || m_panels[m_aimed].kind == PANEL_LAYER)
         return "error: point the crosshair at a window to play it";
     const SPanel& p = m_panels[m_aimed];
@@ -2724,7 +3041,7 @@ void CDesktop3D::addAppCursor() {
 // ------------------------------------------------------------------ input
 
 bool CDesktop3D::onRelativeMotion(const IPointer::SMotionEvent& e) {
-    if (m_mode == MODE_OFF)
+    if (m_mode == MODE_OFF || m_away)
         return false;
     if (m_mode == MODE_ACTIVE && m_play.on) {
         playMotion(e);
@@ -2739,7 +3056,7 @@ bool CDesktop3D::onRelativeMotion(const IPointer::SMotionEvent& e) {
 }
 
 bool CDesktop3D::onAbsoluteMotion(const Vector2D& abs) {
-    if (m_mode == MODE_OFF)
+    if (m_mode == MODE_OFF || m_away)
         return false;
     // play mode: a tablet (or a nested session's pointer) covers the window played, as it would a monitor
     if (m_mode == MODE_ACTIVE && m_play.on) {
@@ -2792,12 +3109,31 @@ void CDesktop3D::onKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info
     const uint32_t mods = g_pInputManager->getModsFromAllKBs();
     const bool     meta = mods & HL_MODIFIER_META;
 
+    // away on another monitor the keys are the desktop's there; Super+Esc comes back into 3D
+    if (m_away) {
+        if (k == K_ESC && meta && m_mode == MODE_ACTIVE) {
+            setAway(false);
+            info.cancelled = true;
+            m_consumed.insert(k);
+        }
+        return;
+    }
+
     if (m_typing) {
         if (k == K_ESC && meta) {
             setTyping(false);
             info.cancelled = true;
             m_consumed.insert(k);
         }
+        return;
+    }
+
+    // Super+Esc, walking: the mouse and keyboard to the desktop on another monitor, the 3D view staying up (with no
+    // other monitor, it's Hyprland's)
+    if (k == K_ESC && meta && m_mode == MODE_ACTIVE && desktopSpot()) {
+        info.cancelled = true;
+        m_consumed.insert(k);
+        setAway(true);
         return;
     }
 
@@ -2867,13 +3203,9 @@ void CDesktop3D::onKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info
             return;
         case K_Q: m_menu.show("apps"); return;    // (WaylandCraft's launcher is V, the view here)
         case K_B: m_menu.show("windows"); return; // (WaylandCraft's window manager is B too)
-        case K_H: // pins the window under the crosshair to your view, or unpins it
-            if (m_aimed >= 0 && m_aimed < (int)m_panels.size() && m_panels[m_aimed].kind != PANEL_LAYER)
-                if (const auto w = m_panels[m_aimed].window.lock()) {
-                    const auto pl = m_placements.find(reinterpret_cast<uintptr_t>(w.get()));
-                    if (const std::string r = setPinned(w, pl == m_placements.end() || !pl->second.pinned); r.starts_with("error: "))
-                        notify(r.substr(7), true);
-                }
+        case K_H: // pins the window under the crosshair (or the one carried) to your view; H again puts it down
+            if (const std::string r = togglePin(); r.starts_with("error: "))
+                notify(r.substr(7), true);
             return;
         case K_R: resetPlayer(); return;
         case K_F:
@@ -2904,7 +3236,7 @@ void CDesktop3D::onButton(uint32_t timeMs, uint32_t button, bool pressed, Event:
         return;
     }
 
-    if (m_mode == MODE_OFF)
+    if (m_mode == MODE_OFF || m_away)
         return;
     if (info)
         info->cancelled = true;
@@ -2958,7 +3290,7 @@ void CDesktop3D::onButton(uint32_t timeMs, uint32_t button, bool pressed, Event:
 }
 
 void CDesktop3D::onAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& info) {
-    if (m_mode == MODE_OFF)
+    if (m_mode == MODE_OFF || m_away)
         return;
     info.cancelled = true;
 
@@ -3426,8 +3758,24 @@ std::string CDesktop3D::setPinned(const PHLWINDOW& w, bool on) {
     if (!on) {
         if (it == m_placements.end() || !it->second.pinned)
             return "unpinned";
-        auto& pl        = it->second;
-        pl.pinned       = 0;
+        auto& pl  = it->second;
+        pl.pinned = 0;
+        // where it is as you see it, but not in a wall you stand close to (it was drawn over the world): brought nearer
+        // your eye, and smaller so it looks the same, till nothing is between you and its middle or its corners
+        if (const int i = windowPanel(w); i >= 0) {
+            const CBox&      box  = m_panels[i].box;
+            const SPanelPose pose = poseFrom(pl.center, pl.rot, pl.scale, box);
+            const V3         eye  = m_camera.eye;
+            float            k    = 1.f;
+            for (const Vector2D& at : {box.size() * 0.5, Vector2D{0.0, 0.0}, Vector2D{box.w, 0.0}, Vector2D{0.0, box.h}, box.size()}) {
+                const V3    d   = pose.at(at) - eye;
+                const float len = length(d);
+                if (SRayHit hit; len > 1e-3f && m_world.collision.raycast(eye, d / len, len, hit))
+                    k = std::min(k, std::max(0.05f, (hit.t - 0.02f) / len));
+            }
+            pl.center = eye + (pl.center - eye) * k;
+            pl.scale *= k;
+        }
         pl.targetCenter = pl.center;
         pl.targetRot    = pl.rot;
         pl.targetScale  = pl.scale;
@@ -3451,6 +3799,39 @@ std::string CDesktop3D::setPinned(const PHLWINDOW& w, bool on) {
     }
     it->second.pinned = ++m_pinCount;
     return "pinned";
+}
+
+// H: the window you carry, else the one under the crosshair, pinned to your view; with one pinned, H puts the last
+// one pinned down where it is (the crosshair never reaches a pinned window: it's in the view's corner, and the
+// window under the crosshair would be pinned along with it)
+std::string CDesktop3D::togglePin() {
+    if (m_mode != MODE_ACTIVE)
+        return "error: not in 3D";
+    PHLWINDOW w;
+    if (m_hold.key)
+        if (const auto it = m_placements.find(m_hold.key); it != m_placements.end())
+            w = it->second.window.lock();
+    if (w)
+        return setPinned(w, true);
+
+    uint64_t last = 0;
+    for (const auto& [key, pl] : m_placements) {
+        const auto pw = pl.window.lock();
+        if (pl.pinned > last && pw && windowPanel(pw) >= 0) { // (not one that isn't drawn: a hidden tab of a group)
+            last = pl.pinned;
+            w    = pw;
+        }
+    }
+    if (w)
+        return setPinned(w, false);
+
+    if (m_menu.open()) // (the crosshair is hidden)
+        return "error: close the Action Menu first";
+    if (m_aimed >= 0 && m_aimed < (int)m_panels.size() && m_panels[m_aimed].kind != PANEL_LAYER)
+        w = m_panels[m_aimed].window.lock();
+    if (!w)
+        return "error: point the crosshair at a window to pin it";
+    return setPinned(w, true);
 }
 
 // its real size (the app draws itself anew at it), logical px: floating, if it was tiled (a window can only be any
@@ -3633,8 +4014,9 @@ std::vector<UP<IPassElement>> CDesktop3D::drawFrame() {
     f.monScale  = mon->m_scale;
     f.panels    = &m_panels;
     f.aimed     = m_mode == MODE_ACTIVE && !m_menu.visible() && m_play.t <= 0.f ? m_aimed : -1;
-    // (none in play mode, where the app's cursor is the only one; where the app's cursor shows, only its dot)
-    f.crosshair    = !m_menu.visible() && m_play.t <= 0.f;
+    // (none in play mode, where the app's cursor is the only one; where the app's cursor shows, only its dot; none
+    // while the mouse is away on another monitor)
+    f.crosshair    = !m_menu.visible() && m_play.t <= 0.f && !m_away;
     f.crosshairDot = m_cursorShown;
     f.typing       = m_typing;
     f.hudAlpha  = smoothstep01(std::clamp((m_t - 0.6f) / 0.4f, 0.f, 1.f));
@@ -3656,10 +4038,11 @@ std::vector<UP<IPassElement>> CDesktop3D::drawFrame() {
     f.menu = m_menu.hud();
     f.menu.alpha *= f.hudAlpha;
     m_badgeBox = {};
-    if (m_mic.on()) { // while it listens, a badge says so: top right, under Hyprland's notifications while they show
+    if (m_mic.on()) { // while it listens, a badge says so (and what's wrong, if the microphone gives nothing): top right,
+        // under Hyprland's notifications while they show
         const float scale = (float)mon->m_scale;
         if (scale != m_badgeScale || m_badge.empty()) {
-            drawBadge(m_badge, m_badgeW, m_badgeH, "lip sync: listening", scale);
+            drawBadge(m_badge, m_badgeW, m_badgeH, m_badgeText.empty() ? "lip sync: listening" : m_badgeText, scale);
             m_badgeScale = scale;
             ++m_badgeSerial;
         }
@@ -3702,20 +4085,55 @@ std::string CDesktop3D::setLipSync(bool on) {
     return lipSyncStatus();
 }
 
+std::string CDesktop3D::setLipSyncGain(const std::string& v) {
+    std::string t = v;
+    std::erase_if(t, [](char c) { return c == ' ' || c == '+'; });
+    if (t.ends_with("dB") || t.ends_with("db"))
+        t.resize(t.size() - 2);
+    if (t.empty() || t == "auto" || t == "[[EMPTY]]") {
+        m_lip.setGain(std::nullopt);
+        return "auto";
+    }
+    char*       end = nullptr;
+    const float dB  = std::strtof(t.c_str(), &end);
+    if (!end || *end || !std::isfinite(dB))
+        return "error: lip sync gain: a number of dB (-20 to 60), or auto";
+    m_lip.setGain(dB);
+    return std::format("{:.1f}", *m_lip.gainSetting());
+}
+
+void CDesktop3D::setLipSyncSource(const std::string& v) {
+    const std::string source = v == "[[EMPTY]]" || v == "default" ? "" : v;
+    if (source == m_lipsyncSource)
+        return;
+    m_lipsyncSource = source;
+    if (m_mic.on()) { // listening: to that one now
+        m_mic.stop();
+        m_lip.reset();
+        m_micWatch = {};
+        m_badge.clear();
+    }
+    lipSync();
+}
+
 void CDesktop3D::lipSync() {
     const bool want = m_lipsync && m_mode != MODE_OFF && m_avatar;
     if (want && !m_mic.on()) {
         std::string error;
-        if (!m_mic.start(error)) {
+        if (!m_mic.start(error, m_lipsyncSource)) {
             m_lipsync = false;
             notify("lip sync: " + error, true);
             return;
         }
         m_lip.reset();
+        m_micWatch = {};
+        m_badgeText.clear();
+        m_badge.clear();
     } else if (!want && m_mic.on()) {
         m_mic.stop();
         m_lip.reset();
         m_anim.setVisemes({});
+        m_badgeText.clear();
         m_badge.clear();
         m_badgeBox = {};
     }
@@ -3726,14 +4144,143 @@ void CDesktop3D::lipSync() {
     m_mic.read(m_micSamples, rate);
     m_lip.feed(m_micSamples.data(), m_micSamples.size(), rate);
     m_anim.setVisemes(m_lip.visemes());
+    watchMicrophone();
+}
+
+namespace {
+    // what can be wrong with the microphone, as the badge says it
+    enum eMicProblem : uint8_t {
+        MP_STARTING, // (nothing known yet)
+        MP_NONE,
+        MP_ERROR,    // PipeWire ended the stream (it went away)
+        MP_UNLINKED, // nothing feeds it
+        MP_MUTED,    // PipeWire has the source muted
+        MP_SILENT,   // exact zeros: a microphone muted on itself (its button), or a device that sends nothing
+        MP_NOTHING,  // no samples at all
+        MP_MISSING,  // the microphone asked for isn't there: listening to the default one
+    };
+
+    bool micThere(const SMicStatus& s) { // the one asked for (none: the default)
+        return s.target.empty() || std::ranges::any_of(s.sources, [&](const auto& src) { return src.first == s.target; });
+    }
+
+    std::string micName(const SMicStatus& s) {
+        std::string n = !s.sourceNick.empty() ? s.sourceNick : !s.sourceDescription.empty() ? s.sourceDescription : s.sourceName;
+        if (n.size() > 28) { // (whole letters)
+            size_t cut = 26;
+            while (cut > 0 && ((unsigned char)n[cut] & 0xC0) == 0x80)
+                --cut;
+            n = n.substr(0, cut) + "…";
+        }
+        return n.empty() ? "the microphone" : n;
+    }
+
+    std::string micBadge(int problem, const SMicStatus& s, const std::string& error) {
+        switch (problem) {
+            case MP_NONE: return std::format("lip sync: listening ({})", micName(s));
+            case MP_ERROR: return "lip sync: PipeWire: " + error;
+            case MP_MISSING: return std::format("lip sync: no {} (listening to {})", s.target, micName(s));
+            case MP_UNLINKED: return "lip sync: no microphone linked";
+            case MP_MUTED: return std::format("lip sync: {} is muted", micName(s));
+            case MP_SILENT: return std::format("lip sync: no sound from {} (muted?)", micName(s));
+            case MP_NOTHING: return std::format("lip sync: nothing from {}", micName(s));
+            default: return "lip sync: listening";
+        }
+    }
+
+    std::string micAdvice(int problem, const SMicStatus& s, const std::string& error) {
+        switch (problem) {
+            case MP_ERROR: return "lip sync: PipeWire ended it: " + error + ". It tries again every few seconds";
+            case MP_MISSING: return std::format("lip sync: no microphone {} (lipsync_source), so {} instead; wpctl status lists them", s.target, micName(s));
+            case MP_UNLINKED: return "lip sync: no microphone is linked to it (wpctl status lists them)";
+            case MP_MUTED:
+                return std::format("lip sync: {} is muted in PipeWire: wpctl set-mute {} 0, or your sound settings", micName(s), s.sourceId ? std::to_string(s.sourceId) : "@DEFAULT_AUDIO_SOURCE@");
+            case MP_SILENT: return std::format("lip sync: {} sends only silence: is it muted, maybe by its own button?", micName(s));
+            case MP_NOTHING: return std::format("lip sync: nothing comes from {} (PipeWire has it {})", micName(s), s.sourceState.empty() ? "unknown" : s.sourceState);
+            default: return "";
+        }
+    }
+}
+
+void CDesktop3D::watchMicrophone() {
+    const auto now = std::chrono::steady_clock::now();
+    const float dt = m_micWatch.looked.time_since_epoch().count() ? std::chrono::duration<float>(now - m_micWatch.looked).count() : 0.f;
+    if (m_micWatch.problem >= 0 && dt < 0.25f) // (four times a second)
+        return;
+    m_micWatch.looked = now;
+    SMicStatus st     = m_mic.status();
+    // broken (PipeWire went away, or ended it: a microphone asked for that isn't there): open it again every few
+    // seconds, so a microphone plugged in (or PipeWire back) brings lip sync back
+    if (st.stream == "error" || st.stream == "unconnected") {
+        if (!st.error.empty())
+            m_micWatch.error = st.error;
+        if ((m_micWatch.broken += dt) >= 3.f) {
+            m_micWatch.broken = 0;
+            m_mic.stop();
+            std::string error;
+            if (!m_mic.start(error, m_lipsyncSource))
+                m_micWatch.error = error;
+            st = m_mic.status();
+        }
+    } else
+        m_micWatch.broken = 0;
+    if (st.linked)
+        m_micWatch.error.clear();
+    if (st.linked && st.sourceName != m_micWatch.source)
+        log(std::format("lip sync: listening to {} ({}, node {})", st.sourceName, st.sourceDescription, st.sourceId));
+    m_micWatch.source = st.linked ? st.sourceName : "";
+
+    int problem = MP_STARTING;
+    if (st.linked)
+        problem = st.muted == 1                                           ? MP_MUTED :
+            st.silentFor >= 2                                             ? MP_SILENT :
+            (st.sinceData < 0 && st.age >= 2) || st.sinceData >= 2 ? MP_NOTHING :
+            !micThere(st)                                                 ? MP_MISSING :
+                                                                            MP_NONE;
+    else if (!m_micWatch.error.empty())
+        problem = MP_ERROR;
+    else if (st.age >= 1.5)
+        problem = MP_UNLINKED;
+    const std::string text = micBadge(problem, st, m_micWatch.error);
+    if (text != m_badgeText) { // drawn anew
+        if (!m_badgeText.empty() || problem != MP_STARTING)
+            log(text);
+        m_badgeText = text;
+        m_badge.clear();
+    }
+    if (problem != m_micWatch.problem && problem > MP_NONE && !m_micWatch.notified) { // once each time it listens
+        m_micWatch.notified = true;
+        notify(micAdvice(problem, st, m_micWatch.error), true);
+    }
+    m_micWatch.problem = problem;
 }
 
 std::string CDesktop3D::lipSyncStatus() const {
     const auto&       v     = m_lip.visemes();
     const std::string badge = m_mic.on() && !m_badgeBox.empty() ? std::format("[{:.0f}, {:.0f}, {:.0f}, {:.0f}]", m_badgeBox.x, m_badgeBox.y, m_badgeBox.w, m_badgeBox.h) : "null";
+    const SMicStatus  st    = m_mic.status();
+    auto dBorNull = [](float x) { return x <= -199.f ? std::string("null") : std::format("{:.1f}", x); };
+    std::string source = "null";
+    if (st.linked)
+        source = std::format(R"({{"id": {}, "name": "{}", "description": "{}", "nick": "{}", "state": "{}", "muted": {}, "volume": {}}})", st.sourceId, jsonEscape(st.sourceName),
+                             jsonEscape(st.sourceDescription), jsonEscape(st.sourceNick), jsonEscape(st.sourceState), st.muted < 0 ? "null" : st.muted ? "true" : "false",
+                             st.volume < 0 ? std::string("null") : std::format("{:.3f}", st.volume));
+    std::string sources;
+    for (const auto& [name, description] : st.sources)
+        sources += std::format(R"({}{{"name": "{}", "description": "{}"}})", sources.empty() ? "" : ", ", jsonEscape(name), jsonEscape(description));
+    static constexpr const char* PROBLEMS[] = {"starting", "none", "error", "unlinked", "muted", "silent", "nothing", "missing"};
+    const auto   marks = m_lip.marks();
+    const auto   set   = m_lip.gainSetting();
     return std::format(
-        R"({{"on": {}, "listening": {}, "microphone": {}, "level": {:.1f}, "formants": [{:.0f}, {:.0f}], "visemes": {{"aa": {:.2f}, "ih": {:.2f}, "ou": {:.2f}, "ee": {:.2f}, "oh": {:.2f}, "pp": {:.2f}, "ff": {:.2f}, "ss": {:.2f}, "ch": {:.2f}}}, "badge": {}}})",
-        m_lipsync, m_mic.on(), CMicrophone::available(), m_lip.level(), m_lip.f1(), m_lip.f2(), v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], badge);
+        R"({{"on": {}, "listening": {}, "microphone": {}, "level": {:.1f}, "formants": [{:.0f}, {:.0f}], "visemes": {{"aa": {:.2f}, "ih": {:.2f}, "ou": {:.2f}, "ee": {:.2f}, "oh": {:.2f}, "pp": {:.2f}, "ff": {:.2f}, "ss": {:.2f}, "ch": {:.2f}}}, "badge": {}, )"
+        R"("text": "{}", "problem": "{}", "stream": "{}", "error": "{}", "coreError": "{}", "linked": {}, "source": {}, "target": "{}", "samples": {}, "buffers": {}, "emptyBuffers": {}, "silentFor": {:.2f}, )"
+        R"("sinceData": {}, "peak": {}, "rms": {}, "gain": {:.1f}, "gainSetting": {}, "reference": {:.1f}, "room": {}, "marks": [{:.1f}, {:.1f}], "sources": [{}]}})",
+        m_lipsync, m_mic.on(), CMicrophone::available(), m_lip.level(), m_lip.f1(), m_lip.f2(), v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], badge,
+        jsonEscape(m_mic.on() ? m_badgeText : ""), m_mic.on() && m_micWatch.problem >= 0 ? PROBLEMS[m_micWatch.problem] : "", jsonEscape(st.stream),
+        jsonEscape(!st.error.empty() ? st.error : m_micWatch.error), jsonEscape(st.coreError), st.linked, source, jsonEscape(st.target), st.samples, st.buffers, st.emptyBuffers, st.silentFor,
+        st.sinceData < 0 ? std::string("null") : std::format("{:.2f}", st.sinceData), dBorNull(st.peak), dBorNull(st.rms), m_lip.gain(),
+        set ? std::format("{:.1f}", *set) : std::string("\"auto\""), m_lip.reference(), std::isnan(m_lip.room()) ? std::string("null") : std::format("{:.1f}", m_lip.room()),
+        marks[0], marks[1], sources);
 }
 
 std::string CDesktop3D::menuAction(const SMenuItem& it) {
@@ -3778,8 +4325,11 @@ std::string CDesktop3D::menuCommand(const std::vector<std::string>& args) {
         return menuStatus(m_menu);
     if (m_mode != MODE_ACTIVE)
         return "error: not in 3D";
-    if (args[0] == "open" || (args[0] == "toggle" && !m_menu.open()))
+    if (args[0] == "open" || (args[0] == "toggle" && !m_menu.open())) {
+        if (m_away)
+            setAway(false); // (it wants the mouse and keyboard: back into 3D from another monitor)
         setTyping(false);
+    }
     return h3d::menuCommand(m_menu, args, [this](const SMenuItem& it) { return menuAction(it); });
 }
 
@@ -3816,8 +4366,8 @@ std::string CDesktop3D::status() {
         cursor = std::format(R"({{"at": [{:.1f}, {:.1f}], "size": [{:.0f}, {:.0f}], "hotspot": [{:.0f}, {:.0f}]}})", m_pointerAt.local.x, m_pointerAt.local.y, size.x, size.y, hot.x, hot.y);
     }
     return std::format(
-        R"({{"mode": "{}", "monitor": "{}", "view": "{}", "typing": {}, "playing": {}, "cursor": {}, "fly": {}, "feet": [{:.3f}, {:.3f}, {:.3f}], "eye": [{:.3f}, {:.3f}, {:.3f}], "yaw": {:.2f}, "pitch": {:.2f}, "onGround": {}, "panels": {}, "aimed": {}, "fps": {:.1f}, "frames": {}, "minDt": {:.5f}, "updateMs": {:.2f}, "renderMs": {:.2f}, "sens": {}, "placed": {}, "holding": {}, "world": "{}", "map": "{}", "mapLoading": {}, "avatar": "{}", "avatarLoading": {}, "anim": "{}", "exposure": {:.2f}, "light": {:.3f}, "menu": "{}", "hooks": {{"motion": {}, "warp": {}, "cursor": {}, "wheel": {}, "frame": {}, "softCursor": {}, "discard": {}}}}})",
-        modes[m_mode], m_mode != MODE_OFF && m_monitor.lock() ? jsonEscape(m_monitor.lock()->m_name) : "", m_thirdPerson ? "third" : "first", m_typing, playStatus(), cursor, m_fly, m_feet.x, m_feet.y, m_feet.z, m_camera.eye.x, m_camera.eye.y, m_camera.eye.z, m_yaw * 180.f / F_PI, m_pitch * 180.f / F_PI, m_onGround,
+        R"({{"mode": "{}", "monitor": "{}", "away": {}, "view": "{}", "typing": {}, "playing": {}, "cursor": {}, "fly": {}, "feet": [{:.3f}, {:.3f}, {:.3f}], "eye": [{:.3f}, {:.3f}, {:.3f}], "yaw": {:.2f}, "pitch": {:.2f}, "onGround": {}, "panels": {}, "aimed": {}, "fps": {:.1f}, "frames": {}, "minDt": {:.5f}, "updateMs": {:.2f}, "renderMs": {:.2f}, "sens": {}, "placed": {}, "holding": {}, "world": "{}", "map": "{}", "mapLoading": {}, "avatar": "{}", "avatarLoading": {}, "anim": "{}", "exposure": {:.2f}, "light": {:.3f}, "menu": "{}", "hooks": {{"motion": {}, "warp": {}, "cursor": {}, "wheel": {}, "frame": {}, "softCursor": {}, "discard": {}}}}})",
+        modes[m_mode], m_mode != MODE_OFF && m_monitor.lock() ? jsonEscape(m_monitor.lock()->m_name) : "", m_mode != MODE_OFF && m_away, m_thirdPerson ? "third" : "first", m_typing, playStatus(), cursor, m_fly, m_feet.x, m_feet.y, m_feet.z, m_camera.eye.x, m_camera.eye.y, m_camera.eye.z, m_yaw * 180.f / F_PI, m_pitch * 180.f / F_PI, m_onGround,
         m_panels.size(), aimed, m_fps, m_frames, m_minDt, m_updateMs, m_renderMs, m_sens, m_placements.size(), m_hold.key != 0, jsonEscape(m_world.name), jsonEscape(m_mapPath), m_mapLoader.busy(),
         jsonEscape(m_avatarPath), m_avatarLoader.busy(), jsonEscape(m_anim.playing()), m_exposure, m_lightAvg, m_menu.open() ? jsonEscape(m_menu.path()) : "", m_hookMoved != nullptr, m_hookWarp != nullptr, m_hookCursor != nullptr, m_hookWheel != nullptr, m_hookFrame != nullptr, m_hookSoftCursor != nullptr, m_hookDiscard != nullptr);
 }
@@ -3843,11 +4393,29 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         toggle();
         return "ok";
     }
-    if (cmd == "on")
-        return enter() ? "ok" : "error: can't enter 3D right now";
+    if (cmd == "on") { // on [MONITOR]: 3D on that one, else on plugin:hypr3d:monitor's, else on the focused one
+        PHLMONITOR mon;
+        if (args.size() > 1) {
+            std::string name = args[1];
+            for (size_t i = 2; i < args.size(); ++i) // (a description has spaces)
+                name += " " + args[i];
+            mon = monitorNamed(name);
+            if (!mon)
+                return "error: no monitor " + name + " is connected (hyprctl monitors lists them)";
+            if (const auto now = m_monitor.lock(); m_mode != MODE_OFF && now && now != mon)
+                return "error: in 3D on " + now->m_name + " already";
+        }
+        return enter(mon) ? "ok" : "error: can't enter 3D right now";
+    }
     if (cmd == "off") {
         exit(args.size() > 1 && args[1] == "now");
         return "ok";
+    }
+    if (cmd == "away") { // away [on|off|toggle]: the mouse and keyboard to the desktop on another monitor, or back
+        const std::string v = args.size() > 1 ? args[1] : "toggle";
+        if (v != "on" && v != "off" && v != "toggle")
+            return "error: away [on|off|toggle]";
+        return setAway(v == "on" || (v == "toggle" && !m_away));
     }
     if (cmd == "type") {
         setTyping(args.size() > 1 ? args[1] != "off" : !m_typing);
@@ -3897,6 +4465,37 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         onButton(nowMs(), button, false, nullptr);
         return "ok";
     }
+    if (cmd == "aim") { // aim [window]: turn to face a window's middle: that one (an address, a class or a title), else the one
+        // nearest to where you look (when the crosshair is on the wallpaper between them, say)
+        if (m_mode != MODE_ACTIVE)
+            return "error: not in 3D";
+        const PHLWINDOW want = args.size() > 1 ? findWindow(args[1]) : nullptr;
+        if (args.size() > 1 && !want)
+            return "error: no window " + args[1];
+        const V3      fwd  = forwardFrom(m_yaw, m_pitch);
+        const SPanel* best = nullptr;
+        float         most = -2.f;
+        V3            to;
+        for (const auto& p : m_panels) {
+            const auto w = p.kind == PANEL_WINDOW ? p.window.lock() : nullptr;
+            if (!w || (want && w != want) || p.alpha < 0.5f)
+                continue;
+            const V3 c = p.pose.at({p.box.w / 2, p.box.h / 2}), d = normalize(c - m_camera.eye);
+            if (dot(d, p.pose.normal) > -0.05f) // (from behind, or edge on)
+                continue;
+            if (const float k = dot(d, fwd); k > most) {
+                most = k;
+                best = &p;
+                to   = c - m_camera.eye;
+            }
+        }
+        if (!best)
+            return "error: no window to aim at";
+        m_yaw   = wrapAngle(std::atan2(to.x, -to.z));
+        m_pitch = std::clamp(std::atan2(to.y, std::hypot(to.x, to.z)), -1.55f, 1.55f);
+        const auto w = best->window.lock();
+        return std::format("0x{:x} {}", (uintptr_t)w.get(), w->m_class);
+    }
     if (cmd == "grab") { // pick up (or put down) the window under the crosshair, like G
         if (m_mode != MODE_ACTIVE)
             return "error: not in 3D";
@@ -3913,6 +4512,8 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         place();
         return "placed";
     }
+    if (cmd == "pin") // pin the window carried or under the crosshair to your view, or put the last one pinned down, like H
+        return togglePin();
     if (cmd == "hold") { // hold <distance> [scale]: while holding, set how far away and how big
         if (!m_hold.key)
             return "error: not holding anything";
@@ -3951,6 +4552,8 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
     }
     if (cmd == "windows") // the windows off the wall: where, how far from the eye, how big (1 = as on the wall), pinned
         return windowsStatus();
+    if (cmd == "log") // log [lines]: what the plugin logged lately (Hyprland's own log has it only with its debug logs on)
+        return logLines(args.size() > 1 ? (size_t)std::max(1, std::atoi(args[1].c_str())) : 400);
     // everything after the command word (and more), so paths can have spaces
     auto afterWords = [&](int words) {
         std::string rest = request;
@@ -4019,13 +4622,18 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         const std::string sub  = args.size() > 1 ? args[1] : "";
         if (rest.empty())
             return avatarStatus();
-        if (sub == "lipsync") { // avatar lipsync [on|off|toggle]
+        if (sub == "lipsync") { // avatar lipsync [on|off|toggle|gain dB|auto|source name|default]
             const std::string v = args.size() > 2 ? args[2] : "";
             if (v == "on" || v == "off" || v == "toggle") {
                 if (const std::string r = setLipSync(v == "on" || (v == "toggle" && !m_lipsync)); r.starts_with("error"))
                     return r;
-            } else if (!v.empty())
-                return "error: avatar lipsync [on|off|toggle]";
+            } else if (v == "gain" && args.size() > 3) {
+                if (const std::string r = setLipSyncGain(unquote(afterWords(4))); r.starts_with("error"))
+                    return r;
+            } else if (v == "source" && args.size() > 3)
+                setLipSyncSource(unquote(afterWords(4)));
+            else if (!v.empty())
+                return "error: avatar lipsync [on|off|toggle|gain dB|auto|source name|default]";
             return lipSyncStatus();
         }
         m_ctl.loading       = m_avatarLoader.busy();
@@ -4078,10 +4686,11 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
             m_sens = std::clamp(num(1, m_sens), 0.00005f, 0.05f);
         return std::format("{}", m_sens);
     }
-    return "usage: hyprctl hypr3d [status|toggle|on|off [now]|type [on|off]|play [on|off|toggle]|look dx dy|turn yaw pitch|tp x y z|walk secs [forward|back|left|right]|jump|fly|click "
-           "[left|right|middle]|sens [value]|grab|place|hold dist [scale]|reset-windows [forget]|windows|panels|launch what|apps|window sel action|map [path|none|reload|forget|scale s]|spawn [here]|desktop [here [height]]|"
+    return "usage: hyprctl hypr3d [status|toggle|on [monitor]|off [now]|away [on|off|toggle]|type [on|off]|play [on|off|toggle]|look dx dy|turn yaw pitch|tp x y z|walk secs [forward|back|left|right]|jump|fly|click "
+           "[left|right|middle]|sens [value]|aim [window]|grab|place|hold dist [scale]|pin|reset-windows [forget]|windows|panels|log [lines]|launch what|apps|window sel action|map [path|none|reload|forget|scale s]|spawn [here]|desktop [here [height]]|"
            "avatar [path|none|reload|height m|expression [name [weight]|none]|gesture [left|right|both gesture]|parts [reset]|toggle name [on|off|reset]|"
-           "shape name [weight|reset]|physics [on|off|toggle]|emote [name|number|file|folder [once|loop]|stop]]|view [first|third|toggle] [distance] [side]|"
+           "shape name [weight|reset]|physics [on|off|toggle]|emote [name|number|file|folder [once|loop]|stop]|lipsync [on|off|toggle|gain dB|auto|source name|default]]|"
+           "view [first|third|toggle] [distance] [side]|"
            "menu [open [page]|close|toggle|back|pick [n]|move dx dy|scroll n]]";
 }
 
@@ -4111,6 +4720,11 @@ namespace {
     int luaPlay(lua_State*) {
         if (g_p3D)
             g_p3D->setPlay(!g_p3D->playing());
+        return 0;
+    }
+    int luaAway(lua_State*) {
+        if (g_p3D)
+            g_p3D->setAway(!g_p3D->away());
         return 0;
     }
 
@@ -4181,6 +4795,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // plugin { hypr3d { lipsync = false } }: off unless asked for; nothing heard is kept or sent
     g_cfgLipSync = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:lipsync", "lip sync: the microphone moves the avatar's mouth while in 3D", false);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgLipSync);
+    // plugin { hypr3d { lipsync_gain = auto, lipsync_source = "" } }
+    g_cfgLipSyncGain = makeShared<Config::Values::CStringValue>("plugin:hypr3d:lipsync_gain",
+                                                                "lip sync: how much louder the microphone counts, dB (-20 to 60), or auto: it goes by your voice", "auto");
+    g_cfgLipSyncSource = makeShared<Config::Values::CStringValue>("plugin:hypr3d:lipsync_source",
+                                                                  "lip sync: the microphone, by its name or description (wpctl status), \"\" = the default one", "");
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgLipSyncGain);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgLipSyncSource);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAvatar);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAvatarHeight);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAvatarPhysics);
@@ -4196,6 +4817,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgApps);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAppRules);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgPinSize);
+    // plugin { hypr3d { monitor = DP-1 } }: 3D on that monitor, the others staying the desktop
+    g_cfgMonitor = makeShared<Config::Values::CStringValue>("plugin:hypr3d:monitor",
+                                                            "the monitor 3D goes on: its name (DP-1) or desc: and its description; \"\" = the focused one", "");
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgMonitor);
 
     g_p3D = std::make_unique<CDesktop3D>();
     g_p3D->init();
@@ -4205,6 +4830,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "exit", luaExit);
     HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "type", luaType);
     HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "play", luaPlay);
+    HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "away", luaAway);
     HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "menu", luaMenu);
 
     log("loaded");

@@ -121,6 +121,8 @@ let
         fcitx5
         dbus # (dbus-monitor)
         swaylock
+        swaybg # a wallpaper (a layer surface) for the live check's crosshair to start on
+        quickshell # a shell's see-through overlay over the whole screen (overlay.qml)
       ]);
       security.pam.services.swaylock = { };
       # The portals' user services want graphical-session.target, which a desktop's session brings up: Hyprland

@@ -532,7 +532,7 @@ def face_avatar(dist=2.2, pitch=-6.0, settle=1.2):
 
 def sing(wav, shot=None, skip=0.6, n=8):
     """lip sync's readings while pw-cat plays wav/NAME_long.wav into the test microphone, from `skip` seconds on"""
-    alice(f"setsid -f pw-cat -p --target test_mic_in {H}/wav/{wav}_long.wav > /dev/null 2>&1")
+    alice(f"setsid -f pw-cat -p --target test_mic_in -P node.name=h3d-sing {H}/wav/{wav}_long.wav > /dev/null 2>&1")
     t0 = time.time()
     time.sleep(skip)
     reads = []
@@ -541,9 +541,30 @@ def sing(wav, shot=None, skip=0.6, n=8):
         time.sleep(0.12)
     if shot:
         frame(shot)
-    machine.execute("pkill -x pw-cat; true")
+    machine.execute("pkill -f 'node.name=h3d-[s]ing'; true")
     time.sleep(0.6)
     return reads
+
+
+def mic_noise(on=True):
+    """the test microphone's own hiss (white noise at -75 dBFS, as a real one has; played into it, looped), or none:
+    with none it gives exact zeros, as a microphone muted on itself does"""
+    running = as_alice("pgrep -f 'micnoise[.]f32'")[0] == 0
+    if on and not running:
+        alice(f"setsid -f sh -c 'while :; do cat {H}/wav/micnoise.f32; done | pw-cat -p --raw --format f32 --rate 48000 --channels 1 "
+              f"--target test_mic_in -P node.name=h3d-mic-noise -' > /dev/null 2>&1")
+        time.sleep(0.5)
+    elif not on and running:
+        machine.execute("pkill -f 'micnoise[.]f32'; pkill -f 'node.name=h3d-mic-[n]oise'; true")
+        time.sleep(0.3)
+
+
+def node_id(name):
+    """a PipeWire node's id by node.name, None = there's none"""
+    for o in json.loads(alice("pw-dump")):
+        if o.get("type") == "PipeWire:Interface:Node" and ((o.get("info") or {}).get("props") or {}).get("node.name") == name:
+            return o["id"]
+    return None
 
 
 def lipsync_node():
@@ -598,8 +619,9 @@ def s_start():
     check("0", "loading it changes nothing on the screen", d < 0.002, f"{d:.2%} of pixels differ")
 
 
-@section("9", "config values (Lua): avatar, avatar_physics, avatar_emotes, lipsync, map")
+@section("9", "config values (Lua): avatar, avatar_physics, avatar_emotes, lipsync, lipsync_gain, lipsync_source, map")
 def s_config():
+    mic_noise()
     cfg = {"avatar": AV, "avatar_physics": False, "avatar_emotes": f"{H}/emotes", "lipsync": False, "map": ROOM, "map_scale": 1.0}
     r = reload_config("hyprland.lua", lua_config(cfg))
     check("9", "hyprctl reload", r == "ok", r)
@@ -621,7 +643,7 @@ def s_config():
     check("9", "in 3D in the test room, at its hypr3d_spawn", s["world"] == "TestRoom" and abs(s["feet"][2] - 4.0) < 0.3, f"{s['world']} feet {s['feet']}")
     ensure_3d(False)
 
-    cfg.update(avatar_physics=True, lipsync=True, map="", avatar_height=2.0)
+    cfg.update(avatar_physics=True, lipsync=True, map="", avatar_height=2.0, lipsync_gain="24", lipsync_source="Test microphone")
     reload_config("hyprland.lua", lua_config(cfg))
     wait_for("the courtyard", lambda: ctlj("hypr3d", "map")["map"] == "", 20)
     a = wait_for("height 2 m", lambda: (lambda a: a if abs(a.get("height", 0) - 2.0) < 0.02 and not a["loading"] else None)(av()), 60, 0.25)
@@ -632,14 +654,18 @@ def s_config():
     check("9", "lipsync = true: on, but not listening outside 3D", ls["on"] is True and ls["listening"] is False, ls)
     check("9", "... and no PipeWire stream outside 3D", lipsync_node() is None)
     ensure_3d()
-    ls = wait_for("listening", lambda: (lambda l: l if l["listening"] else None)(lipsync()), 10)
-    check("9", "... listening in 3D", ls["listening"] is True, ls)
+    ls = wait_for("listening", lambda: (lambda l: l if l["listening"] and l["linked"] else None)(lipsync()), 10)
+    check("9", "... listening in 3D", ls["listening"] is True, ls["text"])
+    check("9", "lipsync_gain = \"24\": 24 dB, set", ls["gainSetting"] == 24 and abs(ls["gain"] - 24) < 0.1, f"{ls['gainSetting']}, {ls['gain']}")
+    check("9", "lipsync_source = \"Test microphone\" (a description): that one, by its node.name", ls["target"] == "test_mic" and ls["source"]["name"] == "test_mic",
+          f"{ls['target']}: {ls['text']}")
     ensure_3d(False)
-    cfg.update(lipsync=False, avatar_height=0.0, avatar="")
+    cfg.update(lipsync=False, avatar_height=0.0, avatar="", lipsync_gain="auto", lipsync_source="")
     reload_config("hyprland.lua", lua_config(cfg))
     wait_for("no avatar", lambda: "name" not in av(), 20)
     check("9", "avatar = \"\": no avatar", "name" not in av())
     check("9", "lipsync = false: off again", lipsync()["on"] is False)
+    check("9", "lipsync_gain = \"auto\": automatic again", lipsync()["gainSetting"] == "auto", lipsync()["gainSetting"])
 
     # a value changed at run time, with no reload (hyprctl eval hl.config / hyprctl keyword)
     cfg.update(avatar=AV)
@@ -1036,11 +1062,12 @@ def s_toon():
     ensure_avatar(AV)
 
 
-@section("mic", "lip sync from PipeWire's default source (the test microphone)")
+@section("mic", "lip sync from PipeWire's default source (the test microphone): vowels, a quieter microphone and the gain; muted, silent, suspended, gone, missing, unlinked")
 def s_mic():
     ensure_avatar(AV)
     ensure_3d()
     menu_closed()
+    mic_noise()
     src = alice("wpctl inspect @DEFAULT_AUDIO_SOURCE@")
     check("mic", "the default source is the test microphone", 'node.name = "test_mic"' in src, re.findall(r'node.name = "[^"]*"', src))
     check("mic", "no hypr3d stream before lip sync is on", lipsync_node() is None)
@@ -1049,33 +1076,194 @@ def s_mic():
     node = wait_for("the stream's link", lambda: (lambda n: n if n and n["fed_by"] else None)(lipsync_node()), 10)
     check("mic", "pw-dump: the \"hypr3d lip sync\" stream, fed by the test microphone",
           node["props"].get("node.description") == "hypr3d lip sync" and "test_mic" in node["fed_by"], f"{node['props'].get('media.class')} from {node['fed_by']}")
+    keys = ("text", "problem", "stream", "linked", "source", "peak", "rms", "silentFor", "sinceData", "buffers", "emptyBuffers", "gain", "room")
+    # (a whole second of it, for its peak and RMS)
+    ls = wait_for("its report", lambda: (lambda l: l if l["problem"] == "none" and l["rms"] is not None else None)(lipsync()), 10)
+    check("mic", "its report: linked to the test microphone, not muted, its hiss heard (-75 dBFS); the badge names it",
+          ls["linked"] and (ls["source"] or {}).get("name") == "test_mic" and ls["source"]["muted"] is False and ls["text"] == "lip sync: listening (Test microphone)"
+          and ls["rms"] is not None and -85 < ls["rms"] < -65 and ls["silentFor"] < 0.1, {k: ls[k] for k in keys})
     face_avatar(1.3, -2)
     img = calm_frame("lipsync-badge")
-    corner = (img.w - 320, 0, img.w, 80)
+    corner = (img.w - 420, 0, img.w, 80)
     red = img.count(lambda r, g, b: r > 170 and g < 90 and b < 90, corner)
     check("mic", "the badge in the top right corner (its red dot)", red > 20, f"{red} red pixels")
     shut = lipsync()
-    check("mic", "silence: the mouth shut", max(shut["visemes"].values()) < 0.05, shut)
+    check("mic", "the microphone's hiss alone: the mouth shut", max(shut["visemes"].values()) < 0.05, shut["visemes"])
     results = {}
-    for who in ("man", "woman"):
-        for k, v in enumerate(VOWELS):
-            reads = sing(f"{who}_{v}", "lipsync-woman-a" if (who, v) == ("woman", "a") else None)
-            med = {n: sorted(r["visemes"][n] for r in reads)[len(reads) // 2] for n in VISEMES}
-            best = max(VISEMES, key=lambda n: med[n])
-            lvl = sorted(r["level"] for r in reads)[len(reads) // 2]
-            f1 = sorted(r["formants"][0] for r in reads)[len(reads) // 2]
-            f2 = sorted(r["formants"][1] for r in reads)[len(reads) // 2]
-            results[f"{who}_{v}"] = {"level": lvl, "formants": [f1, f2], "visemes": med, "readings": reads}
-            check("mic", f"{who}'s {v}: {VISEMES[k]} the most", best == VISEMES[k] and med[best] > 0.5,
-                  f"{best} {med[best]:.2f}; level {lvl:.0f} dB, F1 {f1:.0f} F2 {f2:.0f} Hz; " + " ".join(f"{n} {med[n]:.2f}" for n in VISEMES))
+
+    def vowels(prefix, what, least=0.5):
+        opened = []
+        for who in ("man", "woman"):
+            for k, v in enumerate(VOWELS):
+                reads = sing(f"{prefix}{who}_{v}", f"lipsync-{prefix}woman-a" if (who, v) == ("woman", "a") else None)
+                med = {n: sorted(r["visemes"][n] for r in reads)[len(reads) // 2] for n in VISEMES}
+                best = max(VISEMES, key=lambda n: med[n])
+                lvl = sorted(r["level"] for r in reads)[len(reads) // 2]
+                f1 = sorted(r["formants"][0] for r in reads)[len(reads) // 2]
+                f2 = sorted(r["formants"][1] for r in reads)[len(reads) // 2]
+                results[f"{prefix}{who}_{v}"] = {"level": lvl, "formants": [f1, f2], "visemes": med, "readings": reads}
+                opened.append(med[best])
+                check("mic", f"{what}{who}'s {v}: {VISEMES[k]} the most", best == VISEMES[k] and med[best] > least,
+                      f"{best} {med[best]:.2f}; level {lvl:.0f} dB, F1 {f1:.0f} F2 {f2:.0f} Hz, gain {reads[-1]['gain']:+.0f} dB; " + " ".join(f"{n} {med[n]:.2f}" for n in VISEMES))
+        return opened
+
+    own = vowels("", "")
     for f in ("silence", "hiss", "quiet_a", "o_then_hiss"):
         # (o_then_hiss: a man's o, then hiss: once a consonant's moment is over, the mouth must shut; its readings
-        # start 0.8 s into the hiss)
+        # start 0.8 s into the hiss. quiet_a: a whisper, 40 dB down, right after the normal voices: the gain goes by
+        # them, so it stays shut)
         reads = sing(f, skip=1.6 if f == "o_then_hiss" else 0.6)
         most = max(max(r["visemes"].values()) for r in reads)
         results[f] = {"readings": reads}
-        check("mic", f"{f}: the mouth stays shut", most < 0.05, f"the most {most:.2f}, level {reads[len(reads) // 2]['level']:.0f} dB")
+        check("mic", f"{f}: the mouth stays shut", most < 0.05, f"the most {most:.2f}, level {reads[len(reads) // 2]['level']:.0f} dB, gain {reads[-1]['gain']:+.0f} dB")
+
+    # a microphone 30 dB quieter (the same vowels, 30 dB down, over the same hiss): the automatic gain makes up for it,
+    # once the normal voice is out of the 15 s it goes by (right after it, a quieter voice is a whisper: quiet_a above)
+    time.sleep(15.5)
+    quiet = vowels("q30_", "30 dB quieter: ")
+    ls = lipsync()
+    check("mic", "... the gain made up for it: about +30 dB, and the mouth as wide as at their own level",
+          20 <= ls["gain"] <= 40 and min(q - o for q, o in zip(quiet, own)) > -0.1, f"gain {ls['gain']:+.1f} dB, the voice at {ls['reference']:.0f} dBFS, the room at {ls['room']} dBFS; "
+          f"opened {[round(q, 2) for q in quiet]} vs {[round(o, 2) for o in own]}")
+    # the gain set by hand: 0 dB is the fixed marks of before (the quiet vowels barely open), 30 dB makes up for them
+    r = ctlj("hypr3d", "avatar", "lipsync", "gain", "0")
+    reads = sing("q30_man_a")
+    at0 = sorted(x["visemes"]["aa"] for x in reads)[len(reads) // 2]
+    ctl("hypr3d", "avatar", "lipsync", "gain", "30")
+    reads = sing("q30_man_a")
+    at30 = sorted(x["visemes"]["aa"] for x in reads)[len(reads) // 2]
+    back = ctlj("hypr3d", "avatar", "lipsync", "gain", "auto")
+    check("mic", "avatar lipsync gain 0 / 30 / auto: the quiet a barely opens at 0 dB, wide at 30, and back to automatic",
+          r["gainSetting"] == 0 and at0 < 0.4 and at30 > 0.5 and back["gainSetting"] == "auto", f"aa {at0:.2f} at 0 dB, {at30:.2f} at 30 dB; {back['gainSetting']}")
+    # ... and on the Action Menu's Options page, a dial: its first step automatic, round from there up to 60 dB
+    press("tab")
+    press("7")
+    items = {i["label"]: i for i in menu()["items"]}
+    press(str(items["Mic gain"]["slot"]))
+    dial = menu().get("dial") or {}
+    press("5")  # (the fifth of eight: 4/7 of the way, 34 dB)
+    set34 = lipsync()["gainSetting"]
+    hint = next((i["hint"] for i in menu()["items"] if i["label"] == "Mic gain"), "")
+    press("1")  # (the first: automatic)
+    auto = lipsync()["gainSetting"]
+    press("esc")
+    check("mic", "Options > Mic gain: a dial; round to 4/7 sets 34 dB, back to its start automatic", dial.get("label") == "Mic gain" and set34 == 34 and auto == "auto",
+          f"dial {dial}, {set34} ({hint}), then {auto}")
+
+    # what can be wrong with a microphone, each told apart; each time lip sync starts, one notification of it
+    def fresh():
+        """lip sync off and on: listening anew (so its one notification is the next one)"""
+        ctl("hypr3d", "avatar", "lipsync", "off")
+        ctl("hypr3d", "avatar", "lipsync", "on")
+        ctl("dismissnotify")
+        return wait_for("listening again", lambda: (lambda l: l if l["linked"] and l["problem"] == "none" else None)(lipsync()), 10)
+
+    def told(text):
+        """the plugin's own log has that (its notifications go there too)"""
+        return text in ctl("hypr3d", "log")
+
+    mic = node_id("test_mic")
+    # muted in PipeWire: exact zeros, and PipeWire says so
+    fresh()
+    alice(f"wpctl set-mute {mic} 1")
+    ls = wait_for("muted", lambda: (lambda l: l if l["problem"] == "muted" and l["silentFor"] > 0.5 else None)(lipsync()), 6)
+    check("mic", "muted in PipeWire (wpctl set-mute): \"Test microphone is muted\", exact zeros, the source's mute", ls["text"] == "lip sync: Test microphone is muted"
+          and ls["source"]["muted"] is True and ls["silentFor"] > 0.5, {k: ls[k] for k in keys})
+    check("mic", "... and a notification says how to unmute it", told("is muted in PipeWire: wpctl set-mute"))
+    alice(f"wpctl set-mute {mic} 0")
+    ls = wait_for("unmuted", lambda: (lambda l: l if l["problem"] == "none" else None)(lipsync()), 6)
+    check("mic", "... unmuted: listening again", ls["text"] == "lip sync: listening (Test microphone)", ls["text"])
+    # silent, not muted (a microphone muted by its own button: PipeWire doesn't know): nothing into it, exact zeros
+    fresh()
+    mic_noise(False)
+    ls = wait_for("silent", lambda: (lambda l: l if l["problem"] == "silent" else None)(lipsync()), 8)
+    check("mic", "exact zeros, not muted (as a microphone's own mute button gives): \"no sound from Test microphone (muted?)\"",
+          ls["text"] == "lip sync: no sound from Test microphone (muted?)" and ls["source"]["muted"] is False and ls["silentFor"] >= 2 and ls["peak"] is None,
+          {k: ls[k] for k in keys})
+    frame("lipsync-badge-silent")
+    check("mic", "... and a notification: is it muted?", told("sends only silence: is it muted, maybe by its own button?"))
+    mic_noise()
+    ls = wait_for("its hiss again", lambda: (lambda l: l if l["problem"] == "none" else None)(lipsync()), 6)
+    check("mic", "... its hiss back: listening", ls["text"] == "lip sync: listening (Test microphone)", ls["text"])
+    # suspended (as WirePlumber suspends a source nothing listens to, after 5 s), then lip sync on: PipeWire starts it
+    # again for it (the test microphone gives zeros with nothing played into it, and then its hiss)
+    ctl("hypr3d", "avatar", "lipsync", "off")
+    mic_noise(False)  # (the noise's own stream would keep it running)
+
+    def state_of(name):
+        return next((o["info"].get("state") for o in json.loads(alice("pw-dump")) if o.get("type") == "PipeWire:Interface:Node"
+                     and ((o.get("info") or {}).get("props") or {}).get("node.name") == name), None)
+    try:
+        suspended = wait_for("suspended", lambda: state_of("test_mic") == "suspended", 15, 0.5)
+    except TimeoutError:
+        suspended = False
+    ctl("hypr3d", "avatar", "lipsync", "on")
+    seen = []
+    for _ in range(10):
+        l = lipsync()
+        seen.append((l["problem"], (l["source"] or {}).get("state"), l["stream"], l["samples"], l["silentFor"], l["sinceData"]))
+        time.sleep(0.25)
+    note("mic", "the test microphone suspended, then lip sync on: what it saw, every 0.25 s", f"suspended first: {suspended}; {seen}")
+    mic_noise()
+    ls = wait_for("its hiss", lambda: (lambda l: l if l["problem"] == "none" else None)(lipsync()), 8)
+    reads = sing("man_a")
+    aa = sorted(x["visemes"]["aa"] for x in reads)[len(reads) // 2]
+    check("mic", "... it runs again for lip sync: samples at once, its hiss, and a vowel opens the mouth",
+          suspended and seen[2][1] == "running" and seen[2][3] > 0 and aa > 0.5, f"aa {aa:.2f}; {reads[-1]['text']}")
+    # a second microphone, the default, then gone (unplugged): what lip sync does, and says
+    alice("setsid -f pw-loopback -n h3d-mic2 --capture-props='media.class=Audio/Sink node.name=test_mic2_in node.description=\"Test microphone 2 in\" audio.position=[MONO]' "
+          "--playback-props='media.class=Audio/Source node.name=test_mic2 node.description=\"Test microphone 2\" audio.position=[MONO]' > /dev/null 2>&1")
+    mic2 = wait_for("the second microphone", lambda: node_id("test_mic2"), 10)
+    alice(f"wpctl set-default {mic2}")
+    fresh_ok = True
+    try:
+        ctl("hypr3d", "avatar", "lipsync", "off")
+        ctl("hypr3d", "avatar", "lipsync", "on")
+        ls = wait_for("linked to the second", lambda: (lambda l: l if l["linked"] and l["source"]["name"] == "test_mic2" else None)(lipsync()), 10)
+    except TimeoutError as e:
+        fresh_ok, ls = False, {"error": str(e)}
+    check("mic", "a second microphone made the default: lip sync listens to it", fresh_ok, ls.get("text", ls))
+    machine.execute("pkill -f 'pw-loopback -n h3d-[m]ic2'; true")
+    time.sleep(3)
+    ls, node = lipsync(), lipsync_node()
+    note("mic", "... unplugged (pw-loopback gone): what lip sync says, and pw-dump", f"{ {k: ls[k] for k in keys} }; fed by {node and node['fed_by']}")
+    check("mic", "... its report agrees with pw-dump (linked when a link feeds it), and the badge with the report",
+          ls["linked"] == bool(node and node["fed_by"]) and (ls["linked"] or ls["problem"] in ("unlinked", "error")), f"{ls['text']}; fed by {node and node['fed_by']}")
+    alice(f"wpctl set-default {mic}")
+    ls = fresh()
+    check("mic", "... the test microphone the default again: listening to it", ls["source"]["name"] == "test_mic", ls["text"])
+    # a microphone asked for by name that isn't there: WirePlumber gives it the default one, and it says so
+    ctl("hypr3d", "avatar", "lipsync", "source", "no_such_mic")
+    ls = wait_for("the one missing", lambda: (lambda l: l if l["problem"] == "missing" else None)(lipsync()), 8)
+    check("mic", "avatar lipsync source no_such_mic: \"no no_such_mic (listening to Test microphone)\", the default in its place",
+          ls["text"] == "lip sync: no no_such_mic (listening to Test microphone)" and ls["linked"] and ls["target"] == "no_such_mic",
+          {k: ls[k] for k in keys + ("error", "target", "coreError")})
+    check("mic", "... and a notification: which there are", told("no microphone no_such_mic (lipsync_source), so Test microphone instead"))
+    ctl("hypr3d", "avatar", "lipsync", "source", "Test microphone")  # (a description, as wpctl status lists it)
+    ls = wait_for("linked by its description", lambda: (lambda l: l if l["linked"] else None)(lipsync()), 10)
+    check("mic", "avatar lipsync source \"Test microphone\" (its description): found, and listened to",
+          ls["target"] == "test_mic" and ls["source"]["name"] == "test_mic" and ls["problem"] in ("none", "starting"), f"{ls['target']}: {ls['text']}")
+    ctl("hypr3d", "avatar", "lipsync", "source", "default")
+    ls = wait_for("the default again", lambda: (lambda l: l if l["linked"] and l["target"] == "" else None)(lipsync()), 10)
+    check("mic", "avatar lipsync source default: the default microphone again", ls["source"]["name"] == "test_mic", ls["text"])
+    # unlinked: no session manager to link it (WirePlumber stopped, lip sync started anew). Does PipeWire still give
+    # an unlinked stream anything? It must say "no microphone linked" either way
+    alice("systemctl --user stop wireplumber")
+    ctl("hypr3d", "avatar", "lipsync", "off")
+    ctl("hypr3d", "avatar", "lipsync", "on")
+    ls = wait_for("unlinked", lambda: (lambda l: l if l["problem"] == "unlinked" else None)(lipsync()), 8)
+    b0, t0 = ls["buffers"], time.time()
+    time.sleep(1.0)
+    ls = lipsync()
+    note("mic", "a stream nothing links: what PipeWire gives it", f"{(ls['buffers'] - b0) / (time.time() - t0):.0f} buffers a second, {ls['samples']} samples in all, "
+         f"exact zeros for {ls['silentFor']} s, {ls['emptyBuffers']} flagged empty; stream {ls['stream']}")
+    check("mic", "unlinked (no WirePlumber to link it): \"no microphone linked\"", ls["text"] == "lip sync: no microphone linked" and not ls["linked"], {k: ls[k] for k in keys})
+    alice("systemctl --user start wireplumber")
+    ls = wait_for("linked again", lambda: (lambda l: l if l["linked"] else None)(lipsync()), 15)
+    check("mic", "... WirePlumber back: linked to the test microphone again", ls["source"]["name"] == "test_mic", ls["text"])
     (LOGS / "lipsync.json").write_text(json.dumps(results, indent=1))
+    ctl("dismissnotify")
+
     ensure_3d(False)
     time.sleep(0.5)
     ls = lipsync()
@@ -1143,6 +1331,7 @@ def s_badge():
     ensure_avatar(AV)
     ensure_3d()
     menu_closed()
+    mic_noise()  # (a silent microphone would say so, with a notification over the corner)
     face_avatar(2.0, -4)
     ctl("hypr3d", "avatar", "lipsync", "on")
     wait_for("listening", lambda: lipsync()["listening"], 10)
@@ -1664,6 +1853,207 @@ def s_monitors():
     ensure_3d()
     check("16", "3D again on the first", st()["monitor"] == "Virtual-1", st()["monitor"])
     ensure_3d(False)
+
+
+def second_monitor():
+    """Hyprland's own headless output H3D-2, right of Virtual-1, as section 16 makes it: hyprctl's answer, the monitors"""
+    ctl("eval", 'hl.monitor({ output = "Virtual-1", mode = "preferred", position = "0x0", scale = 1 })')
+    r = ctl("output", "create", "headless", "H3D-2")
+    wait_for("H3D-2", lambda: "H3D-2" in monitors(), 10)
+    ctl("eval", 'hl.monitor({ output = "H3D-2", mode = "1280x800@60", position = "1280x0", scale = 1 })')
+    m = wait_for("H3D-2 at 1280x0", lambda: (lambda m: m if m.get("H3D-2", {}).get("x") == 1280 and m["H3D-2"]["width"] == 1280 and m["Virtual-1"]["x"] == 0 else None)(monitors()), 10)
+    return r, m
+
+
+def cursor():
+    x, y = ctl("cursorpos").split(",")
+    return float(x), float(y)
+
+
+def cursor_pixels(img, at):
+    """Hyprland's cursor drawn where it is, in a frame of the first monitor"""
+    x, y = int(at[0]), int(at[1])
+    return img.count(cursor_cyan, (x - 20, y - 20, x + 50, y + 50))
+
+
+@section("16b", "3D on the monitor plugin:hypr3d:monitor names, the other one the desktop meanwhile: the mouse and keyboard there and back (Super+Esc, a keybind's focus, the mouse)")
+def s_away():
+    ensure_avatar(AV)
+    ensure_3d(False)
+    r, m = second_monitor()
+    check("16b", "a second monitor, right of the first", r == "ok" and m, {n: (v["x"], v["width"]) for n, v in m.items()})
+    # wev fills the first monitor, the pointer over it; the keybinds that move the focus (Serpantinum has these)
+    ctl("dispatch", 'hl.dsp.focus({ monitor = "Virtual-1" })')
+    wev_start()
+    ctl("dispatch", 'hl.dsp.cursor.move({ x = 600, y = 400 })')
+    rel(20, 10)
+    ctl("eval", 'hl.bind("SUPER + Left", hl.dsp.focus({ direction = "left" }))')
+    ctl("eval", 'hl.bind("SUPER + Right", hl.dsp.focus({ direction = "right" }))')
+    ctl("eval", 'hl.config({ plugin = { hypr3d = { monitor = "H3D-2" } } })')
+    home = cursor()
+    ctl("dismissnotify")
+    time.sleep(1.2)
+    one2d, two2d = frame("away-first-2d", "Virtual-1"), frame("away-second-2d", "H3D-2")
+    n2d = cursor_pixels(one2d, home)
+
+    ensure_3d()  # (hyprctl hypr3d on, the first monitor focused)
+    s = st()
+    check("16b", "plugin:hypr3d:monitor = H3D-2: 3D goes there, though the first has the focus", s["monitor"] == "H3D-2" and s["away"] is False,
+          f"{s['monitor']}, away {s['away']}")
+    c = cursor()
+    check("16b", "... the cursor goes to it (and the focus)", c[0] >= 1280 and focused_monitor() == "H3D-2", f"cursor {home} -> {c}, focused {focused_monitor()}")
+    time.sleep(1)
+    one, two = frame("away-first-while-3d", "Virtual-1"), frame("away-second-3d", "H3D-2")
+    d1, d2, n3d = one2d.differs(one), two2d.differs(two), cursor_pixels(one, home)
+    # (wev on the first has lost the focus: its border has the inactive colour)
+    check("16b", "grim -o: the second shows 3D, the first its desktop as it was, the cursor gone from it", d2 > 0.3 and d1 < 0.02 and n2d > 20 and n3d < 5,
+          f"{d2:.1%} and {d1:.2%} of pixels changed; cursor pixels {n2d} -> {n3d}")
+    y0 = st()["yaw"]
+    rel(300, 0)
+    check("16b", "... the mouse turns the camera, the cursor staying", abs(st()["yaw"] - y0) > 5 and cursor() == c, f"yaw {y0} -> {st()['yaw']}, cursor {c} -> {cursor()}")
+
+    # Super+Esc: the mouse and keyboard to the first monitor, the cursor where it was; 3D stays up on the second
+    press("meta_l", "esc")
+    time.sleep(0.5)
+    s, c2 = st(), cursor()
+    check("16b", "Super+Esc: away to the first monitor, the cursor where it was and the focus there; 3D stays up",
+          s["away"] is True and s["mode"] == "active" and abs(c2[0] - home[0]) < 2 and abs(c2[1] - home[1]) < 2 and focused_monitor() == "Virtual-1",
+          f"away {s['away']}, {s['mode']}, cursor {c2} (was {home}), focused {focused_monitor()}")
+    told = ctl("hypr3d", "log", "30")
+    check("16b", "... a notification says how to come back", "move it back onto H3D-2" in told, told.strip().splitlines()[-3:])
+    wev_mark("away")
+    f0, y1 = s["frames"], s["yaw"]
+    rel(30, 20)
+    click("left")
+    press("a")
+    press("esc")
+    wheel(1)
+    time.sleep(1.0)
+    evs, s, c3 = wev_events("away"), st(), cursor()
+    pointer = [e for i, e, r in evs if i == "wl_pointer" and e in ("enter", "motion")]
+    keys = wev_keys(evs)
+    check("16b", "... the mouse moves Hyprland's cursor there, not the camera", c3 != c2 and abs(s["yaw"] - y1) < 0.01, f"cursor {c2} -> {c3}, yaw {y1} -> {s['yaw']}")
+    check("16b", "... wev on the first gets the pointer, a click, keys (Esc too) and the wheel",
+          pointer and wev_buttons(evs) == [(272, 1), (272, 0)] and (38, 1) in keys and (38, 0) in keys and (9, 1) in keys and (9, 0) in keys and wev_scrolls(evs),
+          f"pointer {pointer[-3:]}, buttons {wev_buttons(evs)}, keys {keys}, wheel {wev_scrolls(evs)}")
+    check("16b", "... 3D stays up on the second and goes on drawing (Esc was wev's)", s["mode"] == "active" and s["monitor"] == "H3D-2" and s["frames"] > f0 and s["aimed"] is None,
+          f"{s['mode']} on {s['monitor']}, frames {f0} -> {s['frames']}, aimed {s['aimed']}")
+    n = cursor_pixels(frame("away-first", "Virtual-1"), c3)
+    check("16b", "... Hyprland's cursor shows on the first", n > 20, f"{n} cursor pixels")
+    ctl("dismissnotify")
+    ctl("notify", "1", "8000", "rgb(ff8800)", "hypr3d: on the first monitor, which has the focus")
+    time.sleep(1.2)
+    n1, n2 = len(notification_boxes(frame("away-notification-first", "Virtual-1"))), len(notification_boxes(frame("away-notification-second", "H3D-2")))
+    check("16b", "... a notification shows on the first, not over the 3D view", n1 == 1 and n2 == 0, f"{n1} and {n2}")
+    ctl("dismissnotify")
+
+    # the mouse over the edge onto the second: back into 3D, where it came in
+    rel(1500, 0)
+    time.sleep(0.5)
+    s, c4 = st(), cursor()
+    check("16b", "the mouse moved onto the second monitor: back in 3D, the focus there", s["away"] is False and c4[0] >= 1280 and focused_monitor() == "H3D-2",
+          f"away {s['away']}, cursor {c4}, focused {focused_monitor()}")
+    active = json.loads(ctl("-j", "activewindow") or "{}")
+    check("16b", "... wev on the first has lost the keyboard focus (a Super shortcut in 3D can't close it unseen)", not active.get("class"), active.get("class"))
+    y2 = s["yaw"]
+    rel(200, 0)
+    check("16b", "... the mouse turns the camera again, the cursor staying", abs(st()["yaw"] - y2) > 3 and cursor() == c4, f"yaw {y2} -> {st()['yaw']}, cursor {c4} -> {cursor()}")
+    ctl("hypr3d", "spawn")
+    time.sleep(0.5)
+    wev_mark("back")
+    feet = st()["feet"]
+    press("w", hold=0.8)
+    time.sleep(0.3)
+    keys, moved = wev_keys(wev_events("back")), math.dist(feet, st()["feet"])
+    check("16b", "... W walks again, and isn't wev's", moved > 0.3 and not keys, f"walked {moved:.2f} m, wev keys {keys}")
+
+    # a keybind that moves the focus to the first monitor (hl.dsp.focus, direction left): away there, to its window
+    press("meta_l", "left")
+    time.sleep(0.6)
+    s, active = st(), json.loads(ctl("-j", "activewindow"))
+    check("16b", "Super+Left (the focus to the left): away to the first monitor, wev focused",
+          s["away"] is True and cursor()[0] < 1280 and focused_monitor() == "Virtual-1" and active.get("class") == "wev",
+          f"away {s['away']}, cursor {cursor()}, focused {focused_monitor()}, active {active.get('class')}")
+    # and to the right, back: the second has no window, so Hyprland only puts the cursor in its middle (no pointer move
+    # it tells of: the plugin sees where the cursor is after the frame)
+    press("meta_l", "right")
+    time.sleep(0.6)
+    s = st()
+    check("16b", "Super+Right (the focus to the second, which has no window): back in 3D", s["away"] is False and cursor()[0] >= 1280 and focused_monitor() == "H3D-2",
+          f"away {s['away']}, cursor {cursor()}, focused {focused_monitor()}")
+
+    r1, s1, c5 = ctl("hypr3d", "away", "on"), st(), cursor()
+    r2, s2 = ctl("hypr3d", "away", "off"), st()
+    check("16b", "hyprctl hypr3d away on, then off", r1 == "away" and s1["away"] and c5[0] < 1280 and r2 == "in 3D" and not s2["away"] and cursor()[0] >= 1280,
+          f"{r1}, away {s1['away']}, cursor {c5}; {r2}, away {s2['away']}, cursor {cursor()}")
+    ctl("hypr3d", "away", "on")
+    press("meta_l", "esc")
+    s = st()
+    check("16b", "away, Super+Esc comes back into 3D", s["away"] is False and focused_monitor() == "H3D-2", f"away {s['away']}, focused {focused_monitor()}")
+    ctl("hypr3d", "away", "on")
+    press("meta_l", "m")
+    s, mn = st(), menu()
+    check("16b", "away, the Action Menu's keybind (Super+M) comes back into 3D and opens it", s["away"] is False and mn.get("open"), f"away {s['away']}, menu open {mn.get('open')}")
+    menu_closed()
+
+    # leaving 3D while away: the mouse is the desktop's all along
+    ctl("hypr3d", "away", "on")
+    c6 = cursor()
+    ctl("hypr3d", "off")
+    rel(-40, 0, after=0.1)
+    moving, mode = cursor() != c6, st()["mode"]
+    wait_for("2D", lambda: st()["mode"] == "off", 15)
+    check("16b", "leaving 3D while away: the mouse moves the cursor on the first meanwhile", moving and mode in ("exiting", "off"), f"{c6} -> {cursor()} ({mode})")
+
+    # 3D on a monitor asked for; one that isn't there
+    ctl("eval", 'hl.config({ plugin = { hypr3d = { monitor = "" } } })')
+    r = ctl("hypr3d", "on", "NOPE-9")
+    check("16b", "hyprctl hypr3d on NOPE-9: an error, no 3D", r.startswith("error") and st()["mode"] == "off", r)
+    ctl("dispatch", 'hl.dsp.focus({ monitor = "Virtual-1" })')
+    r = ctl("hypr3d", "on", "H3D-2")
+    ok = wait_for("3D", lambda: st()["mode"] == "active", 15)
+    check("16b", "hyprctl hypr3d on H3D-2, from the first: 3D there", r == "ok" and ok and st()["monitor"] == "H3D-2", f"{r}; {st()['monitor']}")
+    ensure_3d(False)
+    desc = monitors()["H3D-2"].get("description", "")
+    if desc:
+        ctl("eval", f'hl.config({{ plugin = {{ hypr3d = {{ monitor = {lua_value("desc:" + desc)} }} }} }})')
+        ctl("dispatch", 'hl.dsp.focus({ monitor = "Virtual-1" })')
+        ensure_3d()
+        check("16b", "plugin:hypr3d:monitor = desc: and its description", st()["monitor"] == "H3D-2", f"desc:{desc} -> {st()['monitor']}")
+        ensure_3d(False)
+    else:
+        note("16b", "H3D-2 has no description to go by")
+    ctl("eval", 'hl.config({ plugin = { hypr3d = { monitor = "NOPE-9" } } })')
+    ctl("dispatch", 'hl.dsp.focus({ monitor = "Virtual-1" })')
+    ensure_3d()
+    told = ctl("hypr3d", "log", "30")
+    check("16b", "plugin:hypr3d:monitor = NOPE-9 (none such): 3D on the focused one, and a notification says so", st()["monitor"] == "Virtual-1" and "no monitor NOPE-9" in told,
+          f"{st()['monitor']}; {told.strip().splitlines()[-2:]}")
+    ensure_3d(False)
+
+    # the 3D monitor goes while the mouse is away from it
+    ctl("eval", 'hl.config({ plugin = { hypr3d = { monitor = "H3D-2" } } })')
+    ensure_3d()
+    ctl("hypr3d", "away", "on")
+    r = ctl("output", "remove", "H3D-2")
+    time.sleep(1)
+    if not alive():
+        check("16b", "the second monitor removed while away from 3D on it: back to 2D, Hyprland fine", False, f"{r}; Hyprland crashed")
+        restart_after_crash()
+        return
+    ok = wait_for("2D", lambda: st()["mode"] == "off", 10)
+    c7 = cursor()
+    rel(-30, 0)
+    check("16b", "the second monitor removed while away from 3D on it: 2D, Hyprland fine, the mouse moving on the first",
+          r == "ok" and ok and "H3D-2" not in monitors() and cursor() != c7, f"{r}; {st()['mode']}; cursor {c7} -> {cursor()}")
+
+    ctl("eval", 'hl.config({ plugin = { hypr3d = { monitor = "" } } })')
+    ctl("eval", 'hl.unbind("SUPER + Left")')
+    ctl("eval", 'hl.unbind("SUPER + Right")')
+    machine.execute("pkill -x wev; true")
+    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
+    time.sleep(1.5)
 
 
 
@@ -3488,19 +3878,208 @@ def s_perf():
     ensure_3d(False)
 
 
-@section("live", "tools/test/live/check.sh, the script for checking your own desktop, run in the VM (and stopped with Ctrl+C)")
+def shell_overlay(on=True):
+    """quickshell's see-through overlay over the whole screen (overlay.qml: input only in a band down the middle)"""
+    machine.execute("pkill -f 'quickshell -p'; true")
+    if on:
+        alice(f"setsid -f quickshell -p {H}/overlay.qml > /tmp/quickshell.log 2>&1")
+        wait_for("the overlay", lambda: "h3d-overlay" in ctl("-j", "layers"), 30)
+        time.sleep(0.5)
+
+
+@section("25", "a shell's see-through overlay over the whole screen (quickshell): the crosshair and clicks go through it where it takes no input, and hit it where it does")
+def s_overlay():
+    lua_session()
+    ensure_plugin()
+    ensure_3d(False)
+    shell_overlay()
+    ensure_3d()
+    menu_closed()
+    ctl("hypr3d", "view", "first")
+    ctl("hypr3d", "spawn")
+    time.sleep(1.0)
+    s = st()
+    check("25", "the crosshair on the overlay's band (it takes input there): the overlay", (s.get("aimed") or {}).get("kind") == "layer", s.get("aimed"))
+    r = ctl("hypr3d", "aim", "h3d-left")
+    time.sleep(0.8)
+    s = st()
+    aimed = s.get("aimed") or {}
+    check("25", "on the terminal behind its see-through part: the terminal, not the overlay", aimed.get("kind") == "window" and aimed.get("class") == "h3d-left", f"{r}; {aimed}")
+    click("left")
+    time.sleep(0.5)
+    active = json.loads(ctl("-j", "activewindow") or "{}").get("class")
+    check("25", "... a click there focuses the terminal", active == "h3d-left", active)
+    frame("overlay-3d")
+    ensure_3d(False)
+    shell_overlay(False)
+
+
+@section("25h", "H, the key: pinning a window to the view and putting it down somewhere else (with a shell's overlay over the desktop, as on a user's), the one carried, two pinned, the Action Menu open, hyprctl hypr3d pin")
+def s_pin_key():
+    lua_session()
+    ensure_plugin()
+    ensure_3d(False)
+    clean_windows()
+    for cls in ("h3d-left", "h3d-right"):  # (the two terminals, on the wall: section 20 leaves only the left one)
+        if not any(c["class"] == cls for c in json.loads(ctl("-j", "clients"))):
+            alice(f"setsid -f foot --app-id {cls} > /dev/null 2>&1")
+            wait_for(cls, lambda: any(c["class"] == cls for c in json.loads(ctl("-j", "clients"))), 20)
+    shell_overlay()
+    ensure_3d()
+    menu_closed()
+    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hypr3d", "view", "first")
+    ctl("hypr3d", "spawn")
+    time.sleep(1.0)
+
+    def pins():
+        return {p["class"]: p["pinned"] for p in windows3d()["placed"]}
+
+    def errors(text):
+        return ctl("hypr3d", "log").count(text)
+
+    # the user's way: H on a window on the wall, walk somewhere, H again there
+    a = aim_find("h3d-left")
+    press("h")
+    s = st()
+    g = placed("h3d-left")
+    ahead, right, up = relative(g, s) if g else (0, 0, 0)
+    pan = next((p for p in panels() if p["kind"] == "window" and p["class"] == "h3d-left"), {})
+    check("25h", "H on a terminal on the wall, through the overlay's see-through part: pinned to the view's top right corner",
+          a and g and g["pinned"] and right > 0.2 and up > 0.05 and pan.get("front"), f"aimed {a}; {g}; ahead {ahead:.2f} right {right:.2f} up {up:.2f}")
+    frame("pin-key-pinned")
+    ctl("hypr3d", "walk", "0.6", "back")
+    time.sleep(1.2)
+    a = aim_find("h3d-right")
+    s1, g1 = st(), placed("h3d-left")
+    moved = math.dist(s1["eye"], s["eye"])
+    press("h")
+    time.sleep(0.3)
+    g2 = placed("h3d-left")
+    check("25h", "walked back, the crosshair on the other terminal: H puts the pinned one down where it is, and doesn't pin the other",
+          a and moved > 1 and g2 and not g2["pinned"] and math.dist(g2["center"], g1["center"]) < 0.02 and "h3d-right" not in pins(),
+          f"aimed {a and a.get('class')}; walked {moved:.2f} m; {g1 and g1['center']} -> {g2 and g2['center']}; {pins()}")
+    ctl("hypr3d", "walk", "0.5", "left")  # (still on its front side: it faces where you were)
+    rel(-400, 0)
+    time.sleep(1.2)
+    g3 = placed("h3d-left")
+    check("25h", "... and it stays there as you walk away and look around", g3 and not g3["pinned"] and math.dist(g3["center"], g1["center"]) < 0.02,
+          f"{g1['center']} -> {g3 and g3['center']}")
+    ctl("hypr3d", "aim", "h3d-left")
+    time.sleep(0.8)
+    frame("pin-key-put-down")
+
+    # 0.6 m from a wall (the courtyard's south gate, its doors' face at z 21.88), where the pinned window's middle is
+    # behind the doors: put down in front of them, as you saw it (the same way from your eye), only nearer
+    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hypr3d", "spawn")
+    time.sleep(1.0)
+    a = aim_find("h3d-left")
+    press("h")
+    ctl("hypr3d", "tp", "0", "0", "21.3")
+    ctl("hypr3d", "turn", "180", "0")
+    time.sleep(1.0)
+    g1 = placed("h3d-left")
+    press("h")
+    time.sleep(0.5)
+    s, g2 = st(), placed("h3d-left")
+    d1, d2 = [g1["center"][i] - s["eye"][i] for i in range(3)], [g2["center"][i] - s["eye"][i] for i in range(3)]
+    same = sum(x * y for x, y in zip(d1, d2)) / (math.hypot(*d1) * math.hypot(*d2))
+    check("25h", "0.6 m from the gate's doors (a pinned window's middle behind them): H puts it down in front of them, the same way from your eye, only nearer",
+          a and g1 and g1["pinned"] and g1["center"][2] > 21.9 and g2 and not g2["pinned"] and 21.8 < g2["center"][2] < 21.88 and same > 0.9999,
+          f"{g1 and g1['center']} -> {g2 and g2['center']}; {g2 and g2['distance']} m from the eye, {g2 and g2['height']} m tall; cos {same:.6f}")
+    frame("pin-key-by-a-wall")
+
+    # nothing pinned, nothing under the crosshair (the sky): says so
+    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hypr3d", "spawn")
+    ctl("hypr3d", "turn", "0", "70")
+    time.sleep(0.8)
+    n = errors("point the crosshair at a window to pin it")
+    press("h")
+    check("25h", "H at the sky, nothing pinned: nothing is, and a notification says to point at a window",
+          not any(pins().values()) and errors("point the crosshair at a window to pin it") == n + 1, f"{pins()}; aimed {st()['aimed']}")
+
+    # carrying a window (G): H pins that one, not the window behind it
+    ctl("hypr3d", "turn", "0", "0")
+    a = aim_find("h3d-right")
+    press("g")
+    held = st()["holding"]
+    press("h")
+    p = pins()
+    check("25h", "carrying a terminal (G), H pins it, not what's behind it: carried no more", a and held and p.get("h3d-right") and not p.get("h3d-left") and st()["holding"] is False,
+          f"aimed {a and a.get('class')}, held {held}; {p}")
+    press("h")
+    check("25h", "... and H puts it down", pins().get("h3d-right") is False, pins())
+
+    # two pinned (from hyprctl, as the Windows page does): H puts down the last one pinned, then the other
+    ctl("hypr3d", "reset-windows", "forget")
+    time.sleep(1.0)
+    r = [ctl("hypr3d", "window", "h3d-left", "pin"), ctl("hypr3d", "window", "h3d-right", "pin")]
+    p0 = pins()
+    press("h")
+    p1 = pins()
+    press("h")
+    p2 = pins()
+    check("25h", "two pinned: H puts down the last one pinned, H again the other",
+          r == ["pinned", "pinned"] and p0 == {"h3d-left": True, "h3d-right": True} and p1 == {"h3d-left": True, "h3d-right": False} and p2 == {"h3d-left": False, "h3d-right": False},
+          f"{r}; {p0} -> {p1} -> {p2}")
+
+    # the Action Menu open hides the crosshair: H pins nothing then, but puts a pinned window down
+    ctl("hypr3d", "reset-windows", "forget")
+    time.sleep(1.0)
+    a = aim_find("h3d-left")
+    press("tab")
+    n = errors("close the Action Menu first")
+    press("h")
+    p0 = pins()
+    check("25h", "the Action Menu open (the crosshair hidden): H pins nothing, and says to close the menu",
+          a and menu().get("open") and not any(p0.values()) and errors("close the Action Menu first") == n + 1, f"{p0}; menu {menu().get('open')}")
+    press("esc", after=0.05)
+    press("h")  # (at once: the menu still fading out)
+    p1 = pins()
+    press("tab")
+    press("h")
+    p2 = pins()
+    press("esc")
+    check("25h", "... closed (H at once, as it fades), H pins; with one pinned, H puts it down with the menu open",
+          p1.get("h3d-left") is True and p2.get("h3d-left") is False and not menu().get("open"), f"{p1} -> {p2}")
+
+    # hyprctl hypr3d pin: what H does
+    ctl("hypr3d", "reset-windows", "forget")
+    time.sleep(1.0)
+    a = aim_find("h3d-right")
+    r1 = ctl("hypr3d", "pin")
+    p1 = pins()
+    r2 = ctl("hypr3d", "pin")
+    p2 = pins()
+    check("25h", "hyprctl hypr3d pin: pins the window under the crosshair, then puts it down, as H does",
+          a and r1 == "pinned" and p1.get("h3d-right") is True and r2 == "unpinned" and p2.get("h3d-right") is False, f"{r1} {p1}; {r2} {p2}")
+
+    ctl("hypr3d", "reset-windows", "forget")
+    ensure_3d(False)
+    shell_overlay(False)
+
+
+@section("live", "tools/test/live/check.sh, the script for checking your own desktop, run in the VM from a terminal, with a ticking clock and a wallpaper (and a real change, and Ctrl+C)")
 def s_live():
-    # a session without the plugin (the script loads it, and unloads it), one terminal: under the crosshair in 3D
+    # a session without the plugin (the script loads it, and unloads it): a wallpaper (swaybg, a layer surface), a clock
+    # ticking in a terminal on the left and, on the right, the terminal the script runs in (its output scrolls); the
+    # crosshair starts between them, on the wallpaper, as it did on a user's desktop
     start_hyprland("hyprland.lua", lua_config(), terminals=False)
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1")
-    wait_for("the terminal", lambda: json.loads(ctl("-j", "clients")), 20)
+    mic_noise()
+    machine.execute("rm -rf /tmp/live /tmp/live.out /tmp/live.status")
+    alice("setsid -f swaybg -c '#2b4a6f' > /dev/null 2>&1")
+    shell_overlay()  # (over it all, as a quickshell shell's: the crosshair starts on its band)
+    alice("setsid -f foot --app-id h3d-clock sh -c 'while :; do clear; date +%T.%N; sleep 0.25; done' > /dev/null 2>&1")
+    wait_for("the clock", lambda: any(c["class"] == "h3d-clock" for c in json.loads(ctl("-j", "clients"))), 20)
     time.sleep(1.5)
     # --mic's prompts, sung into the test microphone as they come (CHECK_SAY), each cutting the one before short
     machine.succeed(f"""cat > {H}/sing.sh << 'EOF'
 #!/bin/sh
-pkill -x pw-cat
+pkill -f 'node.name=h3d-[s]ing'
 case "$1" in s) f=hiss ;; quiet) f=silence ;; *) f=man_$1 ;; esac
-exec pw-cat -p --target test_mic_in {H}/wav/${{f}}_long.wav
+exec pw-cat -p --target test_mic_in -P node.name=h3d-sing {H}/wav/${{f}}_long.wav
 EOF
 chmod 755 {H}/sing.sh && chown alice {H}/sing.sh""")
     # --app's prompts, done as they come (CHECK_DO): what you'd do with the keys, through hyprctl
@@ -3512,60 +4091,102 @@ case "$1" in
     stop) hyprctl hypr3d play off ;;
     type) hyprctl hypr3d type on; sleep 2; hyprctl hypr3d type off ;;
     pin) hyprctl hypr3d window "$2" pin ;;
+    put) hyprctl hypr3d walk 0.4 back; sleep 1.5; hyprctl hypr3d pin ;;
     free) hyprctl hypr3d window "$2" play; sleep 8; hyprctl hypr3d play off ;;
 esac
 EOF
 chmod 755 {H}/do.sh && chown alice {H}/do.sh""")
     sig = json.loads(alice("hyprctl -j instances"))[0]["instance"]
     lit = f"--map {LIT}" if machine.execute(f"test -f {LIT}")[0] == 0 else "--no-map"
-    cmd = (f"cd {H} && HYPRLAND_INSTANCE_SIGNATURE={sig} CHECK_SAY={H}/sing.sh CHECK_DO={H}/do.sh bash {H}/repo/tools/test/live/check.sh /tmp/live --mic "
-           f"--avatar {AV} {lit} --app 'h3dgame --title liveapp' --so {SO}")
+
+    def in_terminal(args, name):
+        """check.sh ARGS in a terminal of its own, as you'd run it (its output copied to /tmp/NAME.out)"""
+        run = (f"cd {H} && HYPRLAND_INSTANCE_SIGNATURE={sig} CHECK_SAY={H}/sing.sh CHECK_DO={H}/do.sh bash {H}/repo/tools/test/live/check.sh /tmp/live {args} "
+               f"2>&1 | tee /tmp/{name}.out; echo ${{PIPESTATUS[0]}} > /tmp/{name}.status")
+        alice(f"setsid -f foot --app-id h3d-check bash -c {shlex.quote(run)} > /dev/null 2>&1")
+
     t0 = time.time()
-    status, out = as_alice(cmd, timeout=900)
+    in_terminal(f"--mic --avatar {AV} {lit} --app 'h3dgame --title liveapp' --so {SO}", "live")
+    status = wait_for("the script to finish", lambda: machine.execute("cat /tmp/live.status")[1].strip(), 900, 1)
     took = time.time() - t0
-    (LOGS / "live-check.txt").write_text(out)
+    (LOGS / "live-check.txt").write_text(machine.execute("cat /tmp/live.out")[1])
+    run1 = machine.execute("readlink /tmp/live/latest")[1].strip()
     for f in ("results.txt", "lipsync.jsonl", "hypr3d.log"):
-        if machine.execute(f"test -f /tmp/live/{f}")[0] == 0:
-            copy_out(f"/tmp/live/{f}", "live")
-    machine.execute("cd /tmp/live && tar cf /tmp/live-frames.tar frames")
+        if machine.execute(f"test -f /tmp/live/{run1}/{f}")[0] == 0:
+            copy_out(f"/tmp/live/{run1}/{f}", "live")
+    machine.execute(f"cd /tmp/live/{run1} && tar cf /tmp/live-frames.tar frames audio status")
     copy_out("/tmp/live-frames.tar", "live")
-    res = machine.execute("cat /tmp/live/results.txt")[1]
+    res = machine.execute(f"cat /tmp/live/{run1}/results.txt")[1]
     note("live", "its results", "; ".join(l.strip() for l in res.splitlines() if l.startswith(("ok", "FAIL")))[:1500])
     fails = [l for l in res.splitlines() if l.startswith("FAIL")]
     # (llvmpipe draws 6-13 frames a second: its "keeps up with the monitor" fails here, as it should)
     unexpected = [l for l in fails if "keeps up with the monitor" not in l]
     last = res.strip().splitlines()[-1] if res.strip() else ""
-    check("live", "check.sh --mic --avatar --map runs to the end", "passed," in last, f"{last}; exit {status}; {took:.0f} s")
+    check("live", "check.sh --mic --avatar --map --app, from a terminal, runs to the end, into a folder of its own (run-1, and latest)",
+          "passed," in last and run1 == "run-1", f"{last}; exit {status}; {took:.0f} s; latest -> {run1}")
     check("live", "... and all its checks pass but the frame rate (software rendering)", not unexpected, unexpected[:6])
-    check("live", "... its lip sync heard the five vowels sung into the microphone", len([l for l in res.splitlines() if l.startswith("ok") and "you said" in l]) == 5,
-          [l for l in res.splitlines() if "you said" in l])
+    desk = [l for l in res.splitlines() if "changes nothing on the screen" in l or "looks as it did" in l]
+    check("live", "... the desktop comparisons pass, the clock ticking and the script's own terminal scrolling (left out)",
+          len(desk) == 3 and all(l.startswith("ok") for l in desk) and "the terminal this runs in, at" in res, desk)
+    carry = [l.strip() for l in res.splitlines() if "crosshair started on" in l or "grab (G)" in l or "put down" in l]
+    # (the wallpaper isn't drawn in 3D unless plugin:hypr3d:wallpaper: the crosshair is on nothing there)
+    check("live", "... the crosshair started on the shell's overlay: it turned to the nearest window (hyprctl hypr3d aim), through the overlay, and carried it",
+          any("started on layer" in l for l in carry) and any(l.startswith("ok") and "grab (G)" in l for l in carry), carry)
+    check("live", "... its lip sync heard the five vowels sung into the microphone", len([l for l in res.splitlines() if l.startswith("ok") and "you held" in l]) == 5,
+          [l for l in res.splitlines() if "you held" in l])
+    mic = [l.strip() for l in res.splitlines() if l.strip().startswith(("lip sync's badge", "its stream", "linked to", "pw-dump's links", "what came"))]
+    check("live", "... and wrote what PipeWire said: the test microphone linked, not muted, its links, what came",
+          any("linked to  [Test microphone (test_mic" in l and "muted: False" in l for l in mic) and any("links into it  [test_mic" in l for l in mic), mic)
+    audio = machine.execute(f"ls /tmp/live/{run1}/audio; grep -c 'Test microphone' /tmp/live/{run1}/audio/wpctl-status.txt")[1]
+    check("live", "... and saved wpctl status, wpctl inspect and pw-dump in audio/", all(f in audio for f in ("wpctl-status.txt", "wpctl-inspect-default-source.txt", "pw-dump.json")), audio)
+    plog = machine.execute(f"cat /tmp/live/{run1}/hypr3d.log")[1]
+    check("live", "... and the plugin's own log (hyprctl hypr3d log) in hypr3d.log", "INFO loaded" in plog and "lip sync: listening to test_mic" in plog,
+          f"{len(plog.splitlines())} lines: " + " | ".join(plog.splitlines()[:3]))
     apps = [l for l in res.splitlines() if "--app" in l or "playing" in l or "pinned" in l or "typing into it" in l or "own cursor" in l or "your own try" in l]
-    check("live", "... --app: the app launched from 3D, played, stopped, typed into, its cursor, pinned (its prompts done as they came)",
-          len([l for l in apps if l.startswith("ok")]) >= 6 and not [l for l in apps if l.startswith("FAIL")], apps)
+    check("live", "... --app: the app launched from 3D, played, stopped, typed into, its cursor, pinned, put down (its prompts done as they came)",
+          len([l for l in apps if l.startswith("ok")]) >= 7 and not [l for l in apps if l.startswith("FAIL")], apps)
     check("live", "... and the free step: played, then walking again (the prompt done as it came)", "h3dgame, your own try" in res and "... done" in res,
           [l.strip() for l in res.splitlines() if "your own try" in l or "... done" in l])
     check("live", "... and its window closed after, as its close button does", "h3dgame: its window closed" in res,
           [l.strip() for l in res.splitlines() if l.strip().startswith("h3dgame:")])
     check("live", "... and it left 3D, unloaded the plugin and closed the microphone", "hypr3d" not in ctl("plugin", "list") and lipsync_node() is None and not ctl("hypr3d", "status").startswith("{"))
+
+    # a real change on the desktop (the clock's window closed while it runs): the comparisons must fail, into run-2
+    machine.execute("pkill -f 'app-id h3d-[c]heck'; true")
+    time.sleep(1)
+    in_terminal(f"--avatar {AV} --no-map --so {SO}", "live2")
+    wait_for("its first frames", lambda: machine.execute("test -f /tmp/live/run-2/frames/01-desktop-before.png")[0] == 0, 60, 0.2)
+    time.sleep(2.5)  # (and the one a second after it)
+    machine.execute("pkill -f 'app-id h3d-[c]lock'; true")
+    wait_for("the script to finish", lambda: machine.execute("cat /tmp/live2.status")[1].strip(), 400, 1)
+    res2 = machine.execute("cat /tmp/live/run-2/results.txt")[1]
+    desk = [l for l in res2.splitlines() if "changes nothing on the screen" in l or "looks as it did" in l]
+    check("live", "a window closed while it ran (a real change): its desktop comparisons fail, in run-2, run-1 as it was",
+          len(desk) == 3 and all(l.startswith("FAIL") for l in desk) and machine.execute("readlink /tmp/live/latest")[1].strip() == "run-2"
+          and machine.execute("cat /tmp/live/run-1/results.txt")[1] == res, desk)
+    machine.execute("pkill -f 'app-id h3d-[c]heck'; true")
+
     # Ctrl+C in 3D: its trap leaves 3D, turns lip sync off and unloads the plugin
     before = calm_frame("before-live-check-interrupted")
-    machine.execute("rm -rf /tmp/live2")
-    alice(f"cd {H} && HYPRLAND_INSTANCE_SIGNATURE={sig} setsid -f bash {H}/repo/tools/test/live/check.sh /tmp/live2 --mic --avatar {AV} --no-map --so {SO} "
-          "> /tmp/live2.out 2>&1")
+    alice(f"cd {H} && HYPRLAND_INSTANCE_SIGNATURE={sig} setsid -f bash {H}/repo/tools/test/live/check.sh /tmp/live --mic --avatar {AV} --no-map --so {SO} "
+          "> /tmp/live3.out 2>&1")
     in3d = wait_for("the script in 3D with its avatar", lambda: (lambda s: s if s.startswith("{") and '"mode": "active"' in s and "BoothAccessories" in s else None)(ctl("hypr3d", "status")), 120, 0.5)
-    machine.succeed("pkill -INT -f 'live/check[.]sh /tmp/live2'")  # ([.]: not the shell that runs this)
-    # (done when it has said how it went, its last line)
+    machine.succeed("pkill -INT -f 'live/check[.]sh /tmp/live --mic'")  # ([.]: not the shell that runs this)
+    # (done when it has said how it went, its last line; in its results.txt: here its standard output, a file, has
+    # nothing after the interrupt, while in a terminal it has it all)
     try:
-        gone = wait_for("the script to say how it went", lambda: "failed, in" in machine.execute("cat /tmp/live2.out")[1], 90, 0.5)
+        gone = wait_for("the script to say how it went", lambda: "failed, in" in machine.execute("cat /tmp/live/run-3/results.txt")[1], 90, 0.5)
     except TimeoutError:
         gone = False
-    out2 = machine.execute("cat /tmp/live2.out")[1]
-    (LOGS / "live-check-interrupted.txt").write_text(out2 + "\n--- its results.txt:\n" + machine.execute("cat /tmp/live2/results.txt")[1] +
+    res3 = machine.execute("cat /tmp/live/run-3/results.txt")[1]
+    (LOGS / "live-check-interrupted.txt").write_text(machine.execute("cat /tmp/live3.out")[1] + "\n--- its results.txt:\n" + res3 +
                                                      "\n--- still running:\n" + machine.execute("ps -ef | grep '[c]heck[.]sh'")[1])
-    check("live", "Ctrl+C (SIGINT) while it's in 3D: it stops, leaves 3D and unloads the plugin", in3d and gone and "hypr3d" not in ctl("plugin", "list") and "interrupted" in out2,
-          out2.strip().splitlines()[-3:])
+    check("live", "Ctrl+C (SIGINT) while it's in 3D: it stops, leaves 3D and unloads the plugin (run-3)", in3d and gone and "hypr3d" not in ctl("plugin", "list")
+          and "interrupted: cleaning up" in res3 and machine.execute("test -s /tmp/live/run-3/hypr3d.log")[0] == 0, res3.strip().splitlines()[-3:])
     d = before.differs(calm_frame("after-live-check-interrupted"))
     check("live", "... and the desktop is as it was", d < 0.005 and lipsync_node() is None, f"{d:.2%} of pixels differ")
+    machine.execute("pkill swaybg; true")
+    shell_overlay(False)
 
 
 @section("exit", "Hyprland exits cleanly with windows open, dwindle and master (0.55.2 crashes, plugin or not: its own bug)")
@@ -3676,6 +4297,7 @@ def hidpi_checks(scale):
     menu_closed()
     ctl("hypr3d", "turn", "0", "0")
     # the lip sync badge: its size follows the scale
+    mic_noise()  # (a silent microphone would say so, with a notification over the corner)
     ctl("hypr3d", "avatar", "lipsync", "on")
     wait_for("listening", lambda: lipsync()["listening"], 10)
     ctl("dismissnotify")

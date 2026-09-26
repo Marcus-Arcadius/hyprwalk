@@ -11,8 +11,9 @@
 inline HANDLE PHANDLE = nullptr;
 
 namespace h3d {
-    void log(const std::string& s);
-    void notify(const std::string& s, bool error = false);
+    void        log(const std::string& s);
+    void        notify(const std::string& s, bool error = false);
+    std::string logLines(size_t n); // the last n lines logged (and notified), oldest first
 
     template <typename... Args>
     void logf(std::format_string<Args...> fmt, Args&&... args) {

@@ -50,6 +50,62 @@ namespace h3d {
         m_voice = -120.f;
         m_floor = 0.f;
         m_fric[0] = m_fric[1] = m_fric[2] = 0;
+        m_heard.clear();
+        m_room = NAN;
+        m_recent.fill({});
+        m_ref = NOMINAL;
+        m_gain = m_gainSet.value_or(0.f);
+        m_lo   = GATE - m_gain;
+        m_hi   = FULL - m_gain;
+    }
+
+    void CLipSync::setGain(std::optional<float> dB) {
+        m_gainSet = dB ? std::optional<float>(std::clamp(*dB, -20.f, 60.f)) : std::nullopt;
+    }
+
+    void CLipSync::levelMarks(bool voiced) {
+        // the voice: voiced windows that stand out of the noise between words, as a pause had it (a hum or a rumble
+        // that looks voiced doesn't: it's the noise; before any pause, nothing is known to). Those of the last HOLD
+        // seconds; once there's a syllable's worth (10: 150 ms), the loud part of them is the voice's level
+        const size_t keep  = (size_t)std::lround(HOLD * m_fs / std::max<size_t>(m_hop, 1));
+        const bool   voice = voiced && !std::isnan(m_room) && m_level >= m_room + 6.f;
+        if (voice)
+            m_heard.emplace_back(m_windows, m_level);
+        // the room: the last half second, if it was a pause (mostly unvoiced: silence, noise; and what was voiced in it
+        // no louder than the rest: a rumble's, not a voice's); the loud part of its unvoiced windows is how loud the
+        // noise between words is
+        m_recent[m_windows % m_recent.size()] = {m_level, voiced};
+        if (m_windows + 1 >= m_recent.size()) {
+            float loudestVoiced = -1000.f;
+            m_sorted.clear();
+            for (const auto& [lvl, v] : m_recent)
+                if (v)
+                    loudestVoiced = std::max(loudestVoiced, lvl);
+                else
+                    m_sorted.push_back(lvl);
+            if (m_sorted.size() * 4 >= m_recent.size() * 3) {
+                const auto nth = m_sorted.begin() + (ptrdiff_t)(m_sorted.size() * 9 / 10);
+                std::nth_element(m_sorted.begin(), nth, m_sorted.end());
+                if (loudestVoiced <= *nth + 6.f)
+                    m_room = *nth;
+            }
+        }
+        while (!m_heard.empty() && m_heard.front().first + keep < m_windows)
+            m_heard.pop_front();
+        if (m_heard.size() >= 10) {
+            m_sorted.clear();
+            for (const auto& h : m_heard)
+                m_sorted.push_back(h.second);
+            const auto nth = m_sorted.begin() + (ptrdiff_t)(m_sorted.size() * 9 / 10);
+            std::nth_element(m_sorted.begin(), nth, m_sorted.end());
+            m_ref = *nth;
+        }
+        m_gain = m_gainSet ? *m_gainSet : std::clamp(NOMINAL - m_ref, 0.f, MAX_GAIN);
+        m_hi   = FULL - m_gain;
+        m_lo   = GATE - m_gain;
+        // not in the noise between words: 6 dB over the room. Nothing below MIN_LEVEL
+        m_lo = std::max({m_lo, std::isnan(m_room) ? MIN_LEVEL : m_room + 6.f, MIN_LEVEL});
+        m_hi = std::max(m_hi, m_lo + 6.f);
     }
 
     void CLipSync::setRate(int rate) {
@@ -136,8 +192,7 @@ namespace h3d {
         double       sum2 = 0;
         for (size_t i = 0; i < N; ++i)
             sum2 += (double)m_buf[i] * m_buf[i];
-        m_level        = 20.f * std::log10((float)std::sqrt(sum2 / N) + 1e-9f) + 3.01f; // a full scale sine: 0 dBFS
-        const float op = std::clamp((m_level - gate) / (full - gate), 0.f, 1.f);
+        m_level = 20.f * std::log10((float)std::sqrt(sum2 / N) + 1e-9f) + 3.01f; // a full scale sine: 0 dBFS
 
         // linear prediction of the window, pre-emphasised and Hamming windowed
         std::vector<double> x(N);
@@ -251,12 +306,17 @@ namespace h3d {
             m_floor = std::min(m_floor + 1.f * (m_hop / m_fs), m_level);                  // (it rises 1 dB a second)
             m_last.under = m_voice - m_level;
         }
+        // how far open, for how loud: between the marks the gain puts
+        levelMarks(voiced);
+        const float op = std::clamp((m_level - m_lo) / (m_hi - m_lo), 0.f, 1.f);
+        m_last.lo      = m_lo;
+        m_last.hi      = m_hi;
         // the consonant, where it stands out of the noise between words: noise mostly above 1 kHz is a fricative's, by
         // its bands an s (little around 3 kHz: its peak is higher), an sh (much around 3 kHz) or an f (as much here as
         // there: flat); and a voiced window with its energy low, a low first formant and well under the voice a
         // murmur's (an m; or the voice fading out, as the lips close)
         int        cons = -1;
-        const bool out  = m_level > gate && m_level > m_floor + 10.f;
+        const bool out  = m_level > m_lo && m_level > m_floor + 10.f;
         if (out && !voiced && m_last.high + m_last.mid > 0.6f) {
             // (by its windows so far, from its second: its edges pass through the others' bands, and its first
             // window has some of the vowel)
@@ -279,7 +339,7 @@ namespace h3d {
         const float open = voiced ? op : op * 0.3f * std::max(0.f, 1.f - m_unvoiced / 0.2f);
         // (a consonant as clearly as the voice around it is loud: none in noise with no voice before it, and noise that
         // goes on shuts it too)
-        const float strength = std::clamp((m_voice - gate) / (full - gate), 0.f, 1.f) * std::max(0.f, 1.f - m_unvoiced / 0.25f);
+        const float strength = std::clamp((m_voice - m_lo) / (m_hi - m_lo), 0.f, 1.f) * std::max(0.f, 1.f - m_unvoiced / 0.25f);
         for (int c = VOWEL_COUNT; c < VISEME_COUNT; ++c) {
             const float target = c == cons ? strength : 0.f;
             const float tau    = target > m_out[c] ? 0.03f : 0.06f;

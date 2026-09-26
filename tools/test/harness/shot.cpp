@@ -259,7 +259,9 @@ int main(int argc, char** argv) {
     float frameDt = 1.f / 60;
     // lip sync from a WAV file (--audio), a frame's worth of it each frame, as the plugin does with the microphone
     CLipSync           lip;
+    std::optional<float> lipGain; // --lipsync-gain (none: automatic)
     std::string           badgeText; // --badge
+    float                 badgeScale = 1;
     std::vector<uint32_t> badgePixels;
     int                   badgeW = 0, badgeH = 0;
     uint64_t              badgeSerial = 0;
@@ -473,6 +475,16 @@ int main(int argc, char** argv) {
             mo.lookYaw   = rad(atof(argv[i + 1]));
             mo.lookPitch = rad(atof(argv[i + 2]));
             i += 2;
+        } else if (a == "--viseme") { // name weight: lip sync's viseme (aa ih ou ee oh pp ff ss ch) at that weight, the rest 0, as the
+            // plugin hands them to the avatar ("none": all 0)
+            need(i, 2);
+            const std::string name = argv[++i];
+            const float       w    = (float)atof(argv[++i]);
+            SVisemes          v{};
+            for (int k = 0; k < VISEME_COUNT; ++k)
+                if (name == VISEME_NAMES[k])
+                    v[k] = w;
+            anim.setVisemes(v);
         } else if (a == "--expr") { // name [weight]; "none" clears
             need(i, 1);
             const std::string name = argv[++i];
@@ -1092,8 +1104,14 @@ int main(int argc, char** argv) {
             lip.reset();
             fprintf(stderr, "audio %s: %.2f s at %d Hz%s\n", file.c_str(), audioRate ? (double)audio.size() / audioRate : 0.0, audioRate,
                     audio.empty() ? " (no samples: PCM 16/24/32-bit or 32-bit float WAV)" : "");
+        } else if (a == "--lipsync-gain") { // dB|auto: lip sync's gain, for what follows (the plugin's lipsync_gain)
+            need(i, 1);
+            const std::string v = argv[++i];
+            lipGain             = v == "auto" ? std::nullopt : std::optional<float>((float)atof(v.c_str()));
+            lip.setGain(lipGain);
         } else if (a == "--lipsync-trace") { // the rest of --audio's file through lip sync, a line a window
             CLipSync     tr;
+            tr.setGain(lipGain);
             const size_t from = audioAt;
             for (size_t k = audioAt; k < audio.size(); k += 32) {
                 const size_t seen = tr.windows();
@@ -1107,17 +1125,20 @@ int main(int argc, char** argv) {
                     shape += std::format(" {:.2f}", w.shape[s]);
                     out += std::format(" {:.2f}", v[s]);
                 }
-                fprintf(stderr, "window %.3f s: level %.1f gain %.1f crossings %.3f periodic %.3f %s F1 %.0f F2 %.0f bands %.3f %.3f %.3f under %.1f consonant %s shape%s out%s\n",
+                // (the marks after the consonant: the fields before it keep their places, the mouth's nine stay last)
+                fprintf(stderr, "window %.3f s: level %.1f gain %.1f crossings %.3f periodic %.3f %s F1 %.0f F2 %.0f bands %.3f %.3f %.3f under %.1f consonant %s marks %.1f %.1f amp %.1f shape%s out%s\n",
                         (double)(k - from) / audioRate, w.level, w.gain, w.crossings, w.periodic, w.voiced ? "voiced" : "unvoiced", w.f1, w.f2, w.mid, w.high, w.low,
-                        w.under, w.consonant >= 0 ? VISEME_NAMES[w.consonant] : "-", shape.c_str(), out.c_str());
+                        w.under, w.consonant >= 0 ? VISEME_NAMES[w.consonant] : "-", w.lo, w.hi, tr.gain(), shape.c_str(), out.c_str());
             }
-        } else if (a == "--badge") { // text: the plugin's corner badge (lip sync's "lip sync: listening")
+        } else if (a == "--badge") { // text [scale]: the plugin's corner badge (lip sync's "lip sync: listening"), at a monitor's scale
             need(i, 1);
             badgeText = argv[++i];
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+                badgeScale = (float)atof(argv[++i]);
         } else if (a == "--visemes") { // what lip sync heard last: aa ih ou ee oh, the level, the formants
             const auto& v = lip.visemes();
-            fprintf(stderr, "visemes aa %.2f ih %.2f ou %.2f ee %.2f oh %.2f pp %.2f ff %.2f ss %.2f ch %.2f, level %.1f dBFS, F1 %.0f F2 %.0f Hz\n", v[0], v[1], v[2],
-                    v[3], v[4], v[5], v[6], v[7], v[8], lip.level(), lip.f1(), lip.f2());
+            fprintf(stderr, "visemes aa %.2f ih %.2f ou %.2f ee %.2f oh %.2f pp %.2f ff %.2f ss %.2f ch %.2f, level %.1f dBFS, F1 %.0f F2 %.0f Hz, gain %.1f dB\n", v[0], v[1],
+                    v[2], v[3], v[4], v[5], v[6], v[7], v[8], lip.level(), lip.f1(), lip.f2(), lip.gain());
         } else if (a == "--outlines") { // 1|0: the avatar's toon outlines
             need(i, 1);
             outlines = atoi(argv[++i]) != 0;
@@ -1188,8 +1209,10 @@ int main(int argc, char** argv) {
             menu.update(menuDt, W, H, 1);
             f.menu = menu.hud();
             if (!badgeText.empty()) { // as the plugin shows it while lip sync listens
-                drawBadge(badgePixels, badgeW, badgeH, badgeText, 1);
-                f.badge = {.pixels = &badgePixels, .w = badgeW, .h = badgeH, .serial = ++badgeSerial, .x = W - 12.f - badgeW / 2.f, .y = 12.f + badgeH / 2.f};
+                drawBadge(badgePixels, badgeW, badgeH, badgeText, badgeScale);
+                const float margin = 12.f * badgeScale;
+                f.badge = {.pixels = &badgePixels, .w = badgeW, .h = badgeH, .serial = ++badgeSerial, .x = W - margin - badgeW / 2.f, .y = margin + badgeH / 2.f};
+                fprintf(stderr, "badge \"%s\": %d x %d px at scale %.2f\n", badgeText.c_str(), badgeW, badgeH, badgeScale);
             }
             if (menu.visible()) {
                 std::string items;

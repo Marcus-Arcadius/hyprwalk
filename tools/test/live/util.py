@@ -1,7 +1,12 @@
 # util.py: what tools/test/live/check.sh needs that bash doesn't do (plain python3, no numpy):
 #   util.py png IN.ppm OUT.png            a grim PPM as a PNG
-#   util.py diff A.ppm B.ppm [OUT.png]    the fraction of pixels that differ (any channel by more than 32), and a
-#                                         picture of where: red where they differ, the rest dimmed
+#   util.py diff A.ppm B.ppm [OUT.png] [--same X.ppm Y.ppm]... [--mask X Y W H]...
+#                                         the fraction of pixels that differ (any channel by more than 32), then the
+#                                         fraction left out, and a picture of where: red where they differ, blue
+#                                         what's left out, the rest dimmed. --same: two frames of one moment, a second
+#                                         apart; what differs between them changes on its own (a clock, an animated
+#                                         wallpaper) and is left out, in blocks of 16 px and those next to them.
+#                                         --mask: a box left out (pixels)
 #   util.py count IN.ppm COLOUR X0 Y0 X1 Y1  how many pixels in the box are that colour (orange: a notification's
 #                                         bar; red: the lip sync badge's dot); fractions of the width and height
 #   util.py json PATH < JSON               a value out of hyprctl's JSON: "mode", "aimed.kind", "visemes.aa", "0.name"
@@ -35,30 +40,65 @@ def write_png(path, w, h, rgb):
                 chunk(b'IDAT', zlib.compress(rows, 6)) + chunk(b'IEND', b''))
 
 
-def diff(a, b, out=None, step=2, thresh=32):
+BLOCK = 16
+
+
+def live_blocks(pairs, w, h, step=2, thresh=32):
+    """the blocks (bx, by) where two frames of one moment differ, and the blocks next to them"""
+    live = set()
+    for a, b in pairs:
+        wa, ha, pa = read_ppm(a)
+        wb, hb, pb = read_ppm(b)
+        if (wa, ha) != (w, h) or (wb, hb) != (w, h):
+            continue
+        for y in range(0, h, step):
+            row = y * w * 3
+            by = y // BLOCK
+            for x in range(0, w, step):
+                i = row + x * 3
+                if abs(pa[i] - pb[i]) > thresh or abs(pa[i + 1] - pb[i + 1]) > thresh or abs(pa[i + 2] - pb[i + 2]) > thresh:
+                    live.add((x // BLOCK, by))
+    return {(bx + dx, by + dy) for bx, by in live for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+
+
+def diff(a, b, out=None, same=(), masks=(), step=2, thresh=32):
     wa, ha, pa = read_ppm(a)
     wb, hb, pb = read_ppm(b)
     if (wa, ha) != (wb, hb):
         print(f'{a} and {b} differ in size: {wa}x{ha} and {wb}x{hb}', file=sys.stderr)
-        print('1.00000')
+        print('1.00000 0.00000')
         return
-    n = tot = 0
-    # the second picture dimmed, and red where it differs
+    live = live_blocks(same, wa, ha, step, thresh)
+
+    def masked(x, y):
+        return any(mx <= x < mx + mw and my <= y < my + mh for mx, my, mw, mh in masks)
+    n = tot = left = 0
+    # the second picture dimmed, red where it differs, blue what's left out
     pic = bytearray(pb).translate(bytes(v // 3 for v in range(256))) if out else None
+
+    def paint(x, y, rgb):
+        for dy in range(min(step, ha - y)):
+            k = ((y + dy) * wa + x) * 3
+            pic[k:k + 3 * min(step, wa - x)] = rgb * min(step, wa - x)
     for y in range(0, ha, step):
         row = y * wa * 3
+        by = y // BLOCK
         for x in range(0, wa, step):
+            if (x // BLOCK, by) in live or (masks and masked(x, y)):
+                left += 1
+                if pic is not None:
+                    i = (y * wa + x) * 3
+                    paint(x, y, bytes((pic[i] // 2, pic[i + 1] // 2, 110)))
+                continue
             i = row + x * 3
             tot += 1
             if abs(pa[i] - pb[i]) > thresh or abs(pa[i + 1] - pb[i + 1]) > thresh or abs(pa[i + 2] - pb[i + 2]) > thresh:
                 n += 1
                 if pic is not None:
-                    for dy in range(min(step, ha - y)):
-                        k = ((y + dy) * wa + x) * 3
-                        pic[k:k + 3 * min(step, wa - x)] = b'\xff\x00\x00' * min(step, wa - x)
+                    paint(x, y, b'\xff\x00\x00')
     if pic is not None:
         write_png(out, wa, ha, pic)
-    print(f'{n / max(tot, 1):.5f}')
+    print(f'{n / max(tot, 1):.5f} {left / max(tot + left, 1):.5f}')
 
 
 def count(path, colour, box):
@@ -90,7 +130,18 @@ if __name__ == '__main__':
         w, h, p = read_ppm(args[0])
         write_png(args[1], w, h, p)
     elif cmd == 'diff':
-        diff(args[0], args[1], args[2] if len(args) > 2 else None)
+        files, same, masks, i = [], [], [], 0
+        while i < len(args):
+            if args[i] == '--same':
+                same.append((args[i + 1], args[i + 2]))
+                i += 3
+            elif args[i] == '--mask':
+                masks.append(tuple(int(float(v)) for v in args[i + 1:i + 5]))
+                i += 5
+            else:
+                files.append(args[i])
+                i += 1
+        diff(files[0], files[1], files[2] if len(files) > 2 else None, same, masks)
     elif cmd == 'count':
         count(args[0], args[1], [float(a) for a in args[2:6]])
     elif cmd == 'json':

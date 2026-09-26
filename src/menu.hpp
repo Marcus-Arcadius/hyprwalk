@@ -3,6 +3,7 @@
 #include "avatar.hpp"
 #include "renderer.hpp"
 
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -136,6 +137,7 @@ namespace h3d {
         MA_EMOTE_STOP,
         MA_SLIDER, // arg: the model's slider; its dial sets it
         MA_LIPSYNC, // the microphone moves the mouth, or not
+        MA_LIPSYNC_GAIN, // its dial: the microphone's gain for lip sync (0 = automatic, then up to 60 dB)
         // the plugin's own pages (main.cpp): apps and windows
         MA_LAUNCH, // target: a desktop id, or a command
         MA_WINDOW, // target: the window's address; arg: eWindowAction
@@ -160,7 +162,9 @@ namespace h3d {
         bool                   loading = false; // an avatar is on its way
         bool                   third = false, fly = false;
         bool                   lipsync = false, microphone = true; // on; there is a microphone to have it on with
+        float                  micGain = NAN, micGainNow = 0;      // lip sync's gain set (NAN: automatic), and what it is, dB
     };
+    constexpr float MIC_GAIN_MAX = 60.f; // dB, the gain dial's end
 
     // main, emotes, expressions, gestures, left, right, both, outfit, parts, options
     SMenuPage actionPage(const std::string& id, const SActionState& s);

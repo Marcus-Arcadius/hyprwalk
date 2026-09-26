@@ -894,6 +894,14 @@ namespace h3d {
                  .action   = MA_LIPSYNC,
                  .on       = s.lipsync,
                  .disabled = !s.microphone && !s.lipsync},
+                // (its dial: at the start automatic, going by your voice; round from there, a fixed gain up to 60 dB)
+                {.label    = "Mic gain",
+                 .hint     = std::isnan(s.micGain) ? std::format("auto: {:+.0f} dB", s.micGainNow) : std::format("{:+.0f} dB", s.micGain),
+                 .icon     = "🎚️",
+                 .action   = MA_LIPSYNC_GAIN,
+                 .disabled = !s.microphone,
+                 .dial     = true,
+                 .value    = std::isnan(s.micGain) ? 0.f : std::clamp(s.micGain / MIC_GAIN_MAX, 0.f, 1.f)},
                 {.label = "Respawn", .icon = "📍", .action = MA_RESPAWN},
                 {.label = "Reset face", .hint = "and hands", .icon = "😶", .action = MA_FACE_RESET, .disabled = !a},
                 {.label = "Stop emote", .icon = "⏹️", .action = MA_EMOTE_STOP, .disabled = !a || a->emote() < 0},
@@ -907,12 +915,17 @@ namespace h3d {
         // measured first, on a scratch surface
         cairo_surface_t* scratch = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
         cairo_t*         mcr     = cairo_create(scratch);
-        double           tw = 0, th = 0;
+        double           tw = 0, th = 0, lw = 0; // its ink's width and height, and its layout's width (wider: a ")" at the end)
         {
             std::unique_ptr<PangoContext, SUnref> ctx(pango_cairo_create_context(mcr));
             const SBlock                          b = block(ctx.get(), text, "sans", px, true, 4000, 1);
-            tw                                      = b.layout ? b.ink.width : 0;
-            th                                      = b.height;
+            if (b.layout) {
+                PangoRectangle ink, logical;
+                pango_layout_get_pixel_extents(b.layout.get(), &ink, &logical);
+                tw = ink.width;
+                lw = logical.width;
+            }
+            th = b.height;
         }
         cairo_destroy(mcr);
         cairo_surface_destroy(scratch);
@@ -938,7 +951,7 @@ namespace h3d {
             cairo_arc(cr, pad + dot, h / 2.0, dot, 0, TAU);
             cairo_set_source_rgb(cr, 0.93, 0.22, 0.2);
             cairo_fill(cr);
-            const SBlock b = block(ctx.get(), text, "sans", px, true, tw + 2, 1);
+            const SBlock b = block(ctx.get(), text, "sans", px, true, std::max(tw, lw) + 2, 1); // (narrower, it would be cut short)
             if (b.layout) {
                 cairo_set_source_rgb(cr, WHITE.r, WHITE.g, WHITE.b);
                 cairo_move_to(cr, pad * 2 + dot * 2 - b.ink.x, (h - b.height) / 2.0);

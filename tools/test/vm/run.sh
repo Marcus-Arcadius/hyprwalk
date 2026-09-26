@@ -16,7 +16,8 @@
 #                  llvmpipe in the VM
 #
 # Only synthetic things go into the VM: those two avatars, ToonTest.glb and TestRoom.glb (assets.py), LitCourt.glb
-# (litmap.py), the vowels (synth/vowels.py), wheel.py, touchpad.py, gamepad.py, the test apps written here
+# (litmap.py), the vowels (synth/vowels.py, and 30 dB down: synth/attenuate.py) and a microphone's hiss, overlay.qml
+# (a shell's see-through overlay, for quickshell), wheel.py, touchpad.py, gamepad.py, the test apps written here
 # (h3dgame.c, which vm.nix builds, tkapp.py, page.html, electron/ and obsws.py), the live check script and
 # hypr3d.so; the apps the checks run are open-source ones from nixpkgs (vm.nix). OUTDIR gets results.txt (a line
 # per check), results.json, frames/ (grim's PNGs from inside the VMs), logs/ (Hyprland's logs, the journal,
@@ -65,7 +66,7 @@ say "Hyprland: $HYPR_OUT"
 IN="$OUT/in"
 rm -rf "$IN"
 mkdir -p "$IN/wav" "$IN/emotes"
-cp "$REPO/hypr3d.so" "$VM/wheel.py" "$VM/touchpad.py" "$VM/gamepad.py" "$VM/tkapp.py" "$VM/obsws.py" "$VM/page.html" "$IN/"
+cp "$REPO/hypr3d.so" "$VM/wheel.py" "$VM/touchpad.py" "$VM/gamepad.py" "$VM/tkapp.py" "$VM/obsws.py" "$VM/page.html" "$VM/overlay.qml" "$IN/"
 cp -r "$VM/electron" "$IN/"
 python3 "$VM/assets.py" "$IN" > /dev/null
 python3 "$VM/litmap.py" "$IN" > /dev/null
@@ -120,6 +121,18 @@ with wave.open(os.path.join(d, 'o_then_hiss_long.wav'), 'wb') as w:
     w.setparams(params)
     w.writeframes(frames)
 EOF
+# a quieter microphone: the vowels 30 dB down (q30_*); and a microphone's own hiss, white noise at -75 dBFS for 10 s (raw
+# 32-bit floats, looped into the test microphone)
+for f in "$IN"/wav/{man,woman}_[aiueo]_long.wav; do
+    python3 "$REPO/tools/test/synth/attenuate.py" "$IN/wav/q30_$(basename "$f")" 30 "$f" &
+done
+python3 - "$IN/wav/micnoise.f32" << 'EOF' &
+import random, struct, sys
+rnd, sd = random.Random(5), 10 ** ((-75 - 3.01) / 20)
+with open(sys.argv[1], 'wb') as f:
+    f.write(struct.pack('<%df' % 480000, *(rnd.gauss(0.0, sd) for _ in range(480000))))
+EOF
+wait
 
 say "building the VM's test driver (vm.nix)"
 nix-build "$VM/vm.nix" -A driver --argstr hyprland "$HYPR_OUT" --argstr gpu "$GPU" --argstr rendernode "${H3D_RENDERNODE:-/dev/dri/renderD129}" \
