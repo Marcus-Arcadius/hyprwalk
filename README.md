@@ -854,16 +854,17 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check
 - In 3D mode, Alt+Tab doesn't reach Hyprland: Tab opens the Action Menu even with Alt held. Only keys
   with Super or Ctrl+Alt are passed through. That holds in play mode too, so a game never gets
   Super+anything: that's what keeps Super+Esc (and your own Super shortcuts) working while you play.
-- Direct scanout is off in 3D: a fullscreen game is drawn into the 3D view (its frame copied into a
-  texture, the scene drawn around it) instead of going to the screen as it is. See Performance.
+- Direct scanout is off in 3D: a fullscreen game's frames are drawn into the 3D view, the scene around
+  them, instead of going to the screen as they are. See Performance.
 - A window placed in the world from another monitor's workspace keeps that monitor's `wl_output`, scale
   and presentation timing; its FIFO barriers are released as that monitor presents.
 - A window is known as launched from 3D by its process (the one started, or a child of it), by
   `HYPR3D_LAUNCH` in its environment, or, a Steam game's, by `SteamAppId` (or class `steam_app_ID`).
   An app that hands the launch to an instance already running (a second Discord, a second Firefox
   without `--new-instance`) is known only by its class, for a minute: its desktop entry's
-  `StartupWMClass` (or id). Otherwise its window opens where Hyprland puts it, on the wall, and the
-  Windows page's "Bring here" brings it.
+  `StartupWMClass` (or id). Otherwise it's any other window that opens in 3D, which comes in front of
+  you all the same (a floating one at its size on the wall); the Windows page's "Bring here" brings any
+  window.
 - Drag and drop works in 3D, but the dragged thing's icon isn't drawn there (Hyprland keeps it
   private); the "grabbing" cursor shows instead.
 - Changing a window's real size (Shift+wheel, Bigger, Smaller) makes a tiled window floating on the 2D
