@@ -17,6 +17,9 @@ options:
   --outfit NAME|PATH put an outfit on the avatar (a prefab or model by name or file, or a
                      package or folder holding one), as dragging it onto the avatar in Unity and
                      running Modular Avatar's Setup Outfit would; repeatable
+  --emote NAME|PATH  add a humanoid animation clip as an emote, as putting it in the avatar's
+                     Action layer would: a .anim file, a clip by name, or the clips of a package,
+                     zip or folder (less still poses when it has clips that move); repeatable
 
 What it carries over, from the avatar descriptor and the files it points to:
   the humanoid bone map (from the FBX import settings), visemes, the blink shape, the eye bones,
@@ -37,7 +40,8 @@ Controller's) are written next to the GLB as VRM animations (OUT.<name>.vrma) an
 settings file's "emotes". Their muscle curves become bone turns for the avatar's T pose, the body
 curves move the hips, and shape key curves (MMD faces too) set the avatar's shape keys or VRM
 expressions. Weighted keys are Unity's Bezier spans, and a state with Foot IK plants the feet on
-the clip's goals. A dance motion set up with MA goes on with --outfit, like an outfit.
+the clip's goals. A dance motion set up with MA goes on with --outfit, like an outfit; one sold as
+bare clips goes on with --emote, named as its clip, looping if the clip loops.
 
 Modular Avatar setups are built as MA builds them for VRChat: Merge Armature (an outfit's bones
 join the avatar's and its meshes follow the avatar's bones), Bone Proxy, Move To, Replace Object,
@@ -671,11 +675,14 @@ class DB:
         self._meta = {}
         self._fbx = {}
         self._n = 0
+        self._seen = None  # the guids an input holds, while input_assets adds it
 
     def add(self, guid, upath, file):
         guid = guid.lower()
         if guid not in self.assets:
             self.assets[guid] = Asset(guid, upath, file)
+        if self._seen is not None:
+            self._seen.add(guid)
 
     def add_input(self, path):
         path = os.path.abspath(os.path.expanduser(path))
@@ -7123,6 +7130,22 @@ class OutfitSetup:
                  'fit this avatar' % (self.name, len(far), go_name(v), d * 100))
 
 
+def input_assets(db, path):
+    """the assets a package, zip or folder named on the command line holds, added to db unless they are in it"""
+    if path.lower().endswith('.unitypackage'):
+        with tarfile.open(path, 'r:*') as tf:
+            guids = {m.name.replace('\\', '/').lstrip('./').split('/')[0].lower() for m in tf}
+        if not guids & set(db.assets):
+            db.add_input(path)
+        return [db.assets[g] for g in guids if g in db.assets]
+    db._seen = set()
+    try:
+        db.add_input(path)
+        return [db.assets[g] for g in db._seen]
+    finally:
+        db._seen = None
+
+
 def find_outfit(db, want):
     """the prefab (or model) --outfit names: a file, the prefab of a package or folder, or an asset's name"""
     path = os.path.abspath(os.path.expanduser(want))
@@ -7135,18 +7158,7 @@ def find_outfit(db, want):
             if a is None:
                 raise Fail('%s has no .meta file, so it is not an asset of its project' % want)
             return a
-        if low.endswith('.unitypackage'):
-            with tarfile.open(path, 'r:*') as tf:
-                guids = {m.name.replace('\\', '/').lstrip('./').split('/')[0].lower() for m in tf}
-            if not guids & set(db.assets):
-                db.add_input(path)
-            pool = [db.assets[g] for g in guids if g in db.assets]
-        else:
-            before = set(db.assets)
-            db.add_input(path)
-            new = set(db.assets) - before
-            real = os.path.realpath(path)
-            pool = [a for g, a in db.assets.items() if g in new or os.path.realpath(a.file).startswith(real + os.sep)]
+        pool = input_assets(db, path)
         stem = plain_name(os.path.splitext(os.path.basename(path))[0])
     else:
         pool, stem = list(db.assets.values()), plain_name(want)
@@ -7597,6 +7609,7 @@ class HumanClip:
         self.goals = {}  # "LeftFootT.x"...: where the feet and hands were, in the body's frame (see HumanAxes.plant)
         self.tdof = set()  # the bones it moves as well as turns (Translation DoF), which only some avatars take
         self.foot_ik = False  # its state has Foot IK on (action_clips)
+        self.src = None  # (asset guid or file, fileID): where it was read from
         end = 0.0
         for c in listof(body.get('m_FloatCurves')) or listof(body.get('m_EditorCurves')):
             c = dictof(c)
@@ -7624,6 +7637,12 @@ class HumanClip:
     @property
     def humanoid(self):
         return bool(self.muscles) or bool(self.root)
+
+    @property
+    def moves(self):
+        """whether its muscles or body change over time (else it is a still pose)"""
+        return any(max(k[1] for k in ks) - min(k[1] for k in ks) > 1e-4
+                   for ks in list(self.muscles.values()) + list(self.root.values()))
 
     def at(self, t):
         """(muscles {index: value}, RootT, RootQ) at time t"""
@@ -7759,6 +7778,7 @@ def action_clips(an):
             clip = HumanClip(cu.get(p[1])[1])
             if not clip.humanoid:  # (one of no length is a pose, held)
                 continue
+            clip.src = (p[0].lower(), p[1])
             clip.foot_ik = truthy(st.get('m_IKOnFeet', '0')) and bool(clip.goals)
             seen.add(p)
             params = {pn for pn, _ in into.get(fid, [])}
@@ -7771,6 +7791,58 @@ def action_clips(an):
             name = name or str(st.get('m_Name', '')).replace('_', ' ').strip() or clip.name
             out.append((name, clip, clip.loop and clip.length > 0, num(st.get('m_Speed'), 1.0) or 1.0, params))
     return out
+
+
+def find_emotes(db, want):
+    """the humanoid clips --emote names, as action_clips gives them: a clip file (.anim), a clip by name, or the
+    clips of a package, zip or folder, less its still poses when it has clips that move (a motion sold as bare clips,
+    for the buyer to put in their Action layer)"""
+    path = os.path.abspath(os.path.expanduser(want))
+    files, many = [], False  # [(UFile, the guid or file it is, where it is, for the log)]
+    if os.path.isfile(path) and path.lower().endswith('.anim'):
+        try:
+            files.append((UFile(path), os.path.realpath(path), os.path.basename(path)))
+        except OSError as e:
+            raise Fail('cannot read %s: %s' % (want, e))
+    elif os.path.exists(path):
+        if os.path.isfile(path) and not path.lower().endswith(('.unitypackage', '.zip')):
+            raise Fail('--emote %s: not an animation clip (.anim), a package, a zip or a folder' % want)
+        pool = sorted((a for a in input_assets(db, path) if a.ext == '.anim'), key=lambda a: a.path)
+        files, many = [(db.yaml(a.guid), a.guid, a.path) for a in pool], True
+    else:
+        low, stem = want.lower(), plain_name(want)
+        clips = [a for a in db.assets.values() if a.ext == '.anim']
+        for test in (lambda a: a.name.lower() == low, lambda a: stem and plain_name(a.name) == stem,
+                     lambda a: low in a.name.lower(), lambda a: low in a.path.lower()):
+            hits = sorted((a for a in clips if test(a)), key=lambda a: a.path)
+            if hits:
+                files = [(db.yaml(hits[0].guid), hits[0].guid, hits[0].path)]
+                break
+        else:
+            raise Fail('no animation clip called "%s" in the input' % want)
+    found = []
+    for uf, key, where in files:
+        if uf is None or uf.binary:
+            warn('--emote %s: %s is saved as binary, which this tool cannot read' % (want, where))
+            continue
+        for fid in uf.order:
+            if uf.cls(fid) != 74:
+                continue
+            clip = HumanClip(uf.get(fid)[1])
+            if clip.humanoid:
+                clip.src = (key, fid)
+                found.append((where, clip))
+            elif not many:
+                warn('--emote %s: %s is not a humanoid clip (no muscle or body curves)' % (want, where))
+    if many and any(c.moves for _, c in found):
+        for where, c in found:
+            if not c.moves:
+                log('--emote %s: left out %s, a still pose (name it with --emote "%s")' % (want, where, c.name))
+        found = [(w, c) for w, c in found if c.moves]
+    if not found:
+        raise Fail('no humanoid animation clip in %s' % want)
+    return [(c.name.replace('_', ' ').strip() or os.path.splitext(os.path.basename(w))[0], c,
+             c.loop and c.length > 0, 1.0, set()) for w, c in found]
 
 
 def write_vrma(path, axes, names, clip, shapes, speed=1.0):
@@ -9919,13 +9991,18 @@ def choose(found, want, named=()):
     raise Fail('no avatar called "%s" in the input (see --list)' % want)
 
 
-def convert(db, found, opts, outfits=()):
+def convert(db, found, opts, outfits=(), emotes=()):
     t0 = time.time()
     av = Avatar(db, found)
     log('avatar "%s" in %s: %d objects, %d renderers' % (av.name, found.asset.path, len(av.gos), len(av.renderers)))
     adopt(db, av)
     an = Analysis(db, av)
     acts = action_clips(an)  # emotes and dances: their menu items are not outfit toggles
+    for e in emotes:  # --emote's, after the Action layers'
+        if any(a[1].src == e[1].src for a in acts):
+            log('--emote: "%s" is one of the avatar\'s emotes already' % e[0])
+        else:
+            acts.append(e)
     an.emote_params = {pn for *_, params in acts for pn in params}
     human = an.humanoid()
     setups = [OutfitSetup(db, av, human, o) for o in outfits]
@@ -10029,6 +10106,7 @@ def main():
     ap.add_argument('--max-texture', type=int, default=2048, metavar='N')
     ap.add_argument('--keep', metavar='DIR')
     ap.add_argument('--outfit', action='append', default=[], metavar='NAME|PATH')
+    ap.add_argument('--emote', action='append', default=[], metavar='NAME|PATH')
     ap.add_argument('--blend', metavar='FILE', help=argparse.SUPPRESS)
     opts = ap.parse_args(argv)
     if bpy is None and not opts.list:
@@ -10058,7 +10136,8 @@ def main():
             return 0
         found = choose(found, opts.avatar, named)
         outfits = [put_on(db, found, find_outfit(db, x), k) for k, x in enumerate(opts.outfit, 1)]
-        return convert(db, found, opts, outfits)
+        emotes = [e for x in opts.emote for e in find_emotes(db, x)]
+        return convert(db, found, opts, outfits, emotes)
     except Fail as e:
         print('unity2hypr3d: error: %s' % e, flush=True)
         return 1

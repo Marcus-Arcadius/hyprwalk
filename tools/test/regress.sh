@@ -10,13 +10,16 @@
 #                    PC.unity" in the SDK's Samples/Dynamics/Robot Avatar (or set HYPR3D_ROBOT).
 #                    It is VRChat's, so it isn't in this repo; it's in com.vrchat.avatars-*.zip
 #                    from https://github.com/vrchat/packages/releases
-#   --items DIR      also convert three free Booth items, as downloaded into DIR (or set
+#   --items DIR      also convert free Booth items, as downloaded into DIR (or set
 #                    HYPR3D_ITEMS): 止丸式初音ミクNT_ver1.1.2.zip (booth.pm/items/3226395) alone
-#                    (MikuNT) and with the dances VRSuya_Doodle_Dance_Released_260709.zip
-#                    (booth.pm/items/6249275) and VRSuya_Loli_Kami_Requiem_Released_260709.zip
-#                    (booth.pm/items/5157852) as emotes (MikuDances), and the dances on SynthChan
-#                    (SynthDances). They are their makers' under their terms, so they aren't in
-#                    this repo; a missing one leaves out its cases
+#                    (MikuNT) and with VRSuya's dances set up with MA,
+#                    VRSuya_Doodle_Dance_Released_260709.zip (booth.pm/items/6249275),
+#                    VRSuya_Loli_Kami_Requiem_Released_260709.zip (booth.pm/items/5157852),
+#                    VRSuya_INTERNET_YAMERO_Released_260709.zip and
+#                    VRSuya_Reino_Dance_Released_260709.zip, as emotes (MikuDances), and the
+#                    dances on SynthChan (SynthDances); pHMToothlessDance.zip, bare clips, with
+#                    --emote (MikuClips, SynthClips). They are their makers' under their terms, so
+#                    they aren't in this repo; a missing one leaves out its cases
 #   --proj DIR       the synthetic Unity project to use; synth/make.py makes it there if it's missing
 #   --booth DIR      the Booth-style test packages to use; synth/booth.py makes them there if missing
 #   --out DIR        where everything goes (default: a new temporary directory, removed when
@@ -88,7 +91,8 @@ if [[ ! -f "$BOOTH/SynthChan_Gimmicks_VRCFury_v1.0.unitypackage" ]]; then
 fi
 B="$(cd "$BOOTH" && pwd)"
 
-# cases: name, kind (strict = no MA or VRCFury: must stay byte-identical; MA; VRCF), converter arguments
+# cases: name, kind (strict = no MA or VRCFury: must stay byte-identical; MA; VRCF; emote = --emote's clips), converter
+# arguments
 CASES=()
 add() { CASES+=("$(printf '%s\x1f' "$@")"); }
 add SynthAvatar strict "$A/SynthAvatar.prefab"
@@ -122,17 +126,24 @@ if [[ -n "$ITEMS" ]]; then
     [[ -d "$ITEMS" ]] || die "no folder $ITEMS"
     I="$(cd "$ITEMS" && pwd)"
     MIKU="$I/止丸式初音ミクNT_ver1.1.2.zip"
-    DANCES=()
-    for d in VRSuya_Doodle_Dance_Released_260709.zip VRSuya_Loli_Kami_Requiem_Released_260709.zip; do
+    DANCES=() CLIPS=()
+    for d in VRSuya_Doodle_Dance_Released_260709.zip VRSuya_Loli_Kami_Requiem_Released_260709.zip \
+        VRSuya_INTERNET_YAMERO_Released_260709.zip VRSuya_Reino_Dance_Released_260709.zip; do
         if [[ -f "$I/$d" ]]; then DANCES+=(--outfit "$I/$d"); else echo "note: no $d in $I"; fi
+    done
+    for d in pHMToothlessDance.zip; do
+        if [[ -f "$I/$d" ]]; then CLIPS+=(--emote "$I/$d"); else echo "note: no $d in $I"; fi
     done
     if [[ -f "$MIKU" ]]; then
         add MikuNT strict "$MIKU"
         ((${#DANCES[@]})) && add MikuDances MA "$MIKU" "${DANCES[@]}"
+        ((${#CLIPS[@]})) && add MikuClips emote "$MIKU" "${CLIPS[@]}"
+        SAME+=("MikuClips MikuNT")  # (clips add emote files, never change the GLB)
     else
         echo "note: no ${MIKU##*/} in $I"
     fi
     ((${#DANCES[@]})) && add SynthDances MA "$B/SynthChan_v1.0.unitypackage" "${DANCES[@]}"
+    ((${#CLIPS[@]})) && add SynthClips emote "$B/SynthChan_v1.0.unitypackage" "${CLIPS[@]}"
 fi
 
 picked() {

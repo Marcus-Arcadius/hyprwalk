@@ -631,10 +631,16 @@ motion moves the hips. Keys with weighted tangents are Unity's Bezier spans. A s
 translation curves (Translation DoF) only apply to avatars that enable it, as in Unity; the converter
 warns for those. Shape-key curves such as MMD's faces (あ, まばたき, 笑い…) set the avatar's
 shape keys of the same names, else the matching VRM expression. A motion sold for any avatar, set up
-with MA like VRSuya's, goes on with `--outfit`:
+with MA like VRSuya's, goes on with `--outfit`. One sold as bare clips, for you to put in your Action
+layer yourself (no prefab or menu), goes on with `--emote`: a `.anim` file, a clip by name, or a
+package, zip or folder. For a package, every humanoid clip in it becomes an emote, named after the
+clip and looping if the clip loops. A package's still poses (a "proxy" standing pose, say) are left
+out when it also has clips that move. Name one with `--emote` to have it anyway. Both options can be
+given more than once:
 
 ```sh
-python3 tools/unity2hypr3d.py Avatar.zip --outfit VRSuya_Doodle_Dance_Released_260709.zip -o me.glb
+python3 tools/unity2hypr3d.py Avatar.zip --outfit VRSuya_Doodle_Dance_Released_260709.zip \
+    --emote pHMToothlessDance.zip -o me.glb
 ```
 
 hypr3d plays no sound, so play the song yourself. VRSuya's Booth pages name the songs: "Doodle" by
@@ -913,6 +919,9 @@ Valve's; this reads your copy of the game for your own use.
   GLB exported and read back (the alpha baked into the base texture, the extras and their textures).
 - `tools/test/synth/anim_unit.py`: transform curves, VRCFury's Scale, World Drop and Breathing, 2D
   blend trees, four-axis puppets, avatar masks and hand poses.
+- `tools/test/synth/emote_unit.py`: `--emote` on a hand-made package of bare clips, read as a
+  package, inside a zip, as a folder, as loose `.anim` files and by name. Still poses are left out
+  of a package but kept when named, and a clip with no muscle or body curves isn't an emote.
 - `tools/test/synth/human_unit.py [-- T_POSE.anim…]`: the muscle-to-bone maths on a small T-posed
   skeleton. Unity's T-pose muscle values must give the T pose back, left and right must mirror, and
   the signs, twists, body motion, curves (weighted keys too) and Foot IK must behave. Given Unity's
@@ -927,13 +936,14 @@ Valve's; this reads your copy of the game for your own use.
   decals with nothing behind them and a lone lifted decal among right ones stay where they are.
 - `tools/test/regress.sh [--base REV|FILE] [--robot PATH] [--items DIR] [--shots]`: converts the
   synthetic avatars, the Booth-style packages (alone, with each outfit and from the zip), VRChat's
-  robot sample (if you give its path) and three free Booth items (if you give the folder you
-  downloaded them to: 止丸式初音ミクNT, and VRSuya's Doodle Dance and Loli Kami Requiem as emotes on
-  it and on SynthChan) with the working copy's converter and with HEAD's. Then it compares the
-  results, emote files included. Avatars with neither MA nor VRCFury must come out byte-identical,
-  and the zip must give the same GLB as the package. `--shots` also renders every result, front,
-  side and walking, with the harness. The robot and the Booth items belong to their makers, so they
-  are not in this repo.
+  robot sample (if you give its path) and free Booth items (if you give the folder you downloaded
+  them to: 止丸式初音ミクNT, and as emotes on it and on SynthChan VRSuya's Doodle Dance, Loli Kami
+  Requiem, INTERNET YAMERO and Reino Dance with `--outfit` and pHM's Toothless Dance with
+  `--emote`) with the working copy's converter and with HEAD's. Then it compares the results, emote
+  files included. Avatars with neither MA nor VRCFury must come out byte-identical, the zip must
+  give the same GLB as the package, and bare clips must leave the GLB as it was. `--shots` also
+  renders every result, front, side and walking, with the harness. The robot and the Booth items
+  belong to their makers, so they are not in this repo.
 
 Scripts that use numpy run under Blender's Python:
 
@@ -945,6 +955,7 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/vrcf_unit.
 blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/mat_unit.py
 blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/human_unit.py
 blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/anim_unit.py
+blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/emote_unit.py
 blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check.py -- Avatar.zip Dance.anim
 ```
 
@@ -1008,11 +1019,14 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check
   closer than that (a fringe's on the forehead) don't show on it.
 - `tools/unity2hypr3d.py` covers the MA and VRCFury features avatars and outfits use most, not all
   of them (see its "not converted" list above). It has been tested on synthetic packages and on
-  three free Booth items (an UnlitWF avatar and two MA dance motions), not on paid avatars or
-  outfits.
+  free Booth items (an UnlitWF avatar, four MA dance motions and one sold as bare clips), not on paid
+  avatars or outfits.
 - The dance emotes are Unity's humanoid worked out without Unity: within a few degrees of Unity's own
   T pose, and their feet and hands within a few centimetres of where the clips' own IK goals (Unity's
-  record of the motion) say (`goal_check.py`), but not compared frame by frame with Unity.
+  record of the motion) say (`goal_check.py`), but not compared frame by frame with Unity. The
+  exception is Toothless Dance's hands, 13 cm from its goals on 止丸式初音ミクNT. They are nearer the
+  body there, the elbows more bent than the goals have them, with Unity's default arm limits. That
+  may be the avatar the clip was made on, whose limits the goals keep and the muscle values don't.
 
 ## Credits
 
