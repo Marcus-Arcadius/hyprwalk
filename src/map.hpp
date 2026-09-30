@@ -161,8 +161,19 @@ namespace h3d {
         bool        specular[2] = {true, true}; // from the sun, from the surroundings (HYPR3D_materials_source2)
         float       selfIllumAlbedo = 0;         // the emissive color takes this much of the base color
         bool        glass = false;               // blended, its reflections as strong as if it were opaque
-        uint8_t     vertexColor = 0;             // COLOR_0 is: 0 linear (glTF's), 1 sRGB, 2 not a color, 3 a tint as strong as its alpha
+        uint8_t     vertexColor = 0;             // COLOR_0 is: 0 linear (glTF's), 1 sRGB, 2 not a color, 3 a tint as strong as its alpha,
+                                                 // 4 part of the tint (under the tint mask; all 0: none)
         eMapBlend   blend = BLEND_NORMAL;
+        bool        mod2xLinear = false;         // mod2x's color is linear (CS2's unlit shader), not as it's stored
+        bool        fog   = true;                // the game's fog covers it (CS2's g_bFogEnabled)
+        bool        doubleSided = false;         // glTF's (CS2's effect cards are seen from their front only without it)
+        float       scroll[2]   = {0, 0};        // the base color's uvs move by this much a second (CS2's scrolling textures)
+        // HYPR3D_materials_source2's tint mask: the base color's rgb (Source 2's tint) only as much as its r says; and
+        // its decal texture over the base color, mixed in by its alpha or multiplied; each on the vertex uv or uv1
+        int         tintMaskTex = -1, tintMaskUV = 0;
+        int         decalTex = -1, decalUV = 0;
+        uint8_t     decal = 0; // 0 none, 1 mixed in by its alpha, 2 multiplied, 3 a second color texture (rgba) the first is multiplied by
+        float       decalXf[6] = {1, 0, 0, 1, 0, 0}; // the second color texture's, from the vertex uv
         // HYPR3D_materials_source2's detail texture, over the base color
         eMapDetail  detail = DETAIL_NONE;
         int         detailTex = -1, detailMaskTex = -1;
@@ -170,14 +181,20 @@ namespace h3d {
         float       detailTint[3] = {1, 1, 1};
         float       detailBlend = 1, detailBlendToFull = 0;
         int         detailMaskUV = 0;
+        int         detailUV = 0; // the detail texture on the vertex uv, or uv1
         // HYPR3D_materials_blend: a second base color painted over the first by
         // the vertices' _BLEND weight, the way Source 2 blends its layers
         int         layerTex = -1, layerMaskTex = -1; // the mask: g = where the layers meet, r = how soft the edge is
         int         layerNormalTex = -1;              // its normal map, roughness in alpha
         float       layerColor[4] = {1, 1, 1, 1};
         float       layerXf[6]    = {1, 0, 0, 1, 0, 0}; // applied to the vertex uv, like baseXf
+        float       layerMaskXf[6] = {1, 0, 0, 1, 0, 0}; // the mask's (CS2's blend modulation can have its own)
         float       layerSoftness = -1;                // < 0: the mask's red channel
         int         layerMaskChannel = 1;              // where the layers meet: g, or a
+        float       layer1Tint[3] = {1, 1, 1};         // the first layer's own tint (the base color's tints both)
+        // CS2's border tint: the first layer tinted in a band along the edge between the layers
+        float       borderTint[3] = {1, 1, 1};
+        float       border[3]     = {0, 0.5f, 0};      // strength (0: none), softness, offset of the painted weight
         // HYPR3D_materials_source2's effect (CS2's csgo_effects: clouds, dust, glows): unlit, its color
         // times up to three masks scrolling over it, faded by distance and by how square on it's seen
         bool        effect = false;

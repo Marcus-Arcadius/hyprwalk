@@ -367,6 +367,9 @@ namespace h3d {
                         const float f = c < colComps ? col[i * colComps + c] : 1.f;
                         v.color[c]    = (uint8_t)std::lround(std::clamp(f, 0.f, 1.f) * 255.f);
                     }
+                    // Hammer's vertex paint in a tint: all 0 is unpainted (CS2's vertex shader leaves those alone)
+                    if (mm.vertexColor == 4 && !(v.color[0] | v.color[1] | v.color[2] | v.color[3]))
+                        v.color[0] = v.color[1] = v.color[2] = v.color[3] = 255;
                     v.ao[0] = v.ao[1] = 255;
                     v.ao[2] = 0;
                     v.ao[3] = blend.empty() ? 0 : (uint8_t)std::lround(std::clamp(blend[i], 0.f, 1.f) * 255.f);

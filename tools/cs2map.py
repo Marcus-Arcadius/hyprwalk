@@ -119,6 +119,10 @@ def srgb_to_linear(c):
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
+def linear_to_srgb(c):
+    return c * 12.92 if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
+
+
 def source_rotation(angles):
     """Source's AngleMatrix for pitch, yaw, roll in degrees: its columns are the forward, left and up
     axes of something turned that way"""
@@ -145,6 +149,16 @@ def apply(m, p):
 
 def column_major(m):
     return [float(m[r][c]) for c in range(4) for r in range(4)]
+
+
+# uv transforms as HYPR3D's extensions have them: mat2 columns, then the offset
+IDENTITY_XF = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+
+
+def compose(a, b):
+    """the uv transform a after b"""
+    m = [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3]]
+    return m + [a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]]
 
 
 def node_matrix(nd):
@@ -481,6 +495,86 @@ def sun_runtime(sun):
     return dl in (2, 3) or (dl == 1 and sun_channel(sun) >= 0)
 
 
+# ---------------------------------------------------------------- tints
+
+# A tint put on a mesh in Hammer ends up in its draw call's m_vTintColor, which the map compiler stores linear:
+# (rgb / 255) to the power of 2.2 (de_dust2's clouds: 253 247 225 -> 0.982826 0.932277 0.7593). Source 2 Viewer's own
+# renderer and its map extract know that; its glTF export takes it for a gamma one and linearizes it again, with the
+# instance's tint and g_vColorTint. A prop merged into an aggregate by the compiler has its own tint, 0-255 gamma, per
+# fragment.
+
+def parse_draw_calls(text):
+    """Source 2 Viewer's dump of models' MDAT blocks (-b MDAT) -> {model file name: [(material, tint), ...]}, the draw
+    calls of each model's mesh in order (an aggregate's fragments number them that way), names in lower case, tints
+    linear"""
+    calls, cur, tint = {}, None, None
+    for line in text.splitlines():
+        m = re.match(r'\[\d+/\d+\] (\S+)', line)
+        if m:
+            cur = calls.setdefault(os.path.basename(m.group(1)).split('.')[0].lower(), [])
+            tint = None
+            continue
+        m = re.search(r'm_vTintColor = \[\s*([-\d.eE+]+),\s*([-\d.eE+]+),\s*([-\d.eE+]+)', line)
+        if m:
+            tint = tuple(float(x) for x in m.groups())
+            continue
+        m = re.search(r'm_material = resource:"([^"]+)"', line)
+        if m and cur is not None:
+            cur.append((m.group(1).lower(), tint or (1.0, 1.0, 1.0)))
+            tint = None
+    return calls
+
+
+def parse_fragments(text):
+    """Source 2 Viewer's dump of world nodes (-b DATA) -> {aggregate model file name: [(draw call, tint or None), ...]},
+    its fragments in order (Source 2 Viewer's glTF names their meshes ..._fragment1, _fragment2, ...), tints 0-1 gamma"""
+    frags, cur = {}, None
+    for line in text.splitlines():
+        if 'm_aggregateMeshes' in line:
+            cur = []
+            continue
+        if cur is None:
+            continue
+        m = re.search(r'm_nDrawCallIndex = (\d+)', line)
+        if m:
+            cur.append([int(m.group(1)), None])
+            continue
+        m = re.search(r'm_vTintColor = \[\s*([-\d.eE+]+),\s*([-\d.eE+]+),\s*([-\d.eE+]+)', line)
+        if m and cur:
+            cur[-1][1] = tuple(float(x) / 255 for x in m.groups())
+            continue
+        m = re.search(r'm_renderableModel = resource:"([^"]+)"', line)
+        if m:
+            frags[os.path.basename(m.group(1)).split('.')[0].lower()] = [tuple(f) for f in cur]
+            cur = None
+    return frags
+
+
+def tinted_base_color(f, draw, inst, amount, color_tint):
+    """the base color CS2 draws with, from the one Source 2 Viewer wrote (f: srgb_to_linear of (the instance's tint
+    times the draw call's, lerped from white by g_flModelTintAmount) times g_vColorTint, clamped), the draw call's linear
+    tint and, when known, the instance's (gamma; None: worked out from f). CS2 packs the draw call's tint back to gamma
+    with the instance's, as Source 2 Viewer's renderer does, and linearizes each factor on its own:
+    mix(1, lin(inst * gamma(draw)), amount) * lin(g_vColorTint). None when f isn't what Source 2 Viewer's formula gives
+    (a Source 2 Viewer that gets it right)"""
+    out = []
+    for c in range(3):
+        d, t = draw[c], color_tint[c]
+        if inst is None:
+            # f = lin(clamp((1 - amount + amount * inst * draw) * g_vColorTint)): inst from that, 1 when it's clamped
+            s = 1.0
+            if f[c] < 0.99999 and t > 1e-6 and amount > 1e-6 and d > 1e-6:
+                s = (linear_to_srgb(f[c]) / t - 1 + amount) / (amount * d)
+            s = min(max(s, 0.0), 1.0)
+        else:
+            s = inst[c]
+            wrote = srgb_to_linear(min(max((1 - amount + amount * s * d) * t, 0.0), 1.0))
+            if abs(wrote - f[c]) > 2e-3:
+                return None
+        out.append(min(max((1 - amount + amount * srgb_to_linear(s * linear_to_srgb(d))) * srgb_to_linear(t), 0.0), 1.0))
+    return out
+
+
 # ---------------------------------------------------------------- glTF documents
 
 class Doc:
@@ -811,6 +905,9 @@ def texture_refs(m):
     for key in ('texture', 'maskTexture'):
         if key in detail:
             yield detail[key]
+    for key in ('tintMask', 'decal', 'texture2'):
+        if 'texture' in m.get('extensions', {}).get(EXT_S2, {}).get(key, {}):
+            yield m['extensions'][EXT_S2][key]['texture']
     for mask in m.get('extensions', {}).get(EXT_S2, {}).get('effect', {}).get('masks', []):
         yield mask['texture']
 
@@ -887,7 +984,10 @@ class Export:
         for i, pak in enumerate(self.paks):
             if not left:
                 break
-            self.vrf.run(['-i', pak, '-f', ','.join(left), '-d', '-o', outdir], os.path.join(self.work, f'{logname}{i}.log'))
+            # (a few hundred paths at a time: one argument can't be longer than 128 KB)
+            for k in range(0, len(left), 400):
+                self.vrf.run(['-i', pak, '-f', ','.join(left[k:k + 400]), '-d', '-o', outdir],
+                             os.path.join(self.work, f'{logname}{i}{"" if k == 0 else f"_{k // 400}"}.log'))
             for p in list(left):
                 # x.vmat_c comes out as x.vmat, a texture x.vtex_c as x.png or x.exr
                 base = os.path.join(outdir, p[:-2] if p.endswith('_c') else p)
@@ -897,6 +997,22 @@ class Export:
                     found[p] = hits[0]
                     left.remove(p)
         return found
+
+    def vrf_vmats(self, paths, outdir, logname):
+        """decompiles materials (x.vmat_c) without their textures: straight from a .vpk, Source 2 Viewer also decodes
+        and writes every texture they use (1 GB, 107 s on de_dust2), so they are copied out as they are and decompiled
+        where no gameinfo.gi is above them; returns {path: local .vmat}"""
+        raw, left = outdir + '_c', list(paths)
+        for i, pak in enumerate(self.paks):
+            if not left:
+                break
+            for k in range(0, len(left), 400):
+                self.vrf.run(['-i', pak, '-f', ','.join(left[k:k + 400]), '-o', raw],
+                             os.path.join(self.work, f'{logname}{i}{"" if k == 0 else f"_{k // 400}"}.log'))
+            left = [p for p in left if not os.path.isfile(os.path.join(raw, p))]
+        if len(left) < len(paths):
+            self.vrf.run(['-i', raw, '--recursive', '-d', '-o', outdir], os.path.join(self.work, logname + '.log'))
+        return {p: os.path.join(outdir, p[:-2]) for p in paths if os.path.isfile(os.path.join(outdir, p[:-2]))}
 
     def entities(self, vpk, lump, sub):
         out = os.path.join(self.work, sub)
@@ -928,7 +1044,17 @@ class Export:
         if not args.no_skybox:
             self.add_skybox(doc, ents)
         self.fix_decals(doc)
+        tables = [(None,) + self.map_tints(self.vpk, 'map')]
+        if self.skybox:
+            backdrop = next(r for r in doc.roots if doc.j['nodes'][r].get('name') == 'hypr3d_backdrop')
+            tables.insert(0, (backdrop,) + self.map_tints(self.skybox['vpk'], 'skybox'))
+        changed, unsure = self.fix_tints(doc, tables)
+        if changed:
+            log(f'{changed} materials tinted by their draw calls (Source 2 Viewer had those tints too dark)')
+        if unsure:
+            warn(f"{unsure} meshes have draw calls with the same material and different tints, which are left as Source 2 Viewer had them")
         self.fix_materials(doc)
+        self.moving_textures(doc)
         sky = None if args.no_sky else self.add_sky(doc, ents)
         if not args.no_lighting:
             self.add_lighting(doc, ents, sky)
@@ -1215,8 +1341,11 @@ class Export:
                 return None
             tb = vp.get('g_vLayer1DetailTintAndBlend') or [1, 1, 1, 1]
             sx, sy = vec2('g_vLayer1DetailScale', [1.0, 1.0])
+            xf = [sx, 0.0, 0.0, sy, 0.0, 0.0]
+            if int(ip.get('F_TEXTURETRANSFORMS', 0)):
+                xf = compose(xf, Export.uv_transform(v, 'Layer1TexCoord'))  # (of the first layer's uvs)
             return {'texture': tp['g_tLayer1Detail'], 'mode': 'mod2x', 'blend': float(tb[3]), 'tint': [float(c) for c in tb[:3]],
-                    'transform': [sx, 0.0, 0.0, sy, 0.0, 0.0]}
+                    'transform': xf}
         # csgo_vertexlitgeneric and friends: F_DETAIL_TEXTURE 1 is mod2x, 2 and 4 an overlay (3 and 4's
         # detail normals aren't done), through a mask, with its own uv transform
         mode = int(ip.get('F_DETAIL_TEXTURE', 0))
@@ -1230,10 +1359,65 @@ class Export:
         col0, col1 = [sx * c, sy * s], [-sx * s, sy * c]
         off = [0.5 + ox - 0.5 * (col0[0] + col1[0]), 0.5 + oy - 0.5 * (col0[1] + col1[1])]
         second = int(ip.get('F_FORCE_UV2', 0)) or (int(ip.get('F_SECONDARY_UV', 0)) and int(ip.get('g_bUseSecondaryUvForDetailMask', 1)))
+        # csgo_vertexlitgeneric's decal variants read the detail texture and its mask with the second uv set unless told not to
+        decal = shader.startswith('csgo_vertexlitgeneric') and int(ip.get('F_DECAL_TEXTURE', 0))
+        if decal:
+            second = int(ip.get('g_bUseSecondaryUvForDetailMask', 1))
         mask = tp.get('g_tDetailMask')
-        return {'texture': tp['g_tDetail'], 'mask': None if not mask or '/default/' in mask else mask, 'mode': 'mod2x' if mode == 1 else 'overlay',
-                'blend': float(fp.get('g_flDetailBlendFactor', 1)), 'blendToFull': float(fp.get('g_flDetailBlendToFull', 0)),
-                'transform': col0 + col1 + off, 'maskUV': 1 if second else 0}
+        out = {'texture': tp['g_tDetail'], 'mask': None if not mask or '/default/' in mask else mask, 'mode': 'mod2x' if mode == 1 else 'overlay',
+               'blend': float(fp.get('g_flDetailBlendFactor', 1)), 'blendToFull': float(fp.get('g_flDetailBlendToFull', 0)),
+               'transform': col0 + col1 + off, 'maskUV': 1 if second else 0}
+        # and so do csgo_complex's with a second uv set
+        if (decal or (shader.startswith('csgo_complex') and int(ip.get('F_SECONDARY_UV', 0)))) and \
+                int(ip.get('g_bUseSecondaryUvForDetailTexture', 1)):
+            out['uv'] = 1
+        return out
+
+    @staticmethod
+    def uv_transform(v, name):
+        """a uv transform of CS2's shaders (g_v<name>Scale, Offset and Center, g_fl<name>Rotation: scaled and turned about the
+        center, then moved, as their g_v<name>Xform0/1 expressions have it; csgo_unlitgeneric's second color texture is
+        Tex2Coord, csgo_lightmappedgeneric's layers Layer1TexCoord, Layer2TexCoord and BlendModulateTexCoord), as mat2
+        columns and an offset"""
+        fp, vp = v.get('FloatParams', {}), v.get('VectorParams', {})
+
+        def vec2(key, default):
+            x = vp.get(key)
+            return [float(x[0]), float(x[1])] if isinstance(x, list) and len(x) >= 2 else default
+
+        (sx, sy), (ox, oy), (cx, cy) = vec2(f'g_v{name}Scale', [1.0, 1.0]), vec2(f'g_v{name}Offset', [0.0, 0.0]), vec2(f'g_v{name}Center', [0.5, 0.5])
+        a = math.radians(float(fp.get(f'g_fl{name}Rotation', 0)))
+        c, s = math.cos(a), math.sin(a)
+        return [c * sx, s * sx, -s * sy, c * sy, cx + ox + s * sy * cy - c * sx * cx, cy + oy + s * sx * cx - c * sy * cy]
+
+    @staticmethod
+    def base_transform(m, xf):
+        """puts a uv_transform (turned, then scaled) on a material's base color as KHR_texture_transform, which hypr3d's
+        other textures of it follow"""
+        base = m.get('pbrMetallicRoughness', {}).get('baseColorTexture')
+        if xf == IDENTITY_XF or base is None:
+            return
+        # KHR_texture_transform's columns are (cos r * sx, -sin r * sx) and (sin r * sy, cos r * sy)
+        sx = math.hypot(xf[0], xf[1])
+        sy = math.copysign(math.hypot(xf[2], xf[3]), xf[0] * xf[3] - xf[1] * xf[2])
+        t = {'scale': [sx, sy], 'offset': [xf[4], xf[5]]}
+        r = math.atan2(-xf[1], xf[0])
+        if abs(r) > 1e-9:
+            t['rotation'] = r
+        base.setdefault('extensions', {})['KHR_texture_transform'] = t
+
+    @staticmethod
+    def mask_uv(shader, ip, what):
+        """the uv set (0 or 1) CS2 reads a material's tint mask or decal texture with. csgo_vertexlitgeneric's decal variants
+        read the decal with the second one unless g_bUseSecondaryUvForDecal is off, and the tint mask with it only when
+        g_bUseSecondaryUvForTintMask is on; its other variants read the tint mask with the first"""
+        decal = what == 'decal'
+        if shader.startswith('csgo_vertexlitgeneric'):
+            if decal:
+                return 1 if int(ip.get('g_bUseSecondaryUvForDecal', 1)) else 0
+            return 1 if int(ip.get('F_DECAL_TEXTURE', 0)) and int(ip.get('g_bUseSecondaryUvForTintMask', 0)) else 0
+        key = 'g_bUseSecondaryUvForDecal' if decal else 'g_bUseSecondaryUvForTintMask'
+        return 1 if int(ip.get('F_SECONDARY_UV', 0)) and int(ip.get(key, 1 if decal else 0)) else 0
 
     @staticmethod
     def effect_params(v, texture):
@@ -1258,6 +1442,80 @@ class Export:
                 'fade': [f('g_flFadeDistance', 1) * INCH, f('g_flFadeFalloff', 1), f('g_flFadeMin', 0), f('g_flFadeMax', 1)],
                 'fresnel': [f('g_flFresnelExponent', 0.001), f('g_flFresnelFalloff', 1), f('g_flFresnelMin', 0), f('g_flFresnelMax', 1)]}
 
+    def map_tints(self, vpk, key):
+        """the draw calls' tints of a map's (or its 3D skybox's) own models, and its aggregates' fragments: what
+        fix_tints takes"""
+        calls = parse_draw_calls(self.vrf.run(['-i', vpk, '-e', 'vmdl_c', '-b', 'MDAT'], os.path.join(self.work, key + '_meshes.log')))
+        frags = parse_fragments(self.vrf.run(['-i', vpk, '-e', 'vwnod_c', '-b', 'DATA'], os.path.join(self.work, key + '_nodes.log')))
+        return calls, frags
+
+    @staticmethod
+    def fix_tints(doc, tables):
+        """puts the tints of draw calls into the base colors as CS2 has them (see parse_draw_calls). tables: (the root
+        node its nodes are under, or None for the rest; draw calls, fragments), the 3D skybox's first. Returns how many
+        materials changed, and how many meshes have tinted draw calls that couldn't be told apart"""
+        mats, nodes, meshes = doc.list('materials'), doc.list('nodes'), doc.list('meshes')
+        which = {}
+        for root, calls, frags in tables:
+            stack = [root] if root is not None else list(range(len(nodes)))
+            while stack:
+                n = stack.pop()
+                if n not in which:
+                    which[n] = (calls, frags)
+                    if root is not None:
+                        stack.extend(nodes[n].get('children', []))
+        new = {}  # (material, its base color) -> the material the primitives get
+        uses = {}  # material -> the base colors its primitives want (None: as it is)
+        todo, unsure = [], 0
+        for n, node in enumerate(nodes):
+            if 'mesh' not in node or n not in which:
+                continue
+            calls, frags = which[n]
+            model = node.get('name', '').split('.')[0].lower()
+            mesh = meshes[node['mesh']]
+            k = re.search(r'_fragment(\d+)$', mesh.get('name', ''))
+            fragment = frags.get(model, [])[int(k.group(1)) - 1] if k and int(k.group(1)) <= len(frags.get(model, [])) else None
+            for p in mesh['primitives']:
+                mi = p.get('material')
+                if mi is None:
+                    continue
+                v = vmat(mats[mi])
+                name = (v.get('Name') or '').lower()
+                ip, fp, vp = v.get('IntParams', {}), v.get('FloatParams', {}), v.get('VectorParams', {})
+                inst = None
+                if fragment is not None:
+                    dc = calls.get(model, [])
+                    draw = dc[fragment[0]][1] if fragment[0] < len(dc) and dc[fragment[0]][0] == name else None
+                    inst = fragment[1] or (1.0, 1.0, 1.0)
+                else:
+                    tints = {t for mat, t in calls.get(model, []) if mat == name}
+                    draw = tints.pop() if len(tints) == 1 else None
+                    unsure += len(tints) > 1
+                color = None
+                if draw and max(abs(c - 1) for c in draw) > 1e-4 and not int(ip.get('F_NOTINT', 0)):
+                    f = mats[mi].get('pbrMetallicRoughness', {}).get('baseColorFactor', [1.0, 1.0, 1.0, 1.0])
+                    ct = vp.get('g_vColorTint')
+                    ct = [float(c) for c in ct[:3]] if isinstance(ct, list) and len(ct) >= 3 else [1.0, 1.0, 1.0]
+                    color = tinted_base_color(f, draw, inst, float(fp.get('g_flModelTintAmount', 1)), ct)
+                    color = color + list(f[3:4] or [1.0]) if color else None
+                uses.setdefault(mi, set()).add(tuple(color) if color else None)
+                todo.append((p, mi, tuple(color) if color else None))
+        changed = set()
+        for p, mi, color in todo:
+            if color is None:
+                continue
+            if uses[mi] == {color}:
+                mats[mi].setdefault('pbrMetallicRoughness', {})['baseColorFactor'] = list(color)
+            else:
+                # the same material with another tint elsewhere: a copy for this one
+                if (mi, color) not in new:
+                    m = json.loads(json.dumps(mats[mi]))
+                    m.setdefault('pbrMetallicRoughness', {})['baseColorFactor'] = list(color)
+                    new[(mi, color)] = doc.add('materials', m)
+                p['material'] = new[(mi, color)]
+            changed.add((mi, color))
+        return len(changed), unsure
+
     def fix_materials(self, doc):
         mats = doc.list('materials')
         shader = [vmat(m).get('ShaderName', '') for m in mats]
@@ -1266,18 +1524,29 @@ class Export:
 
         # nothing hypr3d can't draw: even the effects shader's clouds, dust sheets and sun glows come
         # along (their scrolling masks, without the softening where they meet the ground)
-        drop = set()
+        drop, odd = set(), set()
         for i, s in enumerate(shader):
             m = mats[i]
             blend = int(ints[i].get('F_BLEND_MODE', 0))
-            if s.startswith(('csgo_static_overlay', 'csgo_unlitgeneric')) and blend in (1, 3):
-                m['alphaMode'] = 'BLEND'  # translucent decals Source 2 Viewer leaves opaque
+            if s.startswith(('csgo_static_overlay', 'csgo_unlitgeneric')):
+                # F_BLEND_MODE: 1 translucent, 2 alpha tested, 3 mod2x, 4 added (de_dust2's clouds; a static overlay's
+                # blends like 1), 5 multiplied, 6 multiplied then added; Source 2 Viewer leaves them all opaque
+                if blend in (1, 3, 4):
+                    m['alphaMode'] = 'BLEND'
+                elif blend == 2:
+                    m['alphaMode'] = 'MASK'
+                    m['alphaCutoff'] = float(vmat(m).get('FloatParams', {}).get('g_flAlphaTestReference', 0.5))
+                elif blend in (5, 6):
+                    odd.add(m.get('name', ''))
             if s.startswith(('csgo_unlitgeneric', 'csgo_black_unlit', 'csgo_effects')) or (s.startswith('csgo_static_overlay') and not int(ints[i].get('F_LIT', 0))):
                 m.setdefault('extensions', {})['KHR_materials_unlit'] = {}
             if s.startswith('csgo_effects'):
                 m['alphaMode'] = 'BLEND'
             if s.startswith('csgo_black_unlit'):
                 m.setdefault('pbrMetallicRoughness', {})['baseColorFactor'] = [0.0, 0.0, 0.0, 1.0]
+        if odd:
+            warn(f'{len(odd)} materials multiply what is behind them, which hypr3d does not do, so they are opaque: '
+                 f'{", ".join(sorted(odd)[:4])}')
         if any('KHR_materials_unlit' in m.get('extensions', {}) for m in mats):
             used = doc.j.setdefault('extensionsUsed', [])
             if 'KHR_materials_unlit' not in used:
@@ -1300,7 +1569,7 @@ class Export:
         # blended layers: Source 2 paints the second layer in per vertex (TEXCOORD4's x), sharpened by a
         # modulation texture: g is where the layers meet and r how soft the edge is (F_FANCY_BLENDING 1),
         # or g with a fixed softness (2), or alpha with a fixed softness (3)
-        layered, detailed, wanted = {}, {}, set()
+        layered, detailed, tinted, decaled, second, wanted = {}, {}, {}, {}, {}, set()
         for i, m in enumerate(mats):
             v = vmat(m)
             ip, tp = v.get('IntParams', {}), v.get('TextureParams', {})
@@ -1316,9 +1585,19 @@ class Export:
                 wanted.update(p + '_c' for p in (detail['texture'], detail.get('mask')) if p)
             if shader[i].startswith('csgo_effects'):
                 wanted.update(tp[k] + '_c' for k in ('g_tMask1', 'g_tMask2', 'g_tMask3') if tp.get(k))
+            # the tint mask (where the tint goes) and the decal texture (grime, stencils), which Source 2 Viewer leaves out
+            for flag, key, into in (('F_TINT_MASK', 'g_tTintMask', tinted), ('F_DECAL_TEXTURE', 'g_tDecal', decaled)):
+                if int(ip.get(flag, 0)) and tp.get(key) and '/default/' not in tp[key] and not shader[i].startswith('csgo_effects') and i not in layered:
+                    into[i] = tp[key]
+                    wanted.add(tp[key] + '_c')
+            # the unlit shader's second color texture, which the first is multiplied by (de_dust2's clouds)
+            if shader[i].startswith('csgo_unlitgeneric') and int(ip.get('F_TWOTEXTURE', 0)) and tp.get('g_tColor2'):
+                second[i] = tp['g_tColor2']
+                wanted.add(tp['g_tColor2'] + '_c')
         files = {}
         if wanted:
-            log(f'exporting the second layers of {len(layered)} blended materials and {len(detailed)} detail textures ...')
+            log(f'exporting the second layers of {len(layered)} blended materials, {len(detailed)} detail textures, '
+                f'{len(tinted)} tint masks and {len(decaled)} decal textures ...')
             files = self.vrf_files(sorted(wanted), os.path.join(self.work, 'layers'), 'layers')
             missing = wanted - set(files)
             if missing:
@@ -1334,19 +1613,41 @@ class Export:
             if tex is None:
                 continue
             v = vmat(mats[i])
-            fp, vp = v.get('FloatParams', {}), v.get('VectorParams', {})
+            ip, fp, vp = v.get('IntParams', {}), v.get('FloatParams', {}), v.get('VectorParams', {})
             ext = {'texture': {'index': tex}}
-            tint = vp.get('g_vLayer2Tint')
-            if isinstance(tint, list) and len(tint) >= 3 and tint[:3] != [1, 1, 1]:
-                ext['factor'] = [float(x) for x in tint[:3]] + [1.0]
+
+            def linear_tint(key):
+                """a tint parameter, which CS2's shader has linear (SrgbGammaToLinear(this)); None when white"""
+                t = vp.get(key)
+                if isinstance(t, list) and len(t) >= 3 and [float(x) for x in t[:3]] != [1.0, 1.0, 1.0]:
+                    return [srgb_to_linear(float(x)) for x in t[:3]]
+                return None
+            tint = linear_tint('g_vLayer2Tint')
+            if tint:
+                ext['factor'] = tint + [1.0]
+            tint = linear_tint('g_vLayer1Tint')
+            if tint:
+                ext['layer1Tint'] = tint
             scale = vp.get('g_vTexCoordScale2')
             if isinstance(scale, list) and len(scale) >= 2 and scale[:2] != [1, 1]:
                 ext['uvScale'] = [float(x) for x in scale[:2]]
+            if int(ip.get('F_TEXTURETRANSFORMS', 0)):
+                # every layer's uvs from layer 1's (transformed) ones, as its vertex shader chains them
+                one = self.uv_transform(v, 'Layer1TexCoord')
+                ext['transform'] = compose(self.uv_transform(v, 'Layer2TexCoord'), one)
+                ext['maskTransform'] = compose(self.uv_transform(v, 'BlendModulateTexCoord'), one)
+                self.base_transform(mats[i], one)
             mtex = texture(mask)
             if mtex is not None:
                 ext['maskTexture'] = {'index': mtex}
                 if fancy in (2, 3):
                     ext['softness'] = float(fp.get('g_flBlendSoftness', 0.5))
+                    # the border tint: layer 1 tinted in a band along the edge between the layers
+                    tint = linear_tint('g_vLayerBorderTint')
+                    strength = float(fp.get('g_flLayerBorderStrength', 0.5))
+                    if tint and strength > 0:
+                        ext['border'] = {'tint': tint, 'strength': strength, 'softness': float(fp.get('g_flLayerBorderSoftness', 0.5)),
+                                         'offset': float(fp.get('g_flLayerBorderOffset', 0))}
                 if fancy == 3:
                     ext['maskChannel'] = 3
             # its normal map, with the roughness in alpha (Source 2 Viewer decodes them that way)
@@ -1372,23 +1673,61 @@ class Export:
                 ext['specular'] = [False, False]
             else:
                 ext['specular'] = [True, True]
-            if s.startswith('csgo_static_overlay') and int(ip.get('F_BLEND_MODE', 0)) == 3:
-                ext['blendMode'] = 'mod2x'  # multiplies what's under it by twice its colour
+            if s.startswith(('csgo_static_overlay', 'csgo_unlitgeneric')):
+                blend = int(ip.get('F_BLEND_MODE', 0))
+                if blend == 3:
+                    ext['blendMode'] = 'mod2x'  # multiplies what's under it by twice its colour
+                    if s.startswith('csgo_unlitgeneric'):
+                        ext['mod2xLinear'] = True  # (its colour read as sRGB: it leaves things as they are at linear 0.5)
+                elif blend == 4 and s.startswith('csgo_unlitgeneric'):
+                    # (csgo_static_overlay's 4, "Additive", blends by alpha like 1: its DstBlend is F_BLEND_MODE==3 ? ONE :
+                    # INV_SRC_ALPHA, and its pixel shader is 1's)
+                    ext['blendMode'] = 'add'
+            if not s.startswith('csgo_effects') and not int(ip.get('g_bFogEnabled', 1)):
+                ext['fog'] = False  # (de_dust2's clouds: the fog would add the sky to them)
+            if int(ip.get('F_NOTINT', 0)):
+                # the shader leaves out the model's tint and g_vColorTint, which Source 2 Viewer puts in the base color
+                pbr = m.get('pbrMetallicRoughness', {})
+                if 'baseColorFactor' in pbr:
+                    pbr['baseColorFactor'] = [1.0, 1.0, 1.0] + list(pbr['baseColorFactor'][3:4] or [1.0])
             # what the vertex colors are to the shader (Source 2 Viewer passes them on as they are)
-            if s.startswith(('csgo_lightmappedgeneric', 'csgo_vertexlitgeneric')):
-                ext['vertexColor'] = 'srgb' if int(ip.get('F_VERTEX_COLOR', 0)) or int(ip.get('F_PAINT_VERTEX_COLORS', 0)) else 'none'
+            if s.startswith(('csgo_vertexlitgeneric', 'csgo_lightmappedgeneric')):
+                ext['vertexColor'] = 'none'  # (their vertex shaders take no color, whatever F_VERTEX_COLOR says)
+            elif s.startswith('csgo_complex'):
+                # Hammer's vertex paint: part of the tint, as it is (so under the tint mask; all 0 is unpainted)
+                ext['vertexColor'] = 'tint' if int(ip.get('F_PAINT_VERTEX_COLORS', 0)) else 'none'
             elif s.startswith('csgo_environment'):
                 ext['vertexColor'] = 'paint'  # tints by rgb as much as alpha says
             if i in detailed:
                 d = detailed[i]
                 tex = texture(d['texture'])
                 if tex is not None:
-                    dx = {k: d[k] for k in ('mode', 'blend', 'blendToFull', 'transform', 'tint', 'maskUV') if k in d}
+                    dx = {k: d[k] for k in ('mode', 'blend', 'blendToFull', 'transform', 'tint', 'maskUV', 'uv') if k in d}
                     dx['texture'] = {'index': tex}
                     mtex = texture(d.get('mask'))
                     if mtex is not None:
                         dx['maskTexture'] = {'index': mtex}
                     ext['detail'] = dx
+            tex = texture(tinted.get(i))
+            if tex is not None:
+                ext['tintMask'] = {'texture': {'index': tex}, 'uv': self.mask_uv(s, ip, 'tint')}
+            tex = texture(decaled.get(i))
+            if tex is not None:
+                ext['decal'] = {'texture': {'index': tex}, 'uv': self.mask_uv(s, ip, 'decal'),
+                                'mode': 'multiply' if int(ip.get('F_DECAL_BLEND_MODE', 0)) == 1 else 'mix'}
+            tex = texture(second.get(i))
+            if tex is not None:
+                ext['texture2'] = {'texture': {'index': tex}, 'transform': self.uv_transform(v, 'Tex2Coord')}
+            if s.startswith('csgo_lightmappedgeneric') and EXT not in m.get('extensions', {}):
+                # one layer (or a second one that didn't come along): its color still gets the first layer's tint
+                # and uv transform
+                t = vp.get('g_vLayer1Tint')
+                if isinstance(t, list) and len(t) >= 3 and [float(x) for x in t[:3]] != [1.0, 1.0, 1.0]:
+                    pbr = m.setdefault('pbrMetallicRoughness', {})
+                    f = pbr.get('baseColorFactor', [1.0, 1.0, 1.0, 1.0])
+                    pbr['baseColorFactor'] = [min(f[k] * srgb_to_linear(float(t[k])), 1.0) for k in range(3)] + list(f[3:4] or [1.0])
+                if int(ip.get('F_TEXTURETRANSFORMS', 0)):
+                    self.base_transform(m, self.uv_transform(v, 'Layer1TexCoord'))
             if s.startswith('csgo_effects'):
                 ext['effect'] = self.effect_params(v, texture)
             if s.startswith('csgo_glass'):
@@ -1400,11 +1739,14 @@ class Export:
                 ext['glass'] = True
             # self-illumination: Source 2 Viewer exports the mask as the emissive texture
             if int(ip.get('F_SELF_ILLUM', 0)) and s.startswith(('csgo_vertexlitgeneric', 'csgo_complex', 'generic')):
-                tint = (vp.get('g_vSelfIllumTint') or [1, 1, 1])[:3]
-                m['emissiveFactor'] = [min(max(float(c), 0.0), 1.0) for c in tint]
-                strength = 2.0 ** float(fp.get('g_flSelfIllumBrightness', 0)) * float(fp.get('g_flSelfIllumScale', 1))
+                tint = [float(c) for c in (vp.get('g_vSelfIllumTint') or [1, 1, 1])[:3]]
+                # (csgo_vertexlitgeneric's and csgo_complex's shaders have it linear and 2^g_flSelfIllumBrightness
+                # brighter, generic's as it is)
+                generic = s.startswith('generic')
+                m['emissiveFactor'] = [min(max(c if generic else srgb_to_linear(c), 0.0), 1.0) for c in tint]
+                strength = (1.0 if generic else 2.0 ** float(fp.get('g_flSelfIllumBrightness', 0))) * float(fp.get('g_flSelfIllumScale', 1))
                 m.setdefault('extensions', {})['KHR_materials_emissive_strength'] = {'emissiveStrength': strength}
-                ext['selfIllumAlbedo'] = float(fp.get('g_flSelfIllumAlbedoFactor', 0))
+                ext['selfIllumAlbedo'] = float(fp.get('g_flSelfIllumAlbedoFactor', 1))
                 glows += 1
             else:
                 m.pop('emissiveTexture', None)
@@ -1428,6 +1770,83 @@ class Export:
                     p['attributes']['_BLEND'] = p['attributes'].pop('_TEXCOORD_4')
                     blends += 1
         log(f'{count} blended materials on {blends} meshes, foliage colours fixed on {dropped} meshes')
+
+    # a material's DynamicParams: expressions CS2 evaluates every frame, which Source 2 Viewer's glTF leaves out (its
+    # decompiled .vmat has them). The ones hypr3d does: a constant g_vTexCoordScale/Offset (KHR_texture_transform on the
+    # base color) and an offset moving with time (HYPR3D_materials_source2's "scroll"), as de_dust2's clouds have them
+    DYN_CONST = re.compile(r'^return\s+(?:float2\(\s*([-+.\deE]+)\s*,\s*([-+.\deE]+)\s*\)|([-+.\deE]+))\s*;$')
+    DYN_SCROLL = re.compile(r'^return\s+(?:frac\(\s*)?float2\(\s*([-+.\deE]+)\s*,\s*([-+.\deE]+)\s*\)\s*\*\s*time\(\)\s*\)?\s*;$')
+
+    @classmethod
+    def dynamic_value(cls, expr):
+        """('const', (x, y)) or ('scroll', (x, y)) for the expressions hypr3d does, else None"""
+        e = ' '.join(expr.split())
+        try:
+            m = cls.DYN_SCROLL.match(e)
+            if m and e.count('(') == e.count(')'):
+                return 'scroll', (float(m.group(1)), float(m.group(2)))
+            m = cls.DYN_CONST.match(e)
+            if m:
+                return 'const', (float(m.group(1)), float(m.group(2))) if m.group(1) is not None else (float(m.group(3)),) * 2
+        except ValueError:
+            pass
+        return None
+
+    def moving_textures(self, doc):
+        mats = doc.list('materials')
+        names = sorted({vmat(m).get('Name') for m in mats if vmat(m).get('Name')})
+        if not names:
+            return
+        files = self.vrf_vmats([n + '_c' for n in names], os.path.join(self.work, 'vmat'), 'vmat')
+        dyn = {}
+        for n in names:
+            f = files.get(n + '_c')
+            text = open(f, encoding='utf-8', errors='replace').read() if f else ''
+            block = re.search(r'"DynamicParams"\s*\{(.*?)\}', text, re.S)
+            if block:
+                dyn[n] = dict(re.findall(r'"(\w+)"\s+"([^"]*)"', block.group(1)))
+        done, left = 0, set()
+        for m in mats:
+            v = vmat(m)
+            s, vp, fp = v.get('ShaderName', ''), v.get('VectorParams', {}), v.get('FloatParams', {})
+            params = dyn.get(v.get('Name'), {})
+
+            def vec2(x, default):
+                return [float(x[0]), float(x[1])] if isinstance(x, list) and len(x) >= 2 and [float(c) for c in x[:2]] != default else None
+            scroll = vec2(vp.get('g_vTexCoordScrollSpeed'), [0.0, 0.0])
+            # the base color's own uv transform (scaled from the origin, then moved), which a dynamic parameter replaces a
+            # part of; csgo_lightmappedgeneric has its first layer's instead, csgo_effects none
+            xf = {}
+            if not s.startswith(('csgo_lightmappedgeneric', 'csgo_effects')):
+                scale, offset = vec2(vp.get('g_vTexCoordScale'), [1.0, 1.0]), vec2(vp.get('g_vTexCoordOffset'), [0.0, 0.0])
+                if (scale or offset) and float(fp.get('g_flTexCoordRotation', 0)):
+                    warn(f"{m.get('name')}'s texture is turned, which hypr3d doesn't do")
+                else:
+                    xf = dict(([('scale', scale)] if scale else []) + ([('offset', offset)] if offset else []))
+            for key, expr in params.items():
+                got = self.dynamic_value(expr)
+                if key in ('g_vTexCoordScale', 'g_vTexCoordOffset') and got and got[0] == 'const':
+                    xf['scale' if key.endswith('Scale') else 'offset'] = list(got[1])
+                elif key == 'g_vTexCoordOffset' and got and got[0] == 'scroll':
+                    # a moving offset in place of the static one, on top of g_vTexCoordScrollSpeed
+                    xf.pop('offset', None)
+                    scroll = [a + b for a, b in zip(scroll or [0.0, 0.0], got[1])]
+                else:
+                    left.add(f'{key} of {m.get("name", "?")}')
+            base = m.get('pbrMetallicRoughness', {}).get('baseColorTexture')
+            if xf and base is not None:
+                base.setdefault('extensions', {})['KHR_texture_transform'] = xf
+            if scroll:
+                m.setdefault('extensions', {}).setdefault(EXT_S2, {})['scroll'] = scroll
+            done += bool((xf and base is not None) or scroll)
+        if any('KHR_texture_transform' in m.get('pbrMetallicRoughness', {}).get('baseColorTexture', {}).get('extensions', {}) for m in mats):
+            used = doc.j.setdefault('extensionsUsed', [])
+            if 'KHR_texture_transform' not in used:
+                used.append('KHR_texture_transform')
+        if done:
+            log(f'{done} materials with moving or rescaled textures')
+        if left:
+            warn(f"{len(left)} of the materials' dynamic parameters aren't done by hypr3d, e.g. {sorted(left)[0]}")
 
     # ------------------------------------------------ CS2's lighting
 
@@ -1648,12 +2067,22 @@ class Export:
 
     WORLD_NODE = re.compile(r'^(n|node)\d+_', re.I)
 
+    @staticmethod
+    def uv_sets(v):
+        """how many uv sets a material's shader reads itself (its vertex shader takes the lightmap's after them): a
+        second one, for its masks and decal, with F_FORCE_UV2 or F_SECONDARY_UV, and in csgo_vertexlitgeneric with
+        F_DECAL_TEXTURE (csgo_complex's decal is on the first unless F_SECONDARY_UV)"""
+        ip = v.get('IntParams', {})
+        keys = ('F_FORCE_UV2', 'F_SECONDARY_UV') + (('F_DECAL_TEXTURE',) if v.get('ShaderName', '').startswith('csgo_vertexlitgeneric') else ())
+        return 2 if any(int(ip.get(k, 0)) for k in keys) else 1
+
     def lightmap_uvs(self, doc):
-        """names the lightmap uvs of the world's meshes _LIGHTMAP_UV: of their second and further uv sets,
-        the last one inside 0..1 (Source 2 Viewer has fitted them to the lightmap). Entities and world
-        meshes without one are lit by the light probes."""
+        """names the lightmap uvs of the world's meshes _LIGHTMAP_UV: of the uv sets after those their material
+        reads, the last one inside 0..1 (Source 2 Viewer has fitted them to the lightmap). Entities and world
+        meshes without one are lit by the light probes (de_dust2's tower edges have only their own two)."""
         j = doc.j
         accs = j['accessors']
+        mats = j.get('materials', [])
         count = 0
         stack = [(r, False) for r in doc.roots]
         while stack:
@@ -1669,8 +2098,9 @@ class Export:
                     count += 1
                     continue
                 cands = []
+                own = self.uv_sets(vmat(mats[p['material']])) if p.get('material', -1) in range(len(mats)) else 1
                 for k in at:
-                    if not k.startswith('TEXCOORD_') or k == 'TEXCOORD_0':
+                    if not k.startswith('TEXCOORD_') or int(k.split('_')[1]) < own:
                         continue
                     a = accs[at[k]]
                     lo, hi = a.get('min'), a.get('max')

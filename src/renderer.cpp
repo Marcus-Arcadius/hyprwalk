@@ -243,8 +243,25 @@ namespace h3d {
                 glUniform4f(U(prog, "uEffectFade"), m.effectFade[0], m.effectFade[1], m.effectFade[2], m.effectFade[3]);
                 glUniform4f(U(prog, "uEffectFresnel"), m.effectFresnel[0], m.effectFresnel[1], m.effectFresnel[2], m.effectFresnel[3]);
             }
+            glUniform1i(U(prog, "uNoFog"), m.fog ? 0 : 1);
+            glUniform1i(U(prog, "uMod2xLinear"), m.mod2xLinear ? 1 : 0);
+            glUniform2f(U(prog, "uScroll"), m.scroll[0], m.scroll[1]);
+            glUniform1i(U(prog, "uDoubleSided"), m.doubleSided ? 1 : 0);
             const int layer = !loaded(m.layerTex) ? 0 : loaded(m.layerMaskTex) ? 2 : 1;
             glUniform1i(U(prog, "uLayer"), layer);
+            // a tint mask and a decal texture go where the layers' textures would (CS2 has them on materials without layers)
+            const int tintMask = layer || m.effect || !loaded(m.tintMaskTex) ? 0 : 1 + m.tintMaskUV;
+            const int decal    = layer || m.effect || !loaded(m.decalTex) ? 0 : m.decal;
+            glUniform1i(U(prog, "uTintMask"), tintMask);
+            glUniform1i(U(prog, "uDecal"), decal);
+            if (tintMask)
+                tex(UNIT_LAYER_MASK, m.tintMaskTex);
+            if (decal) {
+                tex(UNIT_LAYER, m.decalTex);
+                glUniform1i(U(prog, "uDecalUV"), m.decalUV);
+                glUniform4f(U(prog, "uDecalXf"), m.decalXf[0], m.decalXf[1], m.decalXf[2], m.decalXf[3]);
+                glUniform2f(U(prog, "uDecalOffset"), m.decalXf[4], m.decalXf[5]);
+            }
             if (layer) {
                 tex(UNIT_LAYER, m.layerTex);
                 tex(UNIT_LAYER_MASK, m.layerMaskTex);
@@ -255,6 +272,11 @@ namespace h3d {
                 glUniform1f(U(prog, "uLayerSoftness"), m.layerSoftness);
                 glUniform1i(U(prog, "uLayerMaskChannel"), m.layerMaskChannel);
                 glUniform1i(U(prog, "uLayerNormal"), loaded(m.layerNormalTex) ? 1 : 0);
+                glUniform4f(U(prog, "uLayerMaskXf"), m.layerMaskXf[0], m.layerMaskXf[1], m.layerMaskXf[2], m.layerMaskXf[3]);
+                glUniform2f(U(prog, "uLayerMaskOffset"), m.layerMaskXf[4], m.layerMaskXf[5]);
+                glUniform3f(U(prog, "uLayer1Tint"), m.layer1Tint[0], m.layer1Tint[1], m.layer1Tint[2]);
+                glUniform3f(U(prog, "uBorderTint"), m.borderTint[0], m.borderTint[1], m.borderTint[2]);
+                glUniform3f(U(prog, "uBorder"), m.border[0], m.border[1], m.border[2]);
             }
             const int detail = m.detail != DETAIL_NONE && loaded(m.detailTex) ? (int)m.detail : 0;
             glUniform1i(U(prog, "uDetail"), detail);
@@ -266,6 +288,7 @@ namespace h3d {
                 glUniform3f(U(prog, "uDetailTint"), m.detailTint[0], m.detailTint[1], m.detailTint[2]);
                 glUniform2f(U(prog, "uDetailBlend"), m.detailBlend, m.detailBlendToFull);
                 glUniform1i(U(prog, "uDetailMask"), loaded(m.detailMaskTex) ? 1 + m.detailMaskUV : 0);
+                glUniform1i(U(prog, "uDetailUV"), m.detailUV);
             }
             glUniform4f(U(prog, "uBaseColor"), m.baseColor[0], m.baseColor[1], m.baseColor[2], m.baseColor[3]);
             glUniform4f(U(prog, "uBaseXf"), m.baseXf[0], m.baseXf[1], m.baseXf[2], m.baseXf[3]);
@@ -1285,7 +1308,8 @@ namespace h3d {
             const auto& m = model.materials[b.material];
             // Source's decals that multiply what's under them, glows that add to it, and glass that keeps what's
             // behind it by as much as its second color says, channel by channel (MAP_FS_BODY's fragKeep)
-            if (const int want = m.alphaMode != ALPHA_BLEND ? BLEND_NORMAL : m.glass && m_dualSource ? GLASS_DUAL : m.blend; want != blending) {
+            const int want = m.alphaMode != ALPHA_BLEND ? BLEND_NORMAL : m.glass && m_dualSource ? GLASS_DUAL : m.blend;
+            if (want != blending) {
                 blending = want;
                 if (want == BLEND_MOD2X)
                     glBlendFuncSeparate(GL_DST_COLOR, GL_SRC_COLOR, GL_ZERO, GL_ONE);
@@ -1298,6 +1322,8 @@ namespace h3d {
             }
             setMaterial(prog, m, m_map.textures, model.images, m_map.white);
             glUniform1i(U(prog, "uMode"), b.sky ? 2 : m.unlit ? 1 : 0);
+            // light the 3D skybox adds (its clouds, the sun's glow) goes onto the sky behind it, which the shader knows
+            glUniform1i(U(prog, "uOverSky"), backdrop && want == BLEND_ADD ? 1 : 0);
             glDrawElements(GL_TRIANGLES, b.count, GL_UNSIGNED_INT, (void*)(b.first * sizeof(uint32_t)));
         }
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -1307,7 +1333,7 @@ namespace h3d {
     void CRenderer::setBakedLighting(GLuint prog, const SFrameParams& f, size_t set) {
         const bool baked = m_map.model && m_map.model->lighting.present && !m_map.lightSets.empty();
         glUniform1i(U(prog, "uBaked"), baked ? 1 : 0);
-        // the backdrop measures distances (fog, fading effects) in its own, smaller units
+        // the backdrop's effects fade by distances in its own, smaller units (its fog is the map's, where it appears)
         if (set == 1 && m_map.model) {
             const M4&   b = m_map.model->backdropTransform;
             const float s = std::max(length(V3{b.m[0], b.m[1], b.m[2]}), 1e-3f);

@@ -293,7 +293,9 @@ namespace h3d::gltf {
             }
 
             // HYPR3D_materials_blend: {"texture": {"index": n}, "factor": [r, g, b, a], "uvScale": [s, t], "uvOffset": [s, t],
-            // "maskTexture": {"index": n}, "softness": s, "maskChannel": 1|3, "normalTexture": {"index": n}}, see tools/cs2map.py
+            // "transform": [mat2 columns, offset] (in place of uvScale and uvOffset), "maskTransform": (the same, the mask's; the
+            // layer's by default), "maskTexture": {"index": n}, "softness": s, "maskChannel": 1|3, "normalTexture": {"index": n},
+            // "layer1Tint": [r, g, b], "border": {"tint": [r, g, b], "strength": s, "softness": s, "offset": o}}, see tools/cs2map.py
             void layer(const cgltf_material& cm, SMapMaterial& m) {
                 const auto j = extension(cm, "HYPR3D_materials_blend");
                 if (!j)
@@ -311,14 +313,28 @@ namespace h3d::gltf {
                 m.layerXf[3]       = scale[1];
                 m.layerXf[4]       = offset[0];
                 m.layerXf[5]       = offset[1];
+                j->numbers("transform", m.layerXf, 6);
+                std::copy_n(m.layerXf, 6, m.layerMaskXf);
+                j->numbers("maskTransform", m.layerMaskXf, 6);
                 m.layerSoftness    = (float)j->number("softness", -1);
                 m.layerMaskChannel = j->number("maskChannel", 1) == 3 ? 3 : 1;
+                j->numbers("layer1Tint", m.layer1Tint, 3);
+                if (const SJson* b = j->get("border"); b && b->type == SJson::OBJECT) {
+                    b->numbers("tint", m.borderTint, 3);
+                    m.border[0] = (float)b->number("strength", 0);
+                    m.border[1] = (float)b->number("softness", 0.5);
+                    m.border[2] = (float)b->number("offset", 0);
+                }
             }
 
             // HYPR3D_materials_source2: what Source 2's shaders do that glTF doesn't say:
-            // {"normalYDown": true, "specular": [direct, indirect], "blendMode": "mod2x", "selfIllumAlbedo": f,
+            // {"normalYDown": true, "specular": [direct, indirect], "blendMode": "mod2x"|"add", "selfIllumAlbedo": f, "fog": false,
+            //  "mod2xLinear": true (mod2x's color is linear, not as it's stored), "vertexColor": "linear"|"srgb"|"none"|"paint"|"tint",
+            //  "scroll": [u, v] (the base color's uvs move by that much a second),
+            //  "tintMask": {"texture": {"index": n}, "uv": 0|1}, "decal": {"texture": {"index": n}, "uv": 0|1, "mode": "mix"|"multiply"},
+            //  "texture2": {"texture": {"index": n}, "transform": [mat2 columns, offset]} (the base color is multiplied by it),
             //  "detail": {"texture": {"index": n}, "maskTexture": {"index": n}, "mode": "mod2x"|"overlay", "blend": f,
-            //             "blendToFull": f, "tint": [r, g, b], "transform": [mat2 columns, offset], "maskUV": 0|1}}
+            //             "blendToFull": f, "tint": [r, g, b], "transform": [mat2 columns, offset], "maskUV": 0|1, "uv": 0|1}}
             void source2(const cgltf_material& cm, SMapMaterial& m) {
                 const auto j = extension(cm, "HYPR3D_materials_source2");
                 if (!j)
@@ -328,13 +344,35 @@ namespace h3d::gltf {
                 if (const SJson* v = j->get("specular"); v && v->type == SJson::ARRAY)
                     for (size_t k = 0; k < std::min<size_t>(2, v->items.size()); ++k)
                         m.specular[k] = v->items[k].type == SJson::BOOL ? v->items[k].num != 0 : m.specular[k];
-                if (const SJson* v = j->get("blendMode"); v && v->type == SJson::STRING && v->str == "mod2x")
-                    m.blend = BLEND_MOD2X;
+                if (const SJson* v = j->get("blendMode"); v && v->type == SJson::STRING)
+                    m.blend = v->str == "mod2x" ? BLEND_MOD2X : v->str == "add" ? BLEND_ADD : m.blend;
+                if (const SJson* v = j->get("mod2xLinear"); v && v->type == SJson::BOOL)
+                    m.mod2xLinear = v->num != 0;
+                if (const SJson* v = j->get("fog"); v && v->type == SJson::BOOL)
+                    m.fog = v->num != 0;
+                j->numbers("scroll", m.scroll, 2);
+                if (const SJson* t = j->get("tintMask"); t && t->type == SJson::OBJECT) {
+                    m.tintMaskTex = textureRef(t->get("texture"), false);
+                    m.tintMaskUV  = t->number("uv", 0) >= 1 ? 1 : 0;
+                }
+                if (const SJson* d = j->get("decal"); d && d->type == SJson::OBJECT) {
+                    m.decalTex = textureRef(d->get("texture"), true);
+                    m.decalUV  = d->number("uv", 0) >= 1 ? 1 : 0;
+                    const SJson* mode = d->get("mode");
+                    m.decal    = m.decalTex < 0 ? 0 : mode && mode->type == SJson::STRING && mode->str == "multiply" ? 2 : 1;
+                }
+                if (const SJson* t = j->get("texture2"); t && t->type == SJson::OBJECT && m.decal == 0) {
+                    m.decalTex = textureRef(t->get("texture"), true);
+                    if (m.decalTex >= 0) {
+                        m.decal = 3;
+                        t->numbers("transform", m.decalXf, 6);
+                    }
+                }
                 m.selfIllumAlbedo = (float)j->number("selfIllumAlbedo", 0);
                 if (const SJson* v = j->get("glass"); v && v->type == SJson::BOOL)
                     m.glass = v->num != 0;
                 if (const SJson* v = j->get("vertexColor"); v && v->type == SJson::STRING)
-                    m.vertexColor = v->str == "srgb" ? 1 : v->str == "none" ? 2 : v->str == "paint" ? 3 : 0;
+                    m.vertexColor = v->str == "srgb" ? 1 : v->str == "none" ? 2 : v->str == "paint" ? 3 : v->str == "tint" ? 4 : 0;
                 if (const SJson* e = j->get("effect"); e && e->type == SJson::OBJECT) {
                     m.effect = true;
                     if (const SJson* masks = e->get("masks"); masks && masks->type == SJson::ARRAY)
@@ -365,6 +403,7 @@ namespace h3d::gltf {
                 m.detailBlend     = (float)d->number("blend", 1);
                 m.detailBlendToFull = (float)d->number("blendToFull", 0);
                 m.detailMaskUV    = d->number("maskUV", 0) >= 1 ? 1 : 0;
+                m.detailUV        = d->number("uv", 0) >= 1 ? 1 : 0;
                 d->numbers("tint", m.detailTint, 3);
                 d->numbers("transform", m.detailXf, 6);
             }
@@ -688,6 +727,7 @@ namespace h3d::gltf {
                     m.alphaMode   = cm.alpha_mode == cgltf_alpha_mode_mask ? ALPHA_MASK : cm.alpha_mode == cgltf_alpha_mode_blend ? ALPHA_BLEND : ALPHA_OPAQUE;
                     m.alphaCutoff = cm.alpha_cutoff;
                     m.unlit       = cm.unlit;
+                    m.doubleSided = cm.double_sided;
                     layer(cm, m);
                     source2(cm, m);
                     mtoon(cm, m);

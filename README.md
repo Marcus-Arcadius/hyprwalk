@@ -677,7 +677,18 @@ shaders are too new for the installed Source 2 Viewer, it downloads or builds a 
 the 3D skybox, the sky and CS2's baked lighting: lightmaps, light probes, the sun, fog, the exposure
 range and the tone curve. It also keeps the materials' detail textures, self-illumination and
 blended layers, and puts decals back on what they're painted on (Source 2 Viewer 20's glTF export lifts
-them 39 cm off it). See `python3 tools/cs2map.py --help` for `--spawn`, `--desktop` and the rest. The maps are
+them 39 cm off it). Materials are tinted as CS2's shaders tint them: only where a tint mask says (de_dust2's
+doors, shutters, curbs and awnings), not at all with `F_NOTINT`, with their decal textures (grime, stencils)
+over them, and with Hammer's vertex paint inside the tint. A tint set on a mesh in Hammer is stored linear,
+which Source 2 Viewer's glTF export takes for gamma and darkens a second time (de_dust2's dust sheets, clouds,
+bombsite sprays and skybox windows; Mirage's clouds and sun glow): cs2map reads the draw calls' and the merged
+props' own tints and puts them back as CS2 draws them. Walls and ground keep their first layer's tint (on one
+layer too: Mirage's tan plaster), and blended ones each layer's, the band CS2 tints along the edge between the
+layers, and their texture transforms. Unlit materials keep their blend mode and second texture (de_dust2's
+clouds add to the sky), and textures that CS2 tiles or scrolls (the material's own transform, and its
+DynamicParams at run time) do so too. Fog stays off where a material turns it off, and a mesh's lightmap uvs
+are the set after those its material reads itself.
+See `python3 tools/cs2map.py --help` for `--spawn`, `--desktop` and the rest. The maps are
 Valve's; this reads your copy of the game for your own use.
 
 ### tools/test: the tests
@@ -714,6 +725,12 @@ Valve's; this reads your copy of the game for your own use.
   matcap alone), side on to the sun: the plain ball's light falls off with N·L, a toon ball's is flat
   on each side of a sharp step, each shade has its own colour, a matcap brightens where it's white,
   and a toon ball in a wall's shadow is all shade.
+- `tools/test/harness/cs2mat_check.sh [DIR]`: CS2's material details as `tools/cs2map.py` writes them,
+  on `cs2mats.py`'s panels, each split by its textures: the tint only where the tint mask is, a decal
+  multiplied on the second uv set and one mixed in by its alpha, an unlit colour times its second
+  texture, an unlit one added to the wall, past the fog a quad with its fog off that stays red and
+  added light that fades out; and vertex paint only where the tint mask is (all 0 is none), and unlit
+  mod2x in linear light (sRGB 188 leaves the wall as it is, 128 darkens it).
 - `tools/test/fuzz/fuzz.py map|avatar OUTDIR [-n N] [--avatars DIR]` (and `replay CASE`): feeds the
   map and avatar loaders broken files, and keeps what crashes them, trips AddressSanitizer or
   UndefinedBehaviorSanitizer, hangs or runs away with memory, with its input. It runs a harness built
@@ -934,6 +951,13 @@ Valve's; this reads your copy of the game for your own use.
   lifted 39 cm (on a floor, on a wall, over a curb, and under a node 16 times bigger, as the 3D skybox
   is) come back to 1 cm off their surface. A material that isn't a decal, decals already 1 cm off,
   decals with nothing behind them and a lone lifted decal among right ones stay where they are.
+- `tools/test/synth/cs2mat_unit.py`: `tools/cs2map.py`'s CS2 material details, as the game's own
+  shaders (decompiled) have them: the unlit shader's blend modes, its second texture and that
+  texture's uv transform, fog left off, `F_NOTINT`, the tint mask and decal texture with the uv set
+  each is read with, the lightmap's uv set coming after the material's own, the first layer's tint and
+  transform on one-layer walls, a base colour's own uv transform and scroll with DynamicParams on top,
+  and draw calls' linear tints (a model's, and a merged prop's fragment with its own tint) put back
+  where Source 2 Viewer's glTF export had them linearized twice.
 - `tools/test/regress.sh [--base REV|FILE] [--robot PATH] [--items DIR] [--shots]`: converts the
   synthetic avatars, the Booth-style packages (alone, with each outfit and from the zip), VRChat's
   robot sample (if you give its path) and free Booth items (if you give the folder you downloaded

@@ -33,8 +33,9 @@
 #                  round. The baked shadow's band (z -2.2 to -1.2) darkens both: .10 .735 .42 .775 (171 122 72) and
 #                  .58 .735 .80 .775 (75 127 149). The moss (the blend layer): .28 .635 .42 .67 (92 109 41).
 #   sky            .02 .02 .30 .08 (162 100 150), violet (hypr3d's own sky is blue)
-#   backdrop       green hills .20 .20 .33 .29 (128 140 91), its own lightmap; gold towers .375 .12 .405 .28
-#                  (194 162 110), its own probes; both past the far plane, a little pink with the fog
+#   backdrop       green hills .20 .20 .33 .29 (108 145 67), its own lightmap; gold towers .375 .12 .405 .28
+#                  (198 169 100), its own probes; both past the far plane, and fogged where they appear, as CS2 fogs
+#                  its 3D skybox: over the fog's 30 m, so hardly at all
 #   north wall     .17 .33 .26 .45 (190 158 111) over .38 .555 .425 .585 (129 81 54): its light is brighter higher up
 #   props          the pillar .615 .42 .643 .58 (157 73 146), magenta: the indoor probe volume, by its priority. The
 #                  crates' south faces .19 .575 .228 .615 (142 125 52) and east faces .238 .575 .258 .605 (174 82 47):

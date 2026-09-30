@@ -403,7 +403,8 @@ out vec3 vAO;
 out float vBlend;
 out vec4 vSun;
 out vec4 vTangent;
-out vec3 vLight;
+centroid out vec3 vLight; // (as CS2 has it: a pixel on an edge doesn't read the lightmap past its triangle's corner)
+out vec2 vLightHash;
 flat out int vLightMode;
 void main() {
     vPos = aPos;
@@ -415,6 +416,12 @@ void main() {
     vBlend = aAO.w;
     vTangent = aTangent;
     vLight = aLight;
+    // CS2's hash of the lightmap uv's bits: the same where the corners share their u (or v)
+    uvec2 h = floatBitsToUint(aLight.xy);
+    h ^= h << 13u;
+    h ^= h >> 17u;
+    h ^= h << 5u;
+    vLightHash = (uintBitsToFloat(0x3f800000u | (h >> 9u)) - 1.0) * 65535.0;
     vLightMode = int(aLighting.x);
     // push the shadow lookup off the surface, on the side the sun lights
     vec3 n = dot(aNormal, uSunDir) < 0.0 ? -aNormal : aNormal;
@@ -435,7 +442,8 @@ in vec3 vAO;
 in float vBlend;
 in vec4 vSun;
 in vec4 vTangent;       // xyz and the bitangent's sign; 0: none
-in vec3 vLight;         // the lightmap uv, or the probe atlas texel (vLightMode)
+centroid in vec3 vLight; // the lightmap uv, or the probe atlas texel (vLightMode)
+in vec2 vLightHash;     // a hash of the lightmap uv (the same across a triangle whose corners share their u or v)
 flat in int vLightMode; // eMapLight: 0 hypr3d's own, 1 lightmap, 2 light probes, 3 flat
 // the material (texture units in setMaterial())
 uniform sampler2D uBaseTex;        // sRGB
@@ -457,13 +465,18 @@ uniform vec2 uLayerOffset;
 uniform float uLayerSoftness;   // < 0: the mask's red channel
 uniform int uLayerMaskChannel;  // 1: g, 3: a
 uniform int uLayerNormal;
+uniform vec4 uLayerMaskXf;       // the mask's uvs (CS2's blend modulation can have its own transform)
+uniform vec2 uLayerMaskOffset;
+uniform vec3 uLayer1Tint;        // the first layer's own tint (the base color tints both)
+uniform vec3 uBorderTint;        // CS2's border tint: the first layer tinted in a band along the edge between the layers
+uniform vec3 uBorder;            // strength (0: none), softness, offset of the painted weight
 uniform vec3 uEmissive;
 uniform int uEmissiveUV;
 uniform vec4 uEmissiveXf;
 uniform vec2 uEmissiveOffset;
 uniform float uSelfIllumAlbedo; // the emissive color takes this much of the base color
 uniform int uGlass;             // blended, but its reflections don't fade with its opacity
-uniform int uVertexColor;       // vColor is: 0 linear, 1 sRGB, 2 not a color, 3 a tint as strong as its alpha
+uniform int uVertexColor;       // vColor is: 0 linear, 1 sRGB, 2 not a color, 3 a tint as strong as its alpha, 4 part of the tint
 uniform int uOccUV;
 uniform float uOccStrength;
 uniform int uOrm;
@@ -478,8 +491,20 @@ uniform vec2 uDetailOffset;
 uniform vec3 uDetailTint;
 uniform vec2 uDetailBlend;      // how much, how much at least where the mask says none
 uniform int uDetailMask;        // 0 none, 1 the base color's uvs, 2 uv1
+uniform int uDetailUV;          // the detail texture on 0 the vertex uv, 1 uv1
 uniform int uAlphaMode; // 0 opaque, 1 mask, 2 blend
 uniform int uBlendMode; // 0 by alpha, 1 mod2x, 2 added
+uniform int uMod2xLinear; // mod2x's color is linear (csgo_unlitgeneric's), not as it's stored (static overlays')
+uniform int uNoFog;     // the game's fog leaves it alone
+uniform vec2 uScroll;   // the base color's uvs move by this much a second
+uniform int uDoubleSided;
+uniform int uOverSky;   // added light in the 3D skybox (its clouds, the sun's glow): the sky is what's behind it
+// Source 2's tint mask and decal texture, on the layers' units (materials that have them have no layers)
+uniform int uTintMask;  // 0 none, else the base color's rgb (the tint) only as much as its r says: 1 on the base color's uvs, 2 uv1
+uniform int uDecal;     // 0 none, 1 mixed in by its alpha, 2 multiplied, 3 a second color texture (CS2's unlit F_TWOTEXTURE)
+uniform int uDecalUV;   // 0 the base color's uvs, 1 uv1
+uniform vec4 uDecalXf;  // the second color texture's uvs, from the vertex uv: mat2 columns
+uniform vec2 uDecalOffset;
 // CS2's csgo_effects (clouds, dust, glows): its masks are in uLayerTex, uLayerMaskTex and uDetailMaskTex
 uniform int uEffect;
 uniform int uEffectMasks;
@@ -532,7 +557,7 @@ uniform vec3 uSkyAverage;          // light from all of the sky
 uniform float uSkyLod;             // its coarsest mip for the fog
 uniform vec4 uFogA;                // start, 1 / (end - start), exponent, max opacity (0: none)
 uniform vec4 uFogB;                // height: offset, scale, exponent; lod bias
-uniform vec2 uFogSpace;            // distance scale, height offset: the backdrop's own units
+uniform vec2 uFogSpace;            // distance scale, height offset: the backdrop's own units (for its effects' fading)
 uniform vec4 uCurveA;              // tone curve: shoulder, linear strength, linear angle, toe strength
 uniform vec4 uCurveB;              // toe numerator, toe denominator, white point, 1 / curve(white point)
 #ifdef H3D_DUAL
@@ -567,20 +592,50 @@ vec3 skyLight(vec3 d, float lod) {
     return textureLod(uSkyTex, vec2(fract(u), v), lod).rgb * uSkyColor;
 }
 
-// CS2's cubemap fog: the blurred sky, more of it farther away (horizontally) and lower down
+// CS2's cubemap fog: the blurred sky, more of it farther away and lower down. The 3D skybox is fogged where it
+// appears, at its full size (CS2 converts the fog's distances into the skybox's units)
 vec3 gameFog(vec3 c, vec3 P, out float opacity) {
     opacity = 0.0;
-    if (uFogA.w <= 0.0)
+    if (uFogA.w <= 0.0 || uNoFog != 0)
         return c;
     vec3 d = P - uEye;
-    float dist = length(d.xz) * uFogSpace.x;
-    float x = pow(max((dist - uFogA.x) * uFogA.y, 0.0001), uFogA.z);
-    float h = (P.y - uFogSpace.y) * uFogSpace.x;
-    float y = pow(max(h * uFogB.y + uFogB.x, 0.0001), uFogB.z);
+    float x = pow(max((length(d) - uFogA.x) * uFogA.y, 0.0001), uFogA.z);
+    float y = pow(max(P.y * uFogB.y + uFogB.x, 0.0001), uFogB.z);
     float blend = clamp(x, 0.0, 1.0) * clamp(y, 0.0, 1.0);
     opacity = blend * uFogA.w;
     vec3 fog = uHasSky != 0 ? skyLight(normalize(d), clamp(1.0 - blend * uFogB.w, 0.0, 1.0) * uSkyLod) : uSkyAverage;
     return mix(c, fog, opacity);
+}
+
+// light added onto the sky behind it, as CS2 adds it (to the linear scene, before the tone curve), less what the sky
+// shows alone: exact where the sky is what's behind (added after the curve, faint clouds came out too bright over the
+// sky, and a bright glow's faint rim hardly showed)
+vec3 addedOverSky(vec3 add) {
+    vec3 sky = skyLight(normalize(vPos - uEye), 0.0);
+    return srgbEncode(gameCurve((sky + add) * uExposure)) - srgbEncode(gameCurve(sky * uExposure));
+}
+
+// the self-illumination mask's uvs: it scrolls with the base color on the same uv set, as CS2's does
+vec2 emissiveUV() {
+    return mat2(uEmissiveXf.xy, uEmissiveXf.zw) * (uEmissiveUV == 0 ? vUV : vUV1) + uEmissiveOffset +
+        (uEmissiveUV == 0 ? fract(uScroll * uTime) : vec2(0.0));
+}
+
+// the sun's baked shadow as CS2 filters it at its high shader quality: bilinear up to its MinSpecLightmapSize (4096,
+// csgo_core's gameinfo.gi: the 3D skyboxes' 512s), above that a cubic B-spline in four bilinear taps, whose taps CS2's
+// shaders put a texel lower than a centred one ((i + h) - 0.5, where Valve's own bicubic has + 0.5)
+float bakedShadowAt(vec2 uv) {
+    vec2 size = vec2(textureSize(uBakedShadowTex, 0));
+    // (and bilinear on a triangle whose corners share their lightmap u or v: Valve packs those into a texel's row)
+    if (size.x <= 4096.0 || min(fwidth(vLightHash.x), fwidth(vLightHash.y)) <= 0.1)
+        return textureLod(uBakedShadowTex, uv, 0.0).r;
+    vec2 p = uv * size - 1.5, i = floor(p), f = p - i;
+    vec2 w0 = (1.0 - f) * (1.0 - f) * (1.0 - f), w1 = 3.0 * f * f * f - 6.0 * f * f + 4.0;
+    vec2 w2 = -3.0 * f * f * f + 3.0 * f * f + 3.0 * f + 1.0, w3 = f * f * f;
+    vec2 s0 = (w0 + w1) / 6.0, s1 = (w2 + w3) / 6.0;
+    vec2 a = (i - 0.5 + w1 / (w0 + w1)) / size, b = (i + 1.5 + w3 / max(w2 + w3, 1e-6)) / size;
+    return s0.y * (s0.x * textureLod(uBakedShadowTex, a, 0.0).r + s1.x * textureLod(uBakedShadowTex, vec2(b.x, a.y), 0.0).r) +
+        s1.y * (s0.x * textureLod(uBakedShadowTex, vec2(a.x, b.y), 0.0).r + s1.x * textureLod(uBakedShadowTex, b, 0.0).r);
 }
 
 // Valve's directional lightmap (ComputeLightmapShading): the irradiance leans towards where most of
@@ -672,30 +727,51 @@ vec3 matcap(vec3 c, vec3 N, vec3 light, vec3 full) {
 }
 
 void shade() {
-    vec2 uv = mat2(uBaseXf.xy, uBaseXf.zw) * vUV + uBaseOffset;
-    vec4 base = texture(uBaseTex, uv) * uBaseColor;
+    vec2 uv = mat2(uBaseXf.xy, uBaseXf.zw) * vUV + uBaseOffset + fract(uScroll * uTime);
+    vec4 color = texture(uBaseTex, uv);
+    vec4 tint = uVertexColor == 4 ? uBaseColor * vColor : uBaseColor; // (csgo_complex's vertex paint is in its tint)
+    vec4 base = color * tint;
+    if (uTintMask != 0) // the tint only where the mask says
+        base.rgb = color.rgb * mix(vec3(1.0), tint.rgb, texture(uLayerMaskTex, uTintMask == 1 ? uv : vUV1).r);
+    if (uDecal == 3)
+        base *= texture(uLayerTex, mat2(uDecalXf.xy, uDecalXf.zw) * vUV + uDecalOffset);
     if (uBack != 0 && !gl_FrontFacing) // UnlitWF's back faces: their own color (and texture) in place of the base's
         base.rgb = uBackColor.rgb * (uBack == 2 ? texture(uLayerTex, mat2(uBackXf.xy, uBackXf.zw) * vUV + uBackOffset).rgb : vec3(1.0));
     if (uEffect != 0) {
         // csgo_effects: the color, through its scrolling masks, less of it up close and edge on
         vec4 col = base * vColor;
         float o = col.a * uEffectA.y;
+        // (the masks at (uv + scroll t) scale + pan t, as CS2 has them: the color's scroll wraps every tile, which
+        // wouldn't be a whole one of theirs)
+        vec2 uv0 = uv - fract(uScroll * uTime);
         if (uEffectMasks > 0)
-            o *= texture(uLayerTex, uv * uEffectMask[0].xy + uEffectMask[0].zw * uTime).r;
+            o *= texture(uLayerTex, uv0 * uEffectMask[0].xy + fract((uScroll * uEffectMask[0].xy + uEffectMask[0].zw) * uTime)).r;
         if (uEffectMasks > 1)
-            o *= texture(uLayerMaskTex, uv * uEffectMask[1].xy + uEffectMask[1].zw * uTime).r;
+            o *= texture(uLayerMaskTex, uv0 * uEffectMask[1].xy + fract((uScroll * uEffectMask[1].xy + uEffectMask[1].zw) * uTime)).r;
         if (uEffectMasks > 2)
-            o *= texture(uDetailMaskTex, uv * uEffectMask[2].xy + uEffectMask[2].zw * uTime).r;
+            o *= texture(uDetailMaskTex, uv0 * uEffectMask[2].xy + fract((uScroll * uEffectMask[2].xy + uEffectMask[2].zw) * uTime)).r;
         vec3 ray = vPos - uEye;
-        float fres = clamp(abs(dot(normalize(ray), normalize(vNormal))), 0.0001, 1.0);
+        float facing = dot(-normalize(ray), normalize(vNormal));
+        if (uDoubleSided == 0 && facing < 0.0)
+            discard; // CS2 draws a one-sided card (its dust sheets) from the front only
+        float fres = clamp(abs(facing), 0.0001, 1.0); // (a two-sided one's back faces turn their normal round)
         fres = mix(uEffectFresnel.z, uEffectFresnel.w, clamp(pow(fres, uEffectFresnel.x) * uEffectFresnel.y, 0.0, 1.0));
         float fade = clamp(length(ray) * uFogSpace.x / max(uEffectFade.x, 0.0001), 0.0, 1.0);
         fade = pow(max(mix(uEffectFade.z, uEffectFade.w, fade), 1e-9), uEffectFade.y);
         o = clamp(o * fres * fade, 0.0, 1.0);
         vec3 c = col.rgb * uEffectA.x;
-        float fogged;
-        if (uEffectA.z > 0.5)
-            c = uBaked != 0 ? gameFog(c, vPos, fogged) : applyFog(c, vPos);
+        float fogged = 0.0;
+        if (uEffectA.z > 0.5) {
+            if (uBaked != 0 && uBlendMode == 2) {
+                gameFog(c, vPos, fogged);
+                o *= 1.0 - fogged; // added light fades out in the fog, as CS2 fades it
+            } else
+                c = uBaked != 0 ? gameFog(c, vPos, fogged) : applyFog(c, vPos);
+        }
+        if (uBaked != 0 && uBlendMode == 2 && uOverSky != 0 && uHasSky != 0) {
+            fragColor = vec4(addedOverSky(c * o), 0.0);
+            return;
+        }
         vec3 shown = uBaked != 0 ? srgbEncode(gameCurve(c * uExposure)) : linearToSrgb(tonemap(c * uExposure));
         fragColor = vec4(shown * o, uBlendMode == 2 ? 0.0 : o);
         return;
@@ -708,13 +784,20 @@ void shade() {
         // Source 2's vertex paint: the mask sharpens the painted weight into its own pattern
         vec2 luv = mat2(uLayerXf.xy, uLayerXf.zw) * vUV + uLayerOffset;
         float t = vBlend;
+        vec3 first = uLayer1Tint;
         if (uLayer == 2) {
-            vec4 mask = texture(uLayerMaskTex, luv);
+            vec4 mask = texture(uLayerMaskTex, mat2(uLayerMaskXf.xy, uLayerMaskXf.zw) * vUV + uLayerMaskOffset);
             float edge = uLayerMaskChannel == 3 ? mask.a : mask.g;
             float soft = max(uLayerSoftness < 0.0 ? mask.r : uLayerSoftness, 0.002);
             t = smoothstep(max(edge - soft, 0.0), min(edge + soft, 1.0), t);
+            if (uBorder.x > 0.0) {
+                // CS2's border tint: the first layer tinted in a band along the same edge, of the painted weight as it is
+                float b = smoothstep(max(edge - uBorder.y, 0.0), min(edge + uBorder.y, 1.0), clamp(vBlend + uBorder.z, 0.0, 1.0));
+                first *= mix(vec3(1.0), uBorderTint, (1.0 - abs(b * 2.0 - 1.0)) * uBorder.x);
+            }
         }
-        base = mix(base, texture(uLayerTex, luv) * uLayerColor, t);
+        // the mesh's tint (the base color) on both layers, as CS2 tints the blend
+        base = mix(color * vec4(first, 1.0), texture(uLayerTex, luv) * uLayerColor, t) * uBaseColor;
         if (uLayerNormal != 0) {
             // Source 2 blends the textures, not the normals
             vec4 ln = texture(uLayerNormalTex, luv);
@@ -722,8 +805,13 @@ void shade() {
             rough = mix(rough, ln.a, t);
         }
     }
+    if (uDecal == 1 || uDecal == 2) {
+        // Source 2's decal texture (grime, stencils) over the tinted color, under the detail
+        vec4 d = texture(uLayerTex, uDecalUV == 0 ? uv : vUV1);
+        base.rgb = uDecal == 1 ? mix(base.rgb, d.rgb, d.a) : base.rgb * d.rgb;
+    }
     if (uDetail > 0) {
-        vec3 d = texture(uDetailTex, mat2(uDetailXf.xy, uDetailXf.zw) * vUV + uDetailOffset).rgb * uDetailTint;
+        vec3 d = texture(uDetailTex, mat2(uDetailXf.xy, uDetailXf.zw) * (uDetailUV == 0 ? vUV : vUV1) + uDetailOffset).rgb * uDetailTint;
         float mask = uDetailMask == 0 ? 1.0 : texture(uDetailMaskTex, uDetailMask == 1 ? vUV : vUV1).r;
         mask = uDetailBlend.x * max(mask, uDetailBlend.y);
         if (uDetail == 1)
@@ -763,13 +851,21 @@ void shade() {
         // unlit and the sky: straight through the game's fog and tone curve
         vec3 c = uMode == 2 ? base.rgb * uSkyColor : base.rgb;
         float fogged = 0.0;
-        if (uMode == 1)
-            c = gameFog(c, vPos, fogged);
+        if (uMode == 1) {
+            vec3 inFog = gameFog(c, vPos, fogged);
+            c = uBlendMode == 2 ? c * (1.0 - fogged) : inFog; // added light fades out in the fog
+        }
         if (uBlendMode == 1) {
-            // mod2x: the scene times twice the (gamma encoded) color, in the display's terms
-            vec3 f = 2.0 * mix(vec3(0.5), srgbEncode(base.rgb), base.a);
-            f = mix(f, vec3(1.0), fogged);
+            // mod2x: the scene times twice the color (in linear light, which is a power of 1/2.2 in the display's
+            // terms): a static overlay's color as it's stored, going to 1 in the fog; csgo_unlitgeneric's linear, and
+            // fogged like a color
+            vec3 f = uMod2xLinear != 0 ? 2.0 * gameFog(mix(vec3(0.5), base.rgb, base.a), vPos, fogged)
+                                       : mix(2.0 * mix(vec3(0.5), srgbEncode(base.rgb), base.a), vec3(1.0), fogged);
             fragColor = vec4(0.5 * pow(f, vec3(1.0 / 2.2)), 1.0);
+            return;
+        }
+        if (uBlendMode == 2 && uOverSky != 0 && uHasSky != 0) {
+            fragColor = vec4(addedOverSky(c * a), 0.0);
             return;
         }
         fragColor = vec4(srgbEncode(gameCurve(c * uExposure)) * a, a);
@@ -817,7 +913,7 @@ void shade() {
                 vec4 dir = texture(uDirectionalTex, vLight.xy);
                 indirect = lightmapShading(texture(uIrradianceTex, vLight.xy).rgb, dir, nTs, Ng);
                 specOcc = dir.a;
-                baked = uBakedShadow != 0 ? 1.0 - textureLod(uBakedShadowTex, vLight.xy, 0.0).r : 1.0;
+                baked = uBakedShadow != 0 ? 1.0 - bakedShadowAt(vLight.xy) : 1.0;
             } else if (vLightMode == 2) {
                 vec3 p = vLight / vec3(uProbeDims.xy, uProbeDims.z * 6.0);
                 vec3 ns = vec3(N.z, N.x, N.y); // Source's axes
@@ -830,8 +926,9 @@ void shade() {
             }
             float ndl = max(dot(N, uSunDir), 0.0);
             float sun = ndl > 0.0 && baked > 0.001 ? baked * sunShadow(vSun) : 0.0;
-            // rough enough not to sparkle where the surface curves fast (Valve's specular antialiasing)
-            float geoRough = sqrt(clamp(max(dot(dFdx(Ng), dFdx(Ng)), dot(dFdy(Ng), dFdy(Ng))), 0.0, 1.0));
+            // rough enough not to sparkle where the surface curves fast (Valve's specular antialiasing: how much the
+            // vertex normal turns from one pixel to the next)
+            float geoRough = pow(clamp(max(dot(dFdx(Nv), dFdx(Nv)), dot(dFdy(Nv), dFdy(Nv))), 0.0, 1.0), 0.333);
             float r = max(rough, geoRough);
             float specAO = min(specOcc, occ);
             vec3 spec = vec3(0.0), glint = vec3(0.0);
@@ -872,7 +969,7 @@ void shade() {
                 c = matcap(c, N, here, full);
             if (uOutline != 0)
                 c = mix(albedo, c, uOutlineMix.z); // unshaded: its color as it is
-            c += uEmissive * texture(uEmissiveTex, mat2(uEmissiveXf.xy, uEmissiveXf.zw) * (uEmissiveUV == 0 ? vUV : vUV1) + uEmissiveOffset).rgb *
+            c += uEmissive * texture(uEmissiveTex, emissiveUV()).rgb *
                 mix(vec3(1.0), albedo, uSelfIllumAlbedo);
             float fogged;
             if (uGlass != 0 && a < 1.0) {
@@ -927,7 +1024,7 @@ void shade() {
         }
         if (cap)
             c = matcap(c, N, here, full);
-        c += uEmissive * texture(uEmissiveTex, mat2(uEmissiveXf.xy, uEmissiveXf.zw) * (uEmissiveUV == 0 ? vUV : vUV1) + uEmissiveOffset).rgb;
+        c += uEmissive * texture(uEmissiveTex, emissiveUV()).rgb;
         c = tonemap(applyFog(c, vPos) * uExposure);
         if (uOutline != 0)
             c = mix(applyFog(base.rgb, vPos), c, uOutlineMix.z); // unshaded: its color as it is
@@ -1029,11 +1126,13 @@ out vec3 vAO;
 out float vBlend;
 out vec4 vSun;
 out vec4 vTangent;
-out vec3 vLight;
+centroid out vec3 vLight;
+out vec2 vLightHash;
 flat out int vLightMode;
 void main() {
     mat4 m = skinMatrix();
     vBlend = 0.0;
+    vLightHash = vec2(0.0);
     vTangent = vec4(0.0);
     vLightMode = uLightMode;
     vec4 p = m * vec4(aPos + aMorphPos, 1.0);
