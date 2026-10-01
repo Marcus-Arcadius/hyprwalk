@@ -816,18 +816,21 @@ def descriptor(body_smr, eye_l, eye_r, fx_guid, menu_guid, params_guid, visemes,
 
 
 def physbone(root_tf, colliders, radius=0.0, pull=0.2, spring=0.2, stiffness=0.2, gravity=0.0, immobile=0.0,
-             multi=0, max_angle=45, ignore=()):
-    """a VRC PhysBone; root_tf 0 = the object it is on. Lengths are in the root's own units"""
+             multi=0, max_angle=45, ignore=(), limit=None, max_angle_z=None, limit_rot=(0, 0, 0), immobile_type=0):
+    """a VRC PhysBone; root_tf 0 = the object it is on. Lengths are in the root's own units. limit: 1 Angle, 2 Hinge,
+    3 Polar (max_angle its pitch, max_angle_z its yaw), None: Angle if max_angle; limit_rot: its Rotation (Unity's
+    Euler angles); immobile_type 0 All Motion, 1 World"""
     return dict(m_Enabled=1, m_EditorHideFlags=0, m_Script=R(u.PHYSBONE_FID, u.DYN_GUID, 3), m_Name='',
                 m_EditorClassIdentifier='', foldout_transforms=1, foldout_forces=1, foldout_collision=1,
                 foldout_stretchsquish=1, foldout_limits=1, foldout_grabpose=1, foldout_options=1,
                 foldout_gizmos=0, version=1, integrationType=0, rootTransform=R(root_tf),
                 ignoreTransforms=[R(x) for x in ignore], ignoreOtherPhysBones=1, endpointPosition=V(0, 0, 0),
                 multiChildType=multi, pull=pull, spring=spring, stiffness=stiffness, gravity=gravity,
-                gravityFalloff=0, immobileType=0, immobile=immobile, allowCollision=1,
+                gravityFalloff=0, immobileType=immobile_type, immobile=immobile, allowCollision=1,
                 collisionFilter={'allowSelf': 1, 'allowOthers': 1}, radius=radius,
-                colliders=[R(c) for c in colliders], limitType=1 if max_angle else 0, maxAngleX=max_angle,
-                maxAngleZ=max_angle, limitRotation=V(0, 0, 0), allowGrabbing=1, allowPosing=1, grabMovement=0.5,
+                colliders=[R(c) for c in colliders], limitType=(1 if max_angle else 0) if limit is None else limit,
+                maxAngleX=max_angle, maxAngleZ=max_angle if max_angle_z is None else max_angle_z,
+                limitRotation=V(*limit_rot), allowGrabbing=1, allowPosing=1, grabMovement=0.5,
                 maxStretch=0, maxSquish=0, stretchMotion=0, snapToHand=0, parameter='', isAnimated=0,
                 resetWhenDisabled=0)
 

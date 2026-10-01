@@ -230,6 +230,39 @@ namespace h3d {
             return Quat::fromBasis(normalize(x), normalize(y), normalize(z));
         }
 
+        // where a spring's bone at O points at p, turned back within its limit (frame L: its limitFrame in the world), as
+        // far from O; VRMC_springBone_limit's reference implementations
+        V3 springLimit(const SSpringJoint& J, const Quat& L, const V3& O, const V3& p) {
+            V3 d = L.conj().rotate(normalize(p - O));
+            switch (J.limit) {
+                case LIMIT_NONE: return p;
+                case LIMIT_CONE: {
+                    // no further from y than the angle
+                    if (const float c = std::cos(J.limitA); d.y < c) {
+                        const float side = d.x * d.x + d.z * d.z, s = std::sqrt(std::max(0.f, 1.f - c * c));
+                        d                = side <= 1e-8f ? V3{0, c, s} : V3{d.x * s / std::sqrt(side), c, d.z * s / std::sqrt(side)}; // (straight back: to +z)
+                    }
+                    break;
+                }
+                case LIMIT_HINGE: {
+                    // in the yz plane, no further from y than the angle
+                    const float l = std::sqrt(d.y * d.y + d.z * d.z);
+                    d             = l <= 1e-4f ? V3{0, 1, 0} : V3{0, d.y / l, d.z / l};
+                    if (const float c = std::cos(J.limitA); d.y < c)
+                        d = {0, c, (d.z < 0 ? -1.f : 1.f) * std::sqrt(std::max(0.f, 1.f - c * c))};
+                    break;
+                }
+                case LIMIT_SPHERICAL: {
+                    // a pitch round x (in the yz plane) and a yaw toward x, each within its own
+                    const float pitch = d.y <= -1.f + 1e-6f ? TAU * 0.5f : std::abs(d.x) >= 1.f - 1e-6f ? 0.f : std::atan2(d.z, d.y);
+                    const float yaw = std::clamp(std::asin(std::clamp(d.x, -1.f, 1.f)), -J.limitB, J.limitB), p2 = std::clamp(pitch, -J.limitA, J.limitA);
+                    d               = {std::sin(yaw), std::cos(yaw) * std::cos(p2), std::cos(yaw) * std::sin(p2)};
+                    break;
+                }
+            }
+            return O + L.rotate(d) * length(p - O);
+        }
+
         V3 origin(const M4& m) {
             return {m.m[12], m.m[13], m.m[14]};
         }
@@ -1472,6 +1505,12 @@ namespace h3d {
                                 n.rest.r = Quat{nd->rotation[0], nd->rotation[1], nd->rotation[2], nd->rotation[3]}.normalized();
                             if (nd->has_scale)
                                 n.rest.s = {nd->scale[0], nd->scale[1], nd->scale[2]};
+                        }
+                        // (a broken file's: what isn't a number would make the whole skeleton's, and the walk's, none)
+                        auto finite = [](const V3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); };
+                        if (!finite(n.rest.t) || !finite(n.rest.s) || !std::isfinite(n.rest.r.x + n.rest.r.y + n.rest.r.z + n.rest.r.w)) {
+                            log.push_back(std::format("{}'s transform isn't all numbers: left at its parent's", n.name));
+                            n.rest = {};
                         }
                         model.nodes.push_back(std::move(n));
                         inScene.push_back(scene);
@@ -2877,6 +2916,7 @@ namespace h3d {
                 return (int)model.springColliders.size() - 1;
             }
 
+            // (j's limitFrame is the limit's own turn, from a frame whose y is along the bone)
             void addJoint(int node, int spring, SSpringJoint j, const V3& tail, float meters) {
                 if (length(tail) * metersAt(node) < 1e-4f)
                     return; // no length to point with: it stays as the animation has it
@@ -2885,8 +2925,42 @@ namespace h3d {
                 j.tail   = tail;
                 j.length = length(tail) * metersAt(node);
                 j.radius = std::max(meters, 0.f);
+                if (j.limit != LIMIT_NONE) {
+                    // the shortest turn from y to the bone; straight down, half a turn round x
+                    const V3 d   = normalize(tail);
+                    const Quat y = 1.f + d.y < 1e-6f ? Quat{1, 0, 0, 0} : Quat{d.z, 0, -d.x, 1.f + d.y}.normalized();
+                    j.limitFrame = (y * j.limitFrame).normalized();
+                }
                 model.springJoints.push_back(j);
                 claimed[node] = true;
+            }
+
+            // VRMC_springBone_limit's limit: {"cone": {"angle", "rotation": [x, y, z, w]}}, {"hinge": {"angle", "rotation"}}
+            // or {"spherical": {"pitch", "yaw", "rotation"}}, radians; the rotation turns it from a frame whose y is along
+            // the bone. VRChat's PhysBones' Angle, Hinge and Polar limits come as these
+            void readLimit(const SJson* limit, SSpringJoint& p) {
+                const SJson* s = nullptr;
+                auto         angle = [&](const char* k, float most) {
+                    const double v = jnum(s->get(k), 0);
+                    return std::isfinite(v) ? std::clamp((float)v, 0.f, most) : 0.f;
+                };
+                constexpr float HALF = TAU * 0.5f;
+                if (!limit || limit->type != SJson::J_OBJ)
+                    return;
+                if ((s = limit->get("cone")) && s->type == SJson::J_OBJ)
+                    p.limit = LIMIT_CONE, p.limitA = angle("angle", HALF);
+                else if ((s = limit->get("hinge")) && s->type == SJson::J_OBJ)
+                    p.limit = LIMIT_HINGE, p.limitA = angle("angle", HALF);
+                else if ((s = limit->get("spherical")) && s->type == SJson::J_OBJ)
+                    p.limit = LIMIT_SPHERICAL, p.limitA = angle("pitch", HALF), p.limitB = angle("yaw", HALF * 0.5f);
+                else
+                    return;
+                p.limitFrame = {};
+                if (const auto* r = jarr(s->get("rotation")); r && r->size() == 4) {
+                    const Quat q{(float)jnum(&(*r)[0], 0), (float)jnum(&(*r)[1], 0), (float)jnum(&(*r)[2], 0), (float)jnum(&(*r)[3], 1)};
+                    if (std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z) && std::isfinite(q.w))
+                        p.limitFrame = q.normalized();
+                }
             }
 
             // a bone and all under it swing, as VRM 0.x's bone groups have it: each toward its first child, the
@@ -3033,6 +3107,8 @@ namespace h3d {
                             p.gravityDir = normalize(jvec(a.get("gravityDir"), {0, -1, 0}));
                             p.drag       = std::clamp((float)jnum(a.get("dragForce"), 0.5), 0.f, 1.f);
                             p.scale      = model.scale;
+                            if (const SJson* e = a.get("extensions"); e && e->get("VRMC_springBone_limit"))
+                                readLimit(e->get("VRMC_springBone_limit")->get("limit"), p);
                             addJoint(n, index, p, inNode(n, restPos(next)), (float)jnum(a.get("hitRadius"), 0) * metersAt(n));
                         }
                     }
@@ -3080,6 +3156,10 @@ namespace h3d {
                         limb(4, s ? HB_R_UPPER_ARM : HB_L_UPPER_ARM, s ? HB_R_LOWER_ARM : HB_L_LOWER_ARM, 0.04f);
                         limb(4, s ? HB_R_LOWER_ARM : HB_L_LOWER_ARM, s ? HB_R_HAND : HB_L_HAND, 0.035f);
                     }
+                    int bit = 0;
+                    for (const auto& part : bodyParts)
+                        for (int k : part)
+                            model.springColliders[k].body = (uint16_t)(1u << bit++);
                 }
                 bodyMade = true;
                 std::vector<int> out;
@@ -3093,8 +3173,9 @@ namespace h3d {
             // "colliders": [{"name", "node", "offset": [x, y, z], "tail": [x, y, z] (a capsule), "radius", "inside": true (it keeps the
             // bones in)}, or a plane {"name", "node", "offset", "normal": [x, y, z]} (they keep to where it points)], in the node's units;
             // "springs": [{"name", "bones": [roots], "ignore": [bones], "stiffness", "drag", "gravity", "gravityDir": [x, y, z],
-            // "radius", "center": bone, "immobile", "colliders": [names; "body" for the ones made for the body]}]: each root and all under
-            // it swing, as VRM 0.x has it. A spring that doesn't name colliders keeps out of all of the file's, or the body's.
+            // "radius", "center": bone, "immobile", "colliders": [names; "body" for the ones made for the body], "limit": a
+            // VRMC_springBone_limit limit (see readLimit) for each bone}]: each root and all under it swing, as VRM 0.x has it. A
+            // spring that doesn't name colliders keeps out of all of the file's, or the body's.
             void settingsSprings(const std::vector<SJson>& list) {
                 std::map<std::string, std::vector<int>> named;
                 std::vector<int>                        all;
@@ -3115,8 +3196,9 @@ namespace h3d {
                     }
                 for (const auto& s : list) {
                     SSpring sp;
-                    sp.name     = jstr(s.get("name"));
-                    sp.immobile = std::clamp((float)jnum(s.get("immobile"), immobile()), 0.f, 1.f);
+                    sp.name           = jstr(s.get("name"));
+                    sp.immobile       = std::clamp((float)jnum(s.get("immobile"), immobile()), 0.f, 1.f);
+                    sp.parentImmobile = std::clamp((float)jnum(s.get("parentImmobile"), 0), 0.f, 1.f);
                     if (const SJson* c = s.get("center"); c && (sp.center = nodeNamed(jstr(c))) < 0)
                         missing.push_back(std::string(jstr(c)));
                     if (const auto* cs = jarr(s.get("colliders"))) {
@@ -3144,6 +3226,7 @@ namespace h3d {
                     p.gravity    = (float)jnum(s.get("gravity"), 0);
                     p.gravityDir = normalize(jvec(s.get("gravityDir"), {0, -1, 0}));
                     p.scale      = model.scale;
+                    readLimit(s.get("limit"), p);
                     const float radius = (float)jnum(s.get("radius"), 0.02);
                     const int   index  = (int)model.springs.size();
                     model.springs.push_back(std::move(sp));
@@ -3285,6 +3368,40 @@ namespace h3d {
                 model.springs = std::move(kept);
                 for (auto& j : model.springJoints)
                     j.spring = remap[j.spring];
+                // a bone with a limit leaves out the body's colliders its tail starts inside of (deeper than START_IN): its
+                // limit keeps it out of the body, as a PhysBone's does, and the body made up here isn't the avatar's where it
+                // is (a necktie on a chest: pushed off it, it stood out, and swung round through it)
+                constexpr float START_IN = 0.005f;
+                for (auto& j : model.springJoints) {
+                    if (j.limit == LIMIT_NONE)
+                        continue;
+                    const V3 tail = restGlobal[j.node].point(j.tail);
+                    for (int k : model.springs[j.spring].colliders) {
+                        const auto& c = model.springColliders[k];
+                        if (!c.body)
+                            continue;
+                        const V3    a = restGlobal[c.node].point(c.offset), ab = restGlobal[c.node].point(c.tail) - a;
+                        const float ll = dot(ab, ab);
+                        const V3    q  = ll > 1e-12f ? a + ab * std::clamp(dot(tail - a, ab) / ll, 0.f, 1.f) : a;
+                        if (length(tail - q) * model.scale < c.radius + j.radius - START_IN)
+                            j.startsIn |= c.body;
+                    }
+                }
+                // what each spring hangs from: its first root's parent, unless a spring moves that
+                std::vector<int> jointOf(model.nodes.size(), -1);
+                for (const auto& j : model.springJoints)
+                    jointOf[j.node] = j.spring;
+                for (const auto& j : model.springJoints) {
+                    auto& sp = model.springs[j.spring];
+                    if (sp.carrier >= 0 || sp.parentImmobile <= 0)
+                        continue;
+                    if (const int p = model.nodes[j.node].parent; p >= 0 && jointOf[p] != j.spring) {
+                        sp.carrier = p;
+                        for (int a = p; a >= 0 && sp.carrier >= 0; a = model.nodes[a].parent)
+                            if (jointOf[a] >= 0)
+                                sp.carrier = -1, sp.parentImmobile = 0;
+                    }
+                }
                 if (model.springJoints.empty()) {
                     model.springColliders.clear();
                     model.springsFrom.clear();
@@ -3896,6 +4013,9 @@ namespace h3d {
         m_springOf.clear();
         m_tail.clear();
         m_tailPrev.clear();
+        m_carried.clear();
+        m_carrierAt.clear();
+        m_carrierMove.clear();
         m_springGlobal.clear();
         m_centerAt.clear();
         m_centerInv.clear();
@@ -3949,6 +4069,9 @@ namespace h3d {
         }
         m_tail.assign(md.springJoints.size(), V3{});
         m_tailPrev = m_tail;
+        m_carried  = m_tail;
+        m_carrierAt.assign(md.springs.size(), M4::identity());
+        m_carrierMove = m_carrierAt;
         m_springGlobal.assign(md.nodes.size(), M4::identity());
         m_centerAt.assign(md.springs.size(), M4::identity());
         m_centerInv = m_centerAt;
@@ -5002,6 +5125,13 @@ namespace h3d {
                 m_centerAt[s]  = world * m_global[c];
                 m_centerInv[s] = m_centerAt[s].inverse();
             }
+        for (size_t s = 0; s < md.springs.size(); ++s)
+            if (const int c = md.springs[s].carrier; c >= 0) {
+                const M4 at       = world * m_global[c];
+                m_carrierMove[s]  = pass == SP_STEP ? at * m_carrierAt[s].inverse() : M4::identity();
+                if (pass != SP_SHOW)
+                    m_carrierAt[s] = at;
+            }
         if (pass == SP_STEP)
             for (size_t c = 0; c < m_colliderModel.size(); ++c)
                 m_colliderAt[c] = {world.point(m_colliderModel[c].a), world.point(m_colliderModel[c].b), m_colliderModel[c].radius, m_colliderModel[c].kind};
@@ -5019,21 +5149,37 @@ namespace h3d {
                 const V3    O    = origin(G);
                 const V3    rest = G.point(J.tail) - O; // where the animation has it point
                 if (pass == SP_START) {
+                    m_carried[j] = {};
                     m_tail[j] = m_tailPrev[j] = m_centerInv[J.spring].point(O + rest);
                     m_springGlobal[n]          = G;
                     continue;
                 }
                 V3 to;
+                // its limit, after the swing and after each collider's push, as VRMC_springBone_limit has it
+                const Quat L       = J.limit != LIMIT_NONE ? (rotationOf(G) * J.limitFrame).normalized() : Quat{};
+                auto       limited = [&](const V3& p) { return springLimit(J, L, O, p); };
                 if (pass == SP_STEP) {
                     const float len = length(rest);
                     const V3    cur = C.point(m_tail[j]), prev = C.point(m_tailPrev[j]);
-                    V3 next = cur + (cur - prev) * (1 - J.drag) + normalize(rest) * (J.stiffness * t * J.scale) + J.gravityDir * (J.gravity * t * J.scale);
-                    if (const auto& sp = md.springs[J.spring]; sp.center < 0)
+                    const auto& sp     = md.springs[J.spring];
+                    const V3    byBody = m_springMove.point(cur) - cur;
+                    // a PhysBone's Immobile (All Motion): carried along with all its carrier does, as much (and where the avatar
+                    // goes no less than its own immobile); its own swing goes on, the carrying doesn't: the last step's is taken
+                    // out of how it was going
+                    const V3 carried = sp.center < 0 && sp.carrier >= 0 ?
+                        byBody * std::max(sp.immobile, sp.parentImmobile) + (m_carrierMove[J.spring].point(cur) - cur - byBody) * sp.parentImmobile :
+                        V3{};
+                    V3 next = cur + carried + (cur - prev - m_carried[j]) * (1 - J.drag) + normalize(rest) * (J.stiffness * t * J.scale) +
+                        J.gravityDir * (J.gravity * t * J.scale);
+                    m_carried[j] = carried;
+                    if (sp.center < 0 && sp.carrier < 0)
                         // the drag is of the air, and that moves along with the avatar some: going somewhere at a steady
                         // speed swings it less than starting, stopping and turning do
-                        next += (m_springMove.point(cur) - cur) * (J.drag * sp.immobile);
-                    next    = O + normalize(next - O) * len;
+                        next += byBody * (J.drag * sp.immobile);
+                    next    = limited(O + normalize(next - O) * len);
                     for (int k : md.springs[J.spring].colliders) {
+                        if (md.springColliders[k].body & J.startsIn)
+                            continue; // (one of the body's, that it starts inside of: its limit keeps it out)
                         const auto& c  = m_colliderAt[k];
                         const V3    ab = c.b - c.a;
                         if (c.kind == COLLIDER_PLANE) {
@@ -5041,7 +5187,7 @@ namespace h3d {
                             const V3    n = normalize(ab);
                             const float h = dot(next - c.a, n);
                             if (h < J.radius)
-                                next = O + normalize(next + n * (J.radius - h) - O) * len;
+                                next = limited(O + normalize(next + n * (J.radius - h) - O) * len);
                             continue;
                         }
                         const float ll = dot(ab, ab);
@@ -5051,12 +5197,12 @@ namespace h3d {
                             // pulled back in, the bone's radius inside it
                             const float r = std::max(c.radius - J.radius, 0.f);
                             if (d > r)
-                                next = O + normalize(q + (next - q) * (r / d) - O) * len;
+                                next = limited(O + normalize(q + (next - q) * (r / d) - O) * len);
                             continue;
                         }
                         const float r = J.radius + c.radius;
                         if (d < r && d > 1e-7f)
-                            next = O + normalize(q + (next - q) * (r / d) - O) * len; // pushed out, the same length
+                            next = limited(O + normalize(q + (next - q) * (r / d) - O) * len); // pushed out, the same length
                     }
                     if (!std::isfinite(next.x) || !std::isfinite(next.y) || !std::isfinite(next.z))
                         next = O + rest;
@@ -5064,7 +5210,7 @@ namespace h3d {
                     m_tail[j]     = m_centerInv[J.spring].point(next);
                     to            = next;
                 } else
-                    to = C.point(m_tail[j] + (m_tail[j] - m_tailPrev[j]) * t);
+                    to = limited(C.point(m_tail[j] + (m_tail[j] - m_tailPrev[j]) * t));
                 // turned from where the animation points it to the tail
                 const M4 Pi = P.inverse();
                 const V3 a = normalize(Pi.dir(rest)), d = normalize(Pi.dir(to - O));

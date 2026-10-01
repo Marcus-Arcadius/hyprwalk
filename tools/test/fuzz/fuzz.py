@@ -14,8 +14,8 @@
 #
 # Seeds: map: tools/test/vm/litmap.py's LitCourt.glb (everything tools/cs2map.py writes). avatar: BoothAccessories
 # (tools/unity2hypr3d.py's output: skins, morphs, variants, and its settings file) from --avatars DIR (as run.sh
-# --avatars takes it), as it is, as a VRM 0.x and as a VRM 1.0 (VRMC_vrm, VRMC_springBone with extended colliders,
-# VRMC_node_constraint, VRMC_materials_mtoon), with BoothGimmicks.hands.vrma as its emote file; ToonTest.glb
+# --avatars takes it), as it is, as a VRM 0.x and as a VRM 1.0 (VRMC_vrm, VRMC_springBone with extended colliders and
+# limits, VRMC_node_constraint, VRMC_materials_mtoon), with BoothGimmicks.hands.vrma as its emote file; ToonTest.glb
 # (tools/test/vm/assets.py: outlines, stencils); and ToonBalls.glb (tools/test/harness/toonballs.py: MToon 1.0 and
 # 0.x shading, the converter's toon and matcap extras). A case is a seed with one to three mutations of its JSON (numbers
 # made negative, zero, NaN, infinite or huge, indices out of range or pointing back up the tree, wrong types, keys
@@ -86,6 +86,8 @@ def map_seeds(out):
     return {'LitCourt': os.path.join(out, 'LitCourt.glb')}
 
 
+LIMITS = [{'cone': {'angle': 0.8, 'rotation': [-0.70711, 0, 0, 0.70711]}}, {'hinge': {'angle': 1.2}},  # (VRMC_springBone_limit's)
+          {'spherical': {'pitch': 0.6, 'yaw': 0.9, 'rotation': [0, 0.38268, 0, 0.92388]}}]
 VRM0_BONES = {  # the settings file's humanoid names (Unity's) as VRM 0.x's
     'Hips': 'hips', 'Spine': 'spine', 'Chest': 'chest', 'UpperChest': 'upperChest', 'Neck': 'neck', 'Head': 'head',
     'LeftEye': 'leftEye', 'RightEye': 'rightEye', 'Jaw': 'jaw', 'LeftShoulder': 'leftShoulder', 'LeftUpperArm': 'leftUpperArm',
@@ -165,8 +167,8 @@ def avatar_seeds(out, avatars):
 
     # VRM 1.0
     v1 = copy.deepcopy(js)
-    v1.setdefault('extensionsUsed', []).extend(['VRMC_vrm', 'VRMC_springBone', 'VRMC_springBone_extended_collider', 'VRMC_node_constraint',
-                                                'VRMC_materials_mtoon'])
+    v1.setdefault('extensionsUsed', []).extend(['VRMC_vrm', 'VRMC_springBone', 'VRMC_springBone_extended_collider', 'VRMC_springBone_limit',
+                                                'VRMC_node_constraint', 'VRMC_materials_mtoon'])
     exprs = {p: {'morphTargetBinds': [{'node': body_node, 'index': k % len(targets), 'weight': 1.0}], 'isBinary': p == 'blink',
                  'overrideBlink': 'block' if p == 'happy' else 'none', 'overrideMouth': 'blend' if p == 'surprised' else 'none',
                  'overrideLookAt': 'none',
@@ -191,8 +193,9 @@ def avatar_seeds(out, avatars):
     v1['extensions']['VRMC_springBone'] = {
         'specVersion': '1.0', 'colliders': colliders, 'colliderGroups': [{'name': 'body', 'colliders': [0, 1, 2, 3]}],
         'springs': [{'name': f'chain{k}', 'center': hips, 'colliderGroups': [0],
-                     'joints': [{'node': n, 'hitRadius': 0.02, 'stiffness': 1.0, 'gravityPower': 0.1, 'gravityDir': [0, -1, 0], 'dragForce': 0.4}
-                                for n in c]} for k, c in enumerate(springs)]}
+                     'joints': [{'node': n, 'hitRadius': 0.02, 'stiffness': 1.0, 'gravityPower': 0.1, 'gravityDir': [0, -1, 0], 'dragForce': 0.4,
+                                 'extensions': {'VRMC_springBone_limit': {'specVersion': '1.0-draft', 'limit': LIMITS[(k + i) % len(LIMITS)]}}}
+                                for i, n in enumerate(c)]} for k, c in enumerate(springs)]}
     cons = [('roll', {'rollAxis': 'X'}), ('aim', {'aimAxis': 'PositiveY'}), ('rotation', {})]
     for k, c in enumerate(springs[:3]):
         kind, extra = cons[k]

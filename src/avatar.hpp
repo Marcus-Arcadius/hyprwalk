@@ -308,18 +308,32 @@ namespace h3d {
         V3            offset, tail; // in the node's space
         float         radius = 0;   // meters
         eColliderKind kind   = COLLIDER_OUTSIDE;
+        uint16_t      body   = 0; // one made up for the humanoid's body: its bit (for SSpringJoint::startsIn), else 0
+    };
+
+    // how far a spring's bone may turn (VRMC_springBone_limit's, as VRChat's PhysBones have them): within a cone round
+    // the limit's y, in its yz plane up to an angle from its y (a hinge), or a pitch and yaw from its y (spherical)
+    enum eSpringLimit : uint8_t {
+        LIMIT_NONE,
+        LIMIT_CONE,
+        LIMIT_HINGE,
+        LIMIT_SPHERICAL,
     };
 
     struct SSpringJoint {
-        int   node = -1, spring = 0;
-        V3    tail;                 // what it points at, in the node's space: its child, or a made-up end
-        float length    = 0;        // meters, to the tail
-        float radius    = 0;        // meters, how far it keeps from the colliders
-        float stiffness = 1;        // pull back to where the animation has it
-        float drag      = 0.4f;     // 0..1, of its swing each step
-        float gravity   = 0;        // pull along gravityDir
-        V3    gravityDir{0, -1, 0}; // in the world
-        float scale = 1;            // meters per unit of stiffness and gravity
+        int          node = -1, spring = 0;
+        V3           tail;                 // what it points at, in the node's space: its child, or a made-up end
+        float        length    = 0;        // meters, to the tail
+        float        radius    = 0;        // meters, how far it keeps from the colliders
+        float        stiffness = 1;        // pull back to where the animation has it
+        float        drag      = 0.4f;     // 0..1, of its swing each step
+        float        gravity   = 0;        // pull along gravityDir
+        V3           gravityDir{0, -1, 0}; // in the world
+        float        scale = 1;            // meters per unit of stiffness and gravity
+        eSpringLimit limit = LIMIT_NONE;
+        float        limitA = 0, limitB = 0; // radians: the cone's or the hinge's angle; or the pitch, and the yaw
+        Quat         limitFrame;             // the limit's frame in the node's space: y along the bone, then the limit's own turn
+        uint16_t     startsIn = 0;           // with a limit: the body's colliders (SSpringCollider::body) its tail starts inside of, left out
     };
 
     struct SSpring {
@@ -327,6 +341,10 @@ namespace h3d {
         int              center = -1; // the node it moves with (the swing is relative to it), -1 = the world
         std::vector<int> colliders;
         float            immobile = 0.9f; // with no center, 0..1: how much of the air it drags in moves along with the avatar
+        // with no center, 0..1: how much of what the node it hangs from (carrier) does beyond where the avatar goes (the walk's
+        // bob and sway, a turn, a dance) it's carried along with, not swung by: VRChat PhysBones' Immobile ("All Motion")
+        float parentImmobile = 0;
+        int   carrier        = -1;
     };
 
     // VRM 1.0's node constraints: a node that turns along with another one
@@ -560,6 +578,10 @@ namespace h3d {
         const std::vector<uint8_t>& partsShown() const {
             return m_shown;
         }
+        // every node's transform this frame, in the model's space
+        const std::vector<M4>& globals() const {
+            return m_global;
+        }
         // per SAvatarModel::batches, the material it's drawn with; null when the model has no material variants
         const std::vector<int>* batchMaterials() const {
             return m_batchMat.empty() ? nullptr : &m_batchMat;
@@ -720,6 +742,8 @@ namespace h3d {
         std::vector<int>                    m_springOf;   // per node: its joint, -1 = none, -2 = below one
         int                                 m_springFrom = 0; // the first node the springs move
         std::vector<V3>                     m_tail, m_tailPrev; // per joint, in its spring's center's space
+        std::vector<V3>                     m_carried;          // per joint: how far its spring's carrier carried it the last step (the world)
+        std::vector<M4>                     m_carrierAt, m_carrierMove; // per spring: its carrier in the world at the last step; its move over this one
         std::vector<M4>                     m_springGlobal;     // per node the springs move: in the world
         std::vector<M4>                     m_centerAt, m_centerInv; // per spring: center -> world
         std::vector<SColliderAt>            m_colliderModel, m_colliderAt; // per collider: in model space this frame, in the world

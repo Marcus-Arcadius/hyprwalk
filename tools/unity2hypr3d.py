@@ -9667,6 +9667,47 @@ class Settings:
             warn('%d Modular Avatar Global Collider(s) found no finger collider left to take' % failed)
         return [slot[t] for t in sorted(slot) if 2 <= t <= 11]
 
+    def limit(self, d, roots, n, skip):
+        """a VRC PhysBone's limit (Angle, Hinge or Polar) as VRMC_springBone_limit has it (a cone, a hinge or a spherical
+        limit, radians), for the settings file's spring of the GLB node n and the bones under it, or None. The limit
+        turns by its Rotation (Unity's Euler angles) from a frame whose y is along the bone, to its first child that
+        swings. The GLB's frames are Unity's mirrored (x), so the rotation is mirrored; or, where n's bone has other
+        axes in the two, worked out from where its frame and that child are in both"""
+        kind = {1: 'cone', 2: 'hinge', 3: 'spherical'}.get(inum(d.get('limitType')))
+        if kind is None:
+            return None
+        ax, az = (min(max(math.radians(num(d.get(k))), 0.0), math.pi) for k in ('maxAngleX', 'maxAngleZ'))
+        out = {'pitch': _r(ax), 'yaw': _r(min(az, math.pi / 2))} if kind == 'spherical' else {'angle': _r(ax)}
+        E = Euler([math.radians(a) for a in vec3(d.get('limitRotation'))], 'ZXY').to_quaternion()  # Unity's: Z, X, Y
+
+        def from_y(v):  # the shortest turn from y to v (straight down: half a turn round x)
+            v = v.normalized()
+            return Quaternion((0.0, 1.0, 0.0, 0.0)) if 1 + v.y < 1e-6 else Quaternion((1 + v.y, v.z, 0.0, -v.x)).normalized()
+
+        def mirrored(q):  # a turn in Unity's space as the GLB's has it: x mirrored
+            return Quaternion((q.w, q.x, -q.y, -q.z))
+
+        def find(x):  # the GameObject of node n, from a root down
+            if self.node(x) == n:
+                return x
+            return next((f for f in (find(c) for c in self.ma.down(x)) if f is not None), None)
+        rot = mirrored(E)  # (where the GLB's frames are Unity's mirrored, as Blender's FBX import keeps them)
+        g = next((f for f in (find(r) for r in roots) if f is not None), None)
+        kid = next((c for c in self.nodes[n].get('children', []) if 0 <= c < len(self.nodes) and not skip(c)), None)
+        cg = next((c for c in self.ma.down(g) if self.node(c) == kid), None) if g is not None and kid is not None else None
+        U = self.b.U
+        if cg is not None and id(g) in U and id(cg) in U:
+            uq, gq = U[id(g)].decompose()[1], self.world[n].decompose()[1]
+            au = uq.inverted() @ (U[id(cg)].translation - U[id(g)].translation)
+            ag = gq.inverted() @ (self.world[kid].translation - self.world[n].translation)
+            if au.length > 1e-9 and ag.length > 1e-9:
+                rot = (gq @ from_y(ag)).inverted() @ mirrored(uq @ from_y(au) @ E)
+        if rot.w < 0:
+            rot = Quaternion((-rot.w, -rot.x, -rot.y, -rot.z))
+        if max(abs(rot.x), abs(rot.y), abs(rot.z)) > 5e-6:
+            out['rotation'] = _v((rot.x, rot.y, rot.z, rot.w))
+        return {kind: out}
+
     def dynamics(self):
         """(colliders, springs)"""
         av, U = self.av, self.b.U
@@ -9771,6 +9812,8 @@ class Settings:
                 rad = num(d.get('radius'))
                 cl = [name_of[id(y)] for y in listof(d.get('colliders')) if isinstance(y, Obj) and id(y) in name_of]
                 if inum(d.get('limitType')) != 0:
+                    # a limit is mostly there to keep the chain out of the body: the colliders hypr3d makes for the body
+                    # too (but for the bones that start inside them; the limit, written below, keeps those out)
                     cl.append('body')
                 allow = inum(d.get('allowCollision'), 1)
                 if allow == 1 or (allow == 2 and truthy(dictof(d.get('collisionFilter')).get('allowSelf', '1'))):
@@ -9819,8 +9862,16 @@ class Settings:
             y['radius'] = _r(meters / max(avg_scale(self.world[nodes[0]]), 1e-9))
             if imm > 0.9:
                 y['immobile'] = _r(imm, 3)
+            if 'pull' in d and imm > 0:
+                # its Immobile is of all of what its root's parent does (VRChat's All Motion), the walk's and the dances' too,
+                # as hypr3d's own "immobile" is of where the avatar goes
+                y['parentImmobile'] = _r(imm, 3)
             y['colliders'] = list(dict.fromkeys(cl))
             want |= set(y['colliders'])
+            if 'pull' in d:
+                lim = self.limit(d, roots, nodes[0], lambda c: c in human or self.nodes[c].get('name') in ig)
+                if lim:
+                    y['limit'] = lim
             springs.append(y)
         return [x for x in out_c if x['name'] in want], springs
 

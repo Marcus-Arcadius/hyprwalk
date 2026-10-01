@@ -188,6 +188,9 @@ int main(int argc, char** argv) {
     float                         accel = 0; // m/s² toward the --move velocity, 0 = at once (the plugin's is 40 on the ground)
     float                         ground  = 0;
     bool                          jumping = false; // --jump: falls back down to ground
+    FILE*                         springClips = nullptr; // --springclip: a line a frame, how far each kind of spring is inside the body
+    std::vector<int>              vertexSpring;          // (--springclip's: per vertex its kind of spring, -1 the body, -2 neither)
+    std::vector<std::string>      springKinds;           // (... the kinds: a spring's name up to its first '.')
     SAvatarMotion                 mo;
     std::vector<SPanel>           panels;
     int                           W = 800, H = 800;
@@ -196,6 +199,7 @@ int main(int argc, char** argv) {
     std::string aimName;
     float bodyYaw = 0, orbit = 0, pitch = 8, dist = 2.6f, targetY = -1, sky = 1, bounce = 0.15f, time = 0, fov = 70, exposure = 1;
     float height = 0;
+    bool  camChest = false; // --view-chest: the camera's yaw is the chest's (where it faces as the animation turns it)
     // first person (maps): from the feet at eye height, or from --eye
     bool  firstPerson = false, eyeSet = false;
     V3    eyeAt{};
@@ -310,6 +314,104 @@ int main(int argc, char** argv) {
                 anim.update(mo);
                 still.update(mo);
             }
+            if (springClips && model) {
+                // the skin as drawn; round a vertical line through the hips, by height (1 cm) and bearing (5°), how far out
+                // the body goes (not its springs, arms or head); a spring's vertex nearer the line than that is inside
+                if (vertexSpring.size() != model->vertices.size()) {
+                    springKinds.clear();
+                    std::vector<int> kindOf(model->springs.size());
+                    for (size_t s = 0; s < model->springs.size(); ++s) {
+                        const std::string k  = model->springs[s].name.substr(0, model->springs[s].name.find('.'));
+                        const auto        it = std::ranges::find(springKinds, k);
+                        kindOf[s]            = (int)(it - springKinds.begin());
+                        if (it == springKinds.end())
+                            springKinds.push_back(k);
+                    }
+                    std::vector<int> nodeKind(model->nodes.size(), -1), joint(model->nodes.size(), -1);
+                    for (const auto& jt : model->springJoints)
+                        joint[jt.node] = kindOf[jt.spring];
+                    const int lu = model->human[HB_L_UPPER_ARM], ru = model->human[HB_R_UPPER_ARM], nk = model->human[HB_NECK] >= 0 ? model->human[HB_NECK] : model->human[HB_HEAD];
+                    for (size_t k = 0; k < model->nodes.size(); ++k) {
+                        const int p = model->nodes[k].parent;
+                        nodeKind[k] = joint[k] >= 0 ? joint[k] : p >= 0 && nodeKind[p] >= 0 ? nodeKind[p] : (int)k == lu || (int)k == ru || (int)k == nk ? -2 : p >= 0 ? nodeKind[p] : -1;
+                    }
+                    vertexSpring.resize(model->vertices.size());
+                    for (size_t v = 0; v < model->vertices.size(); ++v) {
+                        const auto& vx   = model->vertices[v];
+                        int         most = 0;
+                        for (int k = 1; k < 4; ++k)
+                            if (vx.weights[k] > vx.weights[most])
+                                most = k;
+                        vertexSpring[v] = nodeKind[model->joints[vx.joints[most]].node];
+                    }
+                    std::string head = "# time";
+                    for (const auto& k : springKinds)
+                        head += std::format(" [{}: inside, deepest]", k);
+                    fprintf(springClips, "%s\n", head.c_str());
+                }
+                std::vector<uint8_t> shown(model->vertices.size(), 0);
+                for (const auto& b : model->batches)
+                    if (b.part < 0 || b.part >= (int)anim.partsShown().size() || anim.partsShown()[b.part])
+                        for (uint32_t i = b.first; i < b.first + b.count; ++i)
+                            shown[model->indices[i]] = 1;
+                // (and the springs as the animation has them, physics off: what's inside by design, like a tie's band under
+                // the collar, counts only as far as physics takes it deeper)
+                const M4        toWorld = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1}) * model->fix;
+                std::vector<V3> at(model->vertices.size()), still0(model->vertices.size());
+                for (size_t v = 0; v < at.size(); ++v) {
+                    const auto& vx = model->vertices[v];
+                    if (!shown[v] || vertexSpring[v] == -2)
+                        continue;
+                    for (int w = 0; w < (vertexSpring[v] >= 0 ? 2 : 1); ++w) {
+                        const auto& J = w ? still.joints() : anim.joints();
+                        V3          p{};
+                        for (int k = 0; k < 4; ++k)
+                            if (vx.weights[k]) {
+                                const float* m = &J[vx.joints[k] * 12];
+                                p += V3{m[0] * vx.pos[0] + m[1] * vx.pos[1] + m[2] * vx.pos[2] + m[3], m[4] * vx.pos[0] + m[5] * vx.pos[1] + m[6] * vx.pos[2] + m[7],
+                                        m[8] * vx.pos[0] + m[9] * vx.pos[1] + m[10] * vx.pos[2] + m[11]} *
+                                    (vx.weights[k] / 255.f);
+                            }
+                        (w ? still0 : at)[v] = toWorld.point(p);
+                    }
+                }
+                const M4&       hg   = anim.globals()[model->human[HB_HIPS]];
+                const V3        hips = toWorld.point({hg.m[12], hg.m[13], hg.m[14]});
+                constexpr int   NH = 220, NA = 72;
+                constexpr float H0 = -1.f, DH = 0.01f;
+                std::vector<float> out(NH * NA, 0.f);
+                auto               bin = [&](const V3& p, int& h, int& a) {
+                    h = (int)std::floor((p.y - hips.y - H0) / DH);
+                    a = ((int)std::floor((std::atan2(p.z - hips.z, p.x - hips.x) + 3.14159265f) / 6.2831853f * NA) % NA + NA) % NA;
+                    return h >= 0 && h < NH;
+                };
+                for (size_t v = 0; v < at.size(); ++v)
+                    if (int h, a; shown[v] && vertexSpring[v] == -1 && bin(at[v], h, a))
+                        out[h * NA + a] = std::max(out[h * NA + a], std::hypot(at[v].x - hips.x, at[v].z - hips.z));
+                std::vector<int>   inside(springKinds.size(), 0);
+                std::vector<float> deep(springKinds.size(), 0.f);
+                auto depth = [&](const V3& p) {
+                    int   h, a;
+                    float r = 0;
+                    if (!bin(p, h, a) || std::hypot(p.x - hips.x, p.z - hips.z) < 0.06f)
+                        return 0.f; // (on the line itself which way it is from it says nothing)
+                    for (int d = -1; d <= 1; ++d)
+                        r = std::max(r, out[h * NA + (a + d + NA) % NA]);
+                    return r - std::hypot(p.x - hips.x, p.z - hips.z);
+                };
+                for (size_t v = 0; v < at.size(); ++v) {
+                    if (!shown[v] || vertexSpring[v] < 0)
+                        continue;
+                    if (const float d = depth(at[v]), more = d - std::max(depth(still0[v]), 0.f); d > 0.005f && more > 0.005f) {
+                        ++inside[vertexSpring[v]];
+                        deep[vertexSpring[v]] = std::max(deep[vertexSpring[v]], more);
+                    }
+                }
+                std::string line = std::format("{:.4f}", time);
+                for (size_t k = 0; k < springKinds.size(); ++k)
+                    line += std::format(" {} {:.4f}", inside[k], deep[k]);
+                fprintf(springClips, "%s\n", line.c_str());
+            }
         }
     };
     // how far each spring's bones are turned from where the animation has them, degrees
@@ -420,6 +522,73 @@ int main(int argc, char** argv) {
             anim.setPhysics(atoi(argv[++i]) != 0);
         } else if (a == "--swing") {
             swing();
+        } else if (a == "--springs") { // each spring: its bones, colliders and limit; where its first bone's limit points (the
+                                       // avatar's frame: x right, y up, -z ahead) and its bones that leave out a collider
+                                       // of the body's they start inside of
+            if (!model)
+                continue;
+            static constexpr const char* LIMIT[] = {"none", "cone", "hinge", "spherical"};
+            for (size_t s = 0; s < model->springs.size(); ++s) {
+                int         n = 0, in = 0, first = -1;
+                std::string from;
+                for (size_t j = 0; j < model->springJoints.size(); ++j)
+                    if (const auto& jt = model->springJoints[j]; jt.spring == (int)s) {
+                        ++n;
+                        in += jt.startsIn ? 1 : 0;
+                        if (first < 0)
+                            first = (int)j;
+                    }
+                if (first < 0)
+                    continue;
+                const auto& J    = model->springJoints[first];
+                const M4&   g    = anim.globals()[J.node];
+                const V3    axis = normalize(model->fix.dir(g.dir(J.limitFrame.rotate({0, 1, 0}))));
+                const V3    bone = normalize(model->fix.dir(g.dir(J.tail))), at = model->fix.point({g.m[12], g.m[13], g.m[14]});
+                fprintf(stderr, "spring %s: %d bones, %zu colliders, limit %s %.1f %.1f, at %.3f %.3f %.3f, bone %.3f %.3f %.3f, limit's y %.3f %.3f %.3f (%.1f deg off), %d start inside the body's\n",
+                        model->springs[s].name.c_str(), n, model->springs[s].colliders.size(), LIMIT[J.limit], J.limitA * 57.29578f, J.limitB * 57.29578f, at.x, at.y, at.z,
+                        bone.x, bone.y, bone.z, axis.x, axis.y, axis.z, std::acos(std::clamp(dot(axis, bone), -1.f, 1.f)) * 57.29578f, in);
+            }
+        } else if (a == "--limits") { // how far the bones with a limit are out of it now: the worst (degrees) and its spring;
+                                      // worked out here on its own, from the limit's frame (the parent as it swings, the bone
+                                      // as the animation turns it) and the cone's, hinge's or spherical limit's rules
+            if (!model)
+                continue;
+            auto rot = [](const M4& m) {
+                const V3 x = normalize(V3{m.m[0], m.m[1], m.m[2]}), y = normalize(V3{m.m[4], m.m[5], m.m[6]});
+                return Quat::fromBasis(x, y, cross(x, y));
+            };
+            float       worst = 0;
+            std::string at    = "none";
+            int         n     = 0;
+            for (const auto& jt : model->springJoints) {
+                if (jt.limit == LIMIT_NONE)
+                    continue;
+                const int p     = model->nodes[jt.node].parent;
+                const M4  local = p >= 0 ? still.globals()[p].inverse() * still.globals()[jt.node] : still.globals()[jt.node];
+                const M4  g     = (p >= 0 ? anim.globals()[p] : M4::identity()) * local;
+                const V3  d     = (rot(g) * jt.limitFrame).conj().rotate(normalize(anim.globals()[jt.node].dir(jt.tail)));
+                const float A = jt.limitA * 57.29578f, B = jt.limitB * 57.29578f;
+                float       out = 0;
+                if (jt.limit == LIMIT_CONE)
+                    out = std::acos(std::clamp(d.y, -1.f, 1.f)) * 57.29578f - A;
+                else if (jt.limit == LIMIT_HINGE) // (off the yz plane, or round in it too far)
+                    out = std::max(std::asin(std::min(std::abs(d.x), 1.f)) * 57.29578f, std::abs(std::atan2(d.z, d.y)) * 57.29578f - A);
+                else
+                    out = std::max(std::abs(std::atan2(d.z, d.y)) * 57.29578f - A, std::asin(std::min(std::abs(d.x), 1.f)) * 57.29578f - B);
+                ++n;
+                if (out > worst)
+                    worst = out, at = model->springs[jt.spring].name;
+            }
+            fprintf(stderr, "limits: %d bones, the worst %.2f deg out (%s)\n", n, worst, at.c_str());
+        } else if (a == "--springclip") { // file: a line a frame: time, then per kind of spring (its name up to a '.', as the
+                                          // first line lists them) how many of its vertices physics puts inside the body
+                                          // (round a vertical line through the hips, not counting the arms and head), more
+                                          // than 5 mm deeper than the animation has them, and the most (m)
+            need(i, 1);
+            if (springClips)
+                fclose(springClips);
+            springClips = fopen(argv[++i], "w");
+            vertexSpring.clear();
         } else if (a == "--height") {
             need(i, 1);
             height = atof(argv[++i]);
@@ -435,7 +604,12 @@ int main(int argc, char** argv) {
             bodyYaw = rad(atof(argv[++i]));
         } else if (a == "--view") { // camera around the avatar, degrees, 0 = in front
             need(i, 1);
-            orbit = rad(atof(argv[++i]));
+            orbit    = rad(atof(argv[++i]));
+            camChest = false;
+        } else if (a == "--view-chest") { // camera around the avatar at a yaw from where its chest faces (dances turn it), degrees
+            need(i, 1);
+            orbit    = rad(atof(argv[++i]));
+            camChest = true;
         } else if (a == "--pitch") { // camera elevation, degrees
             need(i, 1);
             pitch = atof(argv[++i]);
@@ -736,6 +910,7 @@ int main(int argc, char** argv) {
                 loop = std::string(argv[++i]) == "loop";
             if (what == "stop") {
                 anim.stopEmote();
+                still.stopEmote();
                 continue;
             }
             int e = -1;
@@ -747,6 +922,7 @@ int main(int argc, char** argv) {
                     fprintf(stderr, "emote failed: %s\n", res.error.c_str());
                 for (const auto& em : res.emotes) {
                     const int k = anim.addEmote(em);
+                    still.addEmote(em);
                     fprintf(stderr, "emote %s from %s: %.2f s, %zu channels, %zu faces%s -> %d\n", em->name.c_str(), em->from.c_str(), em->anim.duration,
                             em->anim.channels.size(), em->faces.size(), em->fingers ? ", fingers" : "", k);
                     if (e < 0)
@@ -757,6 +933,7 @@ int main(int argc, char** argv) {
             if (e < 0)
                 fprintf(stderr, "no emote %s\n", what.c_str());
             anim.playEmote(e, loop);
+            still.playEmote(e, loop); // (the swing and --springclip are measured against it)
         } else if (a == "--emotes") { // the avatar's
             for (size_t k = 0; k < anim.emotes().size(); ++k) {
                 const auto& em = *anim.emotes()[k];
@@ -1183,7 +1360,17 @@ int main(int argc, char** argv) {
                         break;
                     }
             }
-            const V3    toCam  = forwardFrom(bodyYaw + orbit, rad(pitch));
+            float facing = bodyYaw;
+            if (const int chest = model ? model->human[model->human[HB_CHEST] >= 0 ? HB_CHEST : HB_SPINE] : -1; camChest && chest >= 0) {
+                M4 rest = M4::identity();
+                for (int k = chest; k >= 0; k = model->nodes[k].parent)
+                    rest = model->nodes[k].rest.matrix() * rest;
+                const M4 toWorld = M4::trs(feet, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1}) * model->fix;
+                const V3 f       = toWorld.dir(anim.globals()[chest].dir(rest.inverse().dir(model->forward)));
+                if (std::hypot(f.x, f.z) > 1e-3f)
+                    facing = std::atan2(f.x, -f.z);
+            }
+            const V3    toCam  = forwardFrom(facing + orbit, rad(pitch));
             V3          eye    = target + toCam * dist;
             if (firstPerson) {
                 eye    = eyeSet ? eyeAt : feet + V3{0, 1.65f, 0};

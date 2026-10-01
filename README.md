@@ -458,7 +458,8 @@ time a frame on the CPU (its update, and its drawing's GL calls), averaged.
 
 - **VRM 0.x and 1.0**: the humanoid map, expressions (blend shapes, material colours and texture
   transforms), look-at, spring bones (VRM 0.x `secondaryAnimation` and `VRMC_springBone`, with
-  `VRMC_springBone_extended_collider`'s inside and plane colliders), node constraints
+  `VRMC_springBone_extended_collider`'s inside and plane colliders and `VRMC_springBone_limit`'s cone,
+  hinge and spherical limits), node constraints
   (`VRMC_node_constraint`), and MToon's shading, matcap, outlines and render queue.
 - **A plain glTF/GLB**: the humanoid bones are guessed from their names (Mixamo, VRoid, Blender's
   rigs and most other naming styles). Expressions come from shape key names (VRoid, VRChat, MMD and
@@ -516,7 +517,7 @@ or overrides it. The converter writes it; you can also write one by hand. Every 
 | `toggles` | `[{"name", "group" or "groups": [names], "on", "show": [parts], "hide": [parts], "shapes": {…}, "variants": [material variants], "transforms": {…}, "loop": {"seconds", "a": {"shapes", "transforms"}, "b": {…}}, "drop": [nodes]}]`: outfit toggles for the Action Menu; the toggles of a group are exclusive, and a toggle in several groups turns off the others of each. A toggle that is on puts its material variants' materials on, sets its nodes' `transforms` (`{"node": {"t": [x,y,z], "r": [x,y,z,w], "s": [x,y,z]}}`, each part optional, in the node's own space), goes from `a` to `b` and back every `seconds` (smoothly), and leaves the `drop` nodes where they were in the world when it went on |
 | `sliders` | `[{"name", "value": 0..1, "keys": [{"at": 0..1, "shapes": {…}, "transforms": {…}, "show": [parts], "hide": [parts], "variants": [material variants]}]}]`: dials for the Action Menu (VRChat's radial puppets). Between two keys the shape keys and transforms blend. Parts and material variants switch at a key, so each key has what holds from it up to the next. A two-axis one has `"axes": 2`, `"value": [x, y]` and a `"grid": n` of n×n keys, each `"at": [x, y]` (−1..1), blended between the four around the stick |
 | `emotes` | `[{"file" or "clip", "name", "loop", "hold", "grounded", "speed"}]`: more emotes. `file` is a `.vrma` or glTF file (next to the settings file unless absolute), `clip` a clip of the avatar's own. `hold` keeps the last frame until you move, `grounded` keeps the feet on the floor, and `speed` (default 1) plays it faster or slower |
-| `springs` | `[{"name", "bones": [roots], "ignore": [bones], "stiffness", "drag", "gravity", "gravityDir": [x,y,z], "radius", "center", "immobile", "colliders": [names, or "body"]}]`: each root and everything under it swings |
+| `springs` | `[{"name", "bones": [roots], "ignore": [bones], "stiffness", "drag", "gravity", "gravityDir": [x,y,z], "radius", "center", "immobile", "parentImmobile", "colliders": [names, or "body"], "limit"}]`: each root and everything under it swings. `limit` is a `VRMC_springBone_limit` limit for each of its bones: `{"cone": {"angle", "rotation": [x,y,z,w]}}`, `{"hinge": {"angle", "rotation"}}` or `{"spherical": {"pitch", "yaw", "rotation"}}`, in radians, turned by `rotation` from a frame whose y runs along the bone: how far a bone may turn from where the animation points it (a PhysBone's Angle, Hinge or Polar limit). A bone with a limit leaves out the colliders made for the body (`"body"`) that it starts inside of. `parentImmobile` (0..1) is how much of what the bone the spring hangs from does beyond where the avatar goes (a walk's bob and sway, a turn, a dance) carries the spring along instead of swinging it: a PhysBone's Immobile (All Motion) |
 | `colliders` | `[{"name", "node", "offset": [x,y,z], "tail": [x,y,z], "radius", "inside"}]`: spheres, or capsules with a tail, in the node's units; `"inside": true` keeps the bones inside it (PhysBones' inside bounds). A plane is `{"name", "node", "offset", "normal": [x,y,z]}`: the bones keep to the side it faces |
 | `immobile` | 0..1, default 0.9: how much of the air the avatar carries along as it moves. With 0, walking at 4.5 m/s blows long hair out level behind it |
 
@@ -569,7 +570,9 @@ and `OUT.hypr3d.json` for hypr3d, carrying over:
   and scale objects (transform curves, in the FX controller's clips and blend trees), and objects
   that start hidden. Radial puppets become sliders, and two- and four-axis puppets two-axis sliders
 - PhysBones and Dynamic Bones, as springs and colliders: spheres, capsules, planes, and the ones that
-  keep bones inside them
+  keep bones inside them. A PhysBone's Angle, Hinge or Polar limit (its Rotation too) becomes the
+  spring's `limit`, and its Immobile (All Motion) its `parentImmobile`: a necktie whose limit keeps it
+  in front of the chest stays there walking, running, turning and dancing
 - materials: colour, texture, cutout or transparent, emission and culling (Standard, lilToon,
   Poiyomi, MToon and UnlitWF settings, and the common property names of other shaders). A material
   that a toggle or slider puts in a slot is written as a glTF material variant, and so is one whose
@@ -710,7 +713,11 @@ Valve's; this reads your copy of the game for your own use.
   menu, lip sync from a WAV file (`--audio FILE`, `--visemes`, `--badge`, and `--lipsync-trace`: a
   line for each analysis window, its loudness, voicing, formants, fricative bands and visemes),
   outlines (`--outlines 0`), maps (`--no-dual`: glass without blending's second source, as where the
-  GPU has none), timing (`--bench`) and debugging (`--hide`, `--show`, `--glinfo`, `--where NODE`). `--ctl`
+  GPU has none), timing (`--bench`) and debugging (`--hide`, `--show`, `--glinfo`, `--where NODE`). For
+  springs: each one's bones, colliders and limit (`--springs`), how far its bones are out of their limits
+  (`--limits`, worked out on its own) and how much deeper than the animation has it physics puts each kind
+  of spring into the body (`--springclip FILE`); `--view-chest DEG` puts the camera round where the chest
+  faces (a dance turns it). `--ctl`
   runs a `hyprctl hypr3d avatar …` or `menu …` request, and `--key`, `--click`, `--wheel` and
   `--mouse` give the Action Menu the plugin's input: the same code as the plugin's (`src/control.cpp`,
   which `main.cpp` hands its commands and menu input to).
@@ -725,6 +732,13 @@ Valve's; this reads your copy of the game for your own use.
   matcap alone), side on to the sun: the plain ball's light falls off with N·L, a toon ball's is flat
   on each side of a sharp step, each shade has its own colour, a matcap brightens where it's white,
   and a toon ball in a wall's shadow is all shade.
+- `tools/test/harness/spring_check.sh AVATAR [DIR] [KIND...]`: the avatar's springs standing, walking and
+  stopping, running and stopping, turning on the spot, jumping and dancing (and turning right round and
+  running in first person, with a harness that has those), at the plugin's speeds and accelerations: no
+  bone with a limit gets out of it, and the kinds of spring named (a spring's name up to its first `.`)
+  never go more than 2 cm deeper into the body than the animation has them. It prints how deep every kind
+  went in each. Hatsune Miku NT's necktie: `spring_check.sh ~/.local/share/hypr3d/avatars/Miku/Miku.glb ""
+  Necktie` (converted before PhysBone limits were carried over, it went 6.7 cm into her running).
 - `tools/test/harness/cs2mat_check.sh [DIR]`: CS2's material details as `tools/cs2map.py` writes them,
   on `cs2mats.py`'s panels, each split by its textures: the tint only where the tint mask is, a decal
   multiplied on the second uv set and one mixed in by its alpha, an unlit colour times its second
@@ -939,6 +953,11 @@ Valve's; this reads your copy of the game for your own use.
 - `tools/test/synth/emote_unit.py`: `--emote` on a hand-made package of bare clips, read as a
   package, inside a zip, as a folder, as loose `.anim` files and by name. Still poses are left out
   of a package but kept when named, and a clip with no muscle or body curves isn't an emote.
+- `tools/test/synth/limit_unit.py [BOOTHDIR]`: PhysBone limits and Immobile on `booth.py`'s SynthChan
+  (plain python3): the ears' Hinge, the tail's Polar and the skirt's and twin tails' Angle limits come out
+  as hinge, spherical and cone limits; the back hair's hemisphere turned by Unity's Euler angles (90, 15,
+  0) comes out mirrored for the GLB and lies behind it, off her back; an All Motion Immobile becomes
+  `parentImmobile`, a World one doesn't.
 - `tools/test/synth/human_unit.py [-- T_POSE.anim…]`: the muscle-to-bone maths on a small T-posed
   skeleton. Unity's T-pose muscle values must give the T pose back, left and right must mirror, and
   the signs, twists, body motion, curves (weighted keys too) and Foot IK must behave. Given Unity's
@@ -983,12 +1002,18 @@ blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/emote_unit
 blender -b --factory-startup --python-exit-code 1 -P tools/test/synth/goal_check.py -- Avatar.zip Dance.anim
 ```
 
-`vowels.py`, `fbxread.py`, `decal_unit.py` and the shell scripts run with plain `python3` or `bash`.
+`vowels.py`, `fbxread.py`, `decal_unit.py`, `limit_unit.py` and the shell scripts run with plain `python3`
+or `bash`.
 
 ## Known limits
 
 - VRChat's own emote animations are proprietary, so the built-in emotes are procedural look-alikes.
   Load real ones as `.vrma` or glTF clips with `avatar_emotes`.
+- A PhysBone's curves (a value that changes along its chain) aren't carried over: the chain gets the
+  value set for all of it. Nor is Gravity Falloff, so gravity also pulls on bones hanging as modelled. A
+  limit keeps a bone where its avatar's maker meant, as in VRChat: a fast spin can swing a necktie out
+  sideways over a shoulder, and Hatsune Miku NT's skirt chain, which may only swing forward and back,
+  hangs into her thigh when she sits.
 - In 3D mode, Alt+Tab doesn't reach Hyprland: Tab opens the Action Menu even with Alt held. Only keys
   with Super or Ctrl+Alt are passed through. That holds in play mode too, so a game never gets
   Super+anything: that's what keeps Super+Esc (and your own Super shortcuts) working while you play.

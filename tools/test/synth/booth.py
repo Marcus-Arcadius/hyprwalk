@@ -73,6 +73,7 @@ PHAL = ('Proximal', 'Intermediate', 'Distal')
 TWIN = [(0.105, 0.045, 1.34), (0.14, 0.065, 1.24), (0.155, 0.075, 1.12), (0.16, 0.075, 1.0), (0.152, 0.068, 0.88)]
 TAIL = [(0, 0.085, 0.72), (0, 0.16, 0.68), (0, 0.23, 0.665), (0, 0.29, 0.70), (0, 0.325, 0.78), (0, 0.335, 0.87)]
 HAIRBACK = [(0, 0.1, 1.33), (0, 0.125, 1.22), (0, 0.13, 1.11), (0, 0.125, 1.02)]
+HAIRBACK_PITCH = 90  # its PhysBone limit's pitch: the hemisphere it may swing in turned to behind it, off her back
 EAR = [(0.07, 0.005, 1.37), (0.09, 0.005, 1.43), (0.103, 0.005, 1.475)]
 SKIRT = {'F': [(0, -0.1, 0.79), (0, -0.15, 0.67), (0, -0.19, 0.56)],
          'B': [(0, 0.09, 0.79), (0, 0.14, 0.67), (0, 0.18, 0.56)],
@@ -912,13 +913,17 @@ def avatar_assets():
     hair = [(114, 'MonoBehaviour', g.physbone(v.stub(model.fid('TwinTail_' + s, 4), 4), [head, chest, floor] + arms,
                                                radius=0.03, pull=0.15, spring=0.35, stiffness=0.1, gravity=0.15,
                                                immobile=0.3)) for s, x in SIDES]
+    # (the back hair keeps off her back, as the limits Booth avatars' hair and neckties have do it: the half of the turns
+    # behind the bone, a hemisphere turned off it; Immobile only of where she goes)
     hair.append((114, 'MonoBehaviour', g.physbone(v.stub(model.fid('HairBack', 4), 4), [head, chest], radius=0.03,
-                                                  pull=0.2, spring=0.3, stiffness=0.2, gravity=0.1)))
+                                                  pull=0.2, spring=0.3, stiffness=0.2, gravity=0.1, max_angle=90,
+                                                  limit_rot=(HAIRBACK_PITCH, 15, 0), immobile=0.5, immobile_type=1)))
     v.gameobject('PhysBone_髪', ROOT_TF, hair)
     ear_pb = [v.component(model.fid('Ear_' + s, 1), 114, 'MonoBehaviour', g.physbone(
-        0, [], radius=0.01, pull=0.5, spring=0.4, stiffness=0.6, max_angle=25)) for s, x in SIDES]
+        0, [], radius=0.01, pull=0.5, spring=0.4, stiffness=0.6, max_angle=25, limit=2)) for s, x in SIDES]
     tail_pb = v.component(model.fid('Tail', 1), 114, 'MonoBehaviour', g.physbone(
-        0, legs, radius=0.025, pull=0.12, spring=0.45, stiffness=0.05, gravity=0.08, max_angle=0))
+        0, legs, radius=0.025, pull=0.12, spring=0.45, stiffness=0.05, gravity=0.08, max_angle=40, max_angle_z=60,
+        limit=3))
     v.component(model.fid('Skirt_Root', 1), 114, 'MonoBehaviour', g.physbone(
         0, legs + hands + [skirt_in], radius=0.02, pull=0.25, spring=0.2, stiffness=0.3, gravity=0.1, multi=0,
         max_angle=60))
