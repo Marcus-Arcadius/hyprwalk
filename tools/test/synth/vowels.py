@@ -1,17 +1,14 @@
-# vowels.py OUTDIR: sung vowels for testing lip sync (src/lipsync.cpp), made by a source-filter model: a pulse train at
-# the voice's pitch, tilted like a glottis, through resonators at the vowel's formants (Japanese a, i, u, e, o; a man's
-# and a woman's, from the usual measurements), then as radiated from the lips. 0.8 s each, 48 kHz 16-bit mono WAVs:
-# man_a.wav ... woman_o.wav, and silence.wav, hiss.wav (white noise, as an s is), quiet_a.wav (a man's a, 40 dB down).
-# And consonants between two a's (0.3 s, then the consonant, then 0.3 s; 0.2 s of silence before and after):
-# man_asa.wav, man_asha.wav, man_afa.wav
-# (noise shaped as s, sh and f are: most of it around 6 kHz; around 3 kHz; flat above 1 kHz and faint) and man_ama.wav,
-# man_ana.wav (a nasal murmur: voiced, its resonance at 250 Hz, a dip where the mouth's side branch cancels, about 1
-# kHz for an m and 1.8 kHz for an n, and 12 dB fainter than the vowel); woman_asa.wav ... likewise at her pitch
+# vowels.py OUTDIR: sung vowels for testing lip sync (src/lipsync.cpp) from a source-filter model: a pulse train with a
+# glottal tilt through formant resonators (Japanese a i u e o, a man's and a woman's), radiated from the lips. 0.8 s,
+# 48 kHz 16-bit mono WAVs: man_a.wav ... woman_o.wav, silence.wav, hiss.wav (white noise, like an s), quiet_a.wav (a
+# man's a, 40 dB down); and consonants between two a's (0.3 s each, 0.2 s of silence around): man_asa, _asha, _afa
+# (noise shaped as s, sh, f) and _ama, _ana (nasal murmur: 250 Hz resonance, a dip near 1 kHz for m and 1.8 kHz for n,
+# 12 dB down), likewise woman_*.
 #   python3 vowels.py OUTDIR
 import math, os, random, struct, sys, wave
 
 RATE = 48000
-VOICES = {  # pitch (Hz), then per vowel its first four formants (Hz)
+VOICES = {  # pitch, then each vowel's first four formants (Hz)
     'man': (125, {'a': (750, 1180, 2600, 3500), 'i': (290, 2250, 3000, 3700), 'u': (340, 1300, 2300, 3400),
                   'e': (470, 1880, 2550, 3500), 'o': (490, 840, 2500, 3400)}),
     'woman': (225, {'a': (900, 1450, 2900, 4000), 'i': (340, 2750, 3300, 4200), 'u': (390, 1600, 2700, 3900),
@@ -87,10 +84,10 @@ def fricative(kind, seconds, level, rnd):
 
 
 def nasal(f0, dip, seconds, gain):
-    """a nasal murmur: the voice through the nose (a resonance at 250 Hz, weaker ones above) with a dip at `dip`"""
+    """nasal murmur: voice with a 250 Hz resonance, weaker ones above, and a notch at `dip`"""
     s = voice(f0, (250, 1100 if dip > 1400 else 1350, 2200, 3300), seconds, 1.0)
     s = biquad(s, 3, dip, 2.0)
-    s = biquad(s, 0, 1200, 0.7)  # (little above: the nose damps it)
+    s = biquad(s, 0, 1200, 0.7)  # the nose damps the highs
     peak = max(abs(x) for x in s) or 1.0
     return [x / peak * 0.5 * gain for x in s]
 

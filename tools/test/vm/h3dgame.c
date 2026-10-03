@@ -1,20 +1,13 @@
-// h3dgame: a tiny SDL2 "game" for tools/test/vm: it prints a line for everything SDL gives it (the mouse, relative
-// motion, buttons, the wheel, keys, focus, its size, game controllers) and draws what it got, so frames change with
-// input. vm.nix builds it; checks.py runs it as a Wayland client and, with SDL_VIDEODRIVER=x11, through XWayland.
+// h3dgame: a tiny SDL2 "game" for tools/test/vm. It prints a line for every input event SDL gives it and draws them, so
+// frames change with input. Built by vm.nix; checks.py runs it on Wayland and on XWayland (SDL_VIDEODRIVER=x11).
 //
 //   h3dgame [--relative] [--grab] [--fullscreen] [--size WxH] [--title T] [--no-vsync] [--log FILE]
 //
-//   --relative    SDL's relative mouse mode, the way most games take the mouse: on Wayland a pointer lock
-//                 (zwp_locked_pointer_v1) and relative motion (zwp_relative_pointer_v1); on X11 a grab and XInput2's
-//                 raw motion
-//   --grab        keep the mouse in the window (SDL_SetWindowGrab: zwp_confined_pointer_v1 on Wayland)
-//   --fullscreen  ask for fullscreen (xdg_toplevel.set_fullscreen, or _NET_WM_STATE_FULLSCREEN)
-//   --log FILE    the lines go to the end of FILE, not to stdout (started from a desktop entry, stdout is nowhere)
+//   --relative  SDL relative mouse mode (Wayland pointer lock + relative pointer; X11 grab + XInput2 raw motion)
+//   --grab      confine the mouse to the window
+//   --log FILE  append the lines to FILE, not stdout (a desktop entry's stdout goes nowhere)
 //
-// Lines, flushed as they come: "motion X Y XREL YREL", "button down|up N X Y", "wheel X Y", "key down|up NAME",
-// "focus gained|lost", "mouse enter|leave", "size W H", "relative on|off", "controller added NAME",
-// "cbutton down|up NAME", "caxis NAME VALUE", "frames N" (presented in the last second) and "quit". R toggles
-// relative mode, Q (or Esc twice) quits; F toggles fullscreen, M maximized ("maximize on|off").
+// Keys: R toggles relative mode, F fullscreen, M maximized; Q or Esc twice quits.
 #include <SDL.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -49,7 +42,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--log") && i + 1 < argc && !freopen(argv[++i], "a", stdout))
             return 1;
     }
-    // controllers even without the keyboard focus would hide what the test wants to see: SDL's default (off)
+    // controller events only with the keyboard focus, as the test expects (SDL's default)
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "0");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         say("error %s", SDL_GetError());
@@ -70,7 +63,7 @@ int main(int argc, char** argv) {
     if (relative)
         say("relative %s", SDL_SetRelativeMouseMode(SDL_TRUE) == 0 ? "on" : "failed");
 
-    long   dx = 0, dy = 0; // relative motion, all of it
+    long   dx = 0, dy = 0; // summed relative motion
     int    mx = -1, my = -1, keys = 0, buttons = 0, frames = 0, escapes = 0, lastW = 0, lastH = 0;
     Uint32 second = SDL_GetTicks();
     for (;;) {
@@ -123,7 +116,7 @@ int main(int argc, char** argv) {
                         case SDL_WINDOWEVENT_FOCUS_LOST: say("focus lost"); break;
                         case SDL_WINDOWEVENT_ENTER: say("mouse enter"); break;
                         case SDL_WINDOWEVENT_LEAVE: say("mouse leave"); break;
-                        case SDL_WINDOWEVENT_RESIZED: // (sdl2-compat on SDL3 can send this one alone, from the compositor)
+                        case SDL_WINDOWEVENT_RESIZED: // sdl2-compat on SDL3 may send only this one
                         case SDL_WINDOWEVENT_SIZE_CHANGED:
                             if (e.window.data1 != lastW || e.window.data2 != lastH)
                                 say("size %d %d", lastW = e.window.data1, lastH = e.window.data2);
@@ -148,8 +141,7 @@ int main(int argc, char** argv) {
                 default: break;
             }
         }
-        // what it got, drawn: the background's colour turns with the relative motion, keys and buttons flash a
-        // band at the top, a square sits where the pointer is
+        // draw the input: background from relative motion, top band from keys and buttons, a square at the pointer
         int ow = 0, oh = 0;
         SDL_GetRendererOutputSize(r, &ow, &oh);
         SDL_SetRenderDrawColor(r, (Uint8)(40 + ((dx / 2) % 200 + 200) % 200), (Uint8)(40 + ((dy / 2) % 200 + 200) % 200), 90, 255);

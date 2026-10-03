@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# record_voice.sh [DIR]: your voice, for tuning lip sync to it: the vowels lip sync knows held (ah, ee, oo, eh, oh:
-# Japanese a, i, u, e, o), then "sss", then silence, 4 s each, from your default microphone (pw-record, as 32-bit
-# float mono WAVs at 48 kHz) into DIR (default ~/h3d-live/voice). You run it, in a terminal; it asks for each in
-# turn. The files stay where they are: nothing is sent anywhere. Then tools/test/harness/lipsync_check.sh --real DIR
-# (named a_*.wav ... o_*.wav) or the harness's --audio FILE --lipsync-trace goes through them offscreen.
+# record_voice.sh [DIR]: records your voice for tuning lip sync: the vowels it knows held (ah, ee, oo, eh, oh: Japanese
+# a, i, u, e, o), then "sss", then silence, 4 s each, from the default microphone (pw-record, 32-bit float mono WAVs at
+# 48 kHz) into DIR (default ~/h3d-live/voice). Nothing is sent anywhere. tools/test/harness/lipsync_check.sh --real DIR
+# or the harness's --audio FILE --lipsync-trace then goes through them offscreen.
 set -uo pipefail
 DIR="${1:-$HOME/h3d-live/voice}"
 command -v pw-record > /dev/null || { echo "no pw-record (PipeWire's tools)" >&2; exit 1; }

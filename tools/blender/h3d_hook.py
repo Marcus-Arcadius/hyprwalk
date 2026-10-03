@@ -1,11 +1,9 @@
-"""h3d_hook: the attack, a right hook, at 60 frames a second: key poses as h3d_rig's doc has them, third person's at
-frames 0-45 and first person's at 100-130 (CLIPS); h3d_export writes them for the plugin. See README.md here.
+"""h3d_hook: the attack, a right hook at 60 frames a second, as h3d_rig key poses: third person's at frames 0-45, first
+person's at 100-130 (CLIPS); h3d_export writes them for the plugin. See README.md here.
 
-From standing she winds up to her right, the right fist out wide at her shoulder's height, ahead of her twin tails
-(where third person's camera sees it past them; first person, at the right edge of the view), the left up by her chin.
-Then the trunk turns her left and the right fist sweeps round in front of her face after it, the elbow up, palm down;
-on a little past the middle, held a moment, back to the guard and the hands down. The arms keep ahead of the twin tails
-(they hang from her head behind her shoulders, their inner strands a hand's breadth out from her waist).
+She winds up to her right, the fist wide at shoulder height ahead of her twin tails (so both cameras see it), then the
+trunk turns left and the fist sweeps round in front of her face, elbow up, palm down, and back to the guard. The arms
+stay ahead of the twin tails, which hang behind her shoulders.
 """
 import math
 
@@ -21,33 +19,33 @@ def pose(**kw):
     return {k.replace("_R", ".R").replace("_L", ".L"): v for k, v in kw.items()}
 
 
-# standing as the plugin's idle has her: the arms hanging a little out from the skirt, the palms in
+# the plugin's idle stance: arms hanging a little out from the skirt, palms in
 DOWN = pose(wrist_R=(W, (0.25, -0.25, 0.0)), wrist_L=(W, (0.25, -0.25, 0.0)),
             elbow_R=(W, (0.6, 0.0, -0.05)), elbow_L=(W, (0.6, 0.0, -0.05)),
             along_R=(W, (0.08, -1, 0.0)), along_L=(W, (0.08, -1, 0.0)),
             palm_R=(W, (-1, 0, 0)), palm_L=(W, (-1, 0, 0)))
-# the left up by her chin, the elbow down in front
+# left fist by her chin, elbow down in front
 GUARD_L = dict(wrist_L=(0.06, 0.18, 0.17), elbow_L=(0.25, -0.4, 0.05), along_L=(-0.1, 0.8, 0.6), palm_L=(-1, 0, 0.1))
 TIGHT_L = dict(wrist_L=(0.045, 0.175, 0.13), elbow_L=(0.25, -0.4, 0.05), along_L=(-0.05, 0.85, 0.5), palm_L=(-1, 0, 0.1))
 
 
 def side(d, s):
-    """an arm's numbers as the other arm's (its own side's: a pose's arms are each in its own side's terms)"""
+    """an arm's numbers for the other arm (each arm's numbers are in its own side's terms)"""
     return {k.replace("_R", "_" + s): v for k, v in d.items()}
 
 
 def swing(deg, height, reach=0.38, ahead=0.0):
-    """the right wrist on the hook's arc round her middle: deg round from straight ahead (to her right > 0), meters up
-    from the chest's joint, the elbow out to the side and up; the fist pointing round the arc, palm down"""
+    """right wrist on the hook's arc round her middle: deg from straight ahead (her right > 0), height in meters above
+    the chest's joint; elbow out and up, fist along the arc, palm down"""
     a = math.radians(deg)
     out, fwd = reach * math.sin(a), reach * math.cos(a) + ahead
-    # (the hand along the arc, turning in: its tangent, a little in toward the middle)
+    # the hand points along the arc's tangent, a little in toward the middle
     t = (-math.cos(a) - 0.25 * math.sin(a), 0.0, math.sin(a) - 0.25 * math.cos(a))
     return dict(wrist_R=(W, (out, height, fwd)), elbow_R=(W, (0.65, height + 0.05, fwd * 0.4 - 0.02)),
                 along_R=(W, t), palm_R=(W, (0, -1, 0)))
 
 
-# the fists coming up in front (not out past the twin tails), the left on its way to her chin
+# fists come up in front (inside the twin tails), the left on its way to her chin
 RAISE_R = dict(wrist_R=(W, (0.22, -0.03, 0.22)), elbow_R=(W, (0.5, -0.3, 0.1)), along_R=(W, (0.1, 0.4, 1.0)), palm_R=(W, (-1, -0.3, 0)))
 RAISE = mix(pose(spine=(-3, 3, 0), chest=(-8, 4, 0), neck=(-5, 1, 0), head=(-1, 1, 0), **RAISE_R, **{k: v for k, v in DOWN.items() if k.endswith(".L")}),
             pose(spine=(-3, 3, 0), chest=(-8, 4, 0), neck=(-5, 1, 0), head=(-1, 1, 0), **RAISE_R, **GUARD_L), trunk=1, R=1, L=0.45)
@@ -67,7 +65,7 @@ OVER = pose(spine=(15, 6, 0), chest=(36, 8, 3), neck=(25, 3, 0), head=(7, 2, 0),
 GUARD = pose(spine=(2, 5, 0), chest=(4, 6, 0), neck=(2, 2, 0), head=(0, 2, 0),
              wrist_R=(0.075, 0.165, 0.12), elbow_R=(0.25, -0.4, 0.0), along_R=(0.0, 0.85, 0.5), palm_R=(-1, 0, 0.1), **GUARD_L)
 
-KEYS = [  # (frame, a pose or a mix): up slower than the strike; the trunk leads the strike, the fist sweeps round after it
+KEYS = [  # (frame, pose or mix); the trunk leads, the fist follows
     (0, DOWN),
     (4, RAISE),
     (8, READY),
@@ -82,23 +80,23 @@ KEYS = [  # (frame, a pose or a mix): up slower than the strike; the trunk leads
     (31, GUARD),
     (45, DOWN),
 ]
-# ready: where a swing after another starts (taking over from it as it goes: by the time it strikes, it's all its own);
-# next: when another may start after it; out: when it starts letting go of the body
+# ready: where a chained swing starts (blending in until it strikes); next: when another may start; out: when it starts
+# releasing the body
 MARKERS = {"ready": 4, "hit": 14, "next": 16, "out": 31}
 
-# --- first person's (frames 100 on): seen from her eyes (30 cm over the chest's joint, 4 cm ahead of it) the fist comes
-# up from the bottom right corner of the view to just under the middle, the forearm rising to it (seen side on: from
-# behind, her sleeves' bell cuffs hide a fist pointing away), and on up a little; a smaller turn of the trunk
+# --- first person's (frames 100 on): from her eyes (30 cm above the chest's joint, 4 cm ahead) the fist rises from the
+# view's bottom right corner to just under the middle, the forearm seen side on (from behind, the sleeves' bell cuffs
+# hide a fist pointing away); a smaller trunk turn
 
 
 def rise(out, up, ahead, lead=0.0):
-    """the right wrist rising: where (from the chest's joint, not turned), the elbow down and out to the right below it;
-    the fist pointing up and in (lead: more in, as it crosses), palm in"""
+    """right wrist rising at (out, up, ahead) from the chest's joint, not turned; elbow down and out below it; fist up
+    and in (lead: more in), palm in"""
     return dict(wrist_R=(W, (out, up, ahead)), elbow_R=(W, (out + 0.35, up - 0.45, ahead - 0.05)),
                 along_R=(W, (-0.35 - lead, 1.0, 0.45)), palm_R=(W, (-1, 0.2, -0.2)))
 
 
-# first person's hands held ready, as the plugin has them looking ahead (in the view's bottom corners)
+# first person's ready hands, as the plugin holds them (the view's bottom corners)
 FP_HANDS_R = dict(wrist_R=(W, (0.155, 0.13, 0.39)), elbow_R=(W, (0.5, -0.35, 0.1)), along_R=(W, (-0.15, 0.55, 1.0)), palm_R=(W, (-1, 0, 0)))
 FP_HANDS = pose(**FP_HANDS_R, **side(FP_HANDS_R, "L"))
 FP_GUARD_L = side(dict(FP_HANDS_R, wrist_R=(W, (0.13, 0.12, 0.33))), "L")
@@ -109,7 +107,7 @@ FP_HIT = pose(spine=(8, 5, 0), chest=(17, 6, 2), neck=(12, 2, 0), head=(3, 1, 0)
               **rise(0.02, 0.23, 0.36, 0.45), **FP_GUARD_L)
 FP_OVER = pose(spine=(9, 5, 0), chest=(19, 6, 2), neck=(13, 2, 0), head=(3, 1, 0), shoulder_R=(15, 7), shoulder_L=(-4, 0),
                **rise(-0.02, 0.255, 0.355, 0.5), **FP_GUARD_L)
-# (it starts and ends with the hands as first person holds them ready: a swing starts at its start there)
+# starts and ends at the ready hands, where a first person swing begins
 FP_KEYS = [(100 + f, p) for f, p in [
     (0, FP_HANDS),
     (4, FP_READY),
@@ -125,7 +123,7 @@ FP_KEYS = [(100 + f, p) for f, p in [
     (30, FP_HANDS),
 ]]
 FP_MARKERS = {"ready": 100, "hit": 110, "next": 112, "out": 127}
-CLIPS = {"third": (0, 45), "first": (100, 130)}  # (frames)
+CLIPS = {"third": (0, 45), "first": (100, 130)}  # frame ranges
 
 
 def build():

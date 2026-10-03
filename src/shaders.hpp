@@ -1,7 +1,6 @@
 #pragma once
 
-// All GLSL lives here. Everything targets GLSL ES 3.00 (what Hyprland's EGL
-// context guarantees); the external-texture variant needs the OES extension.
+// All GLSL, for GLSL ES 3.00 (guaranteed by Hyprland's EGL context); the external-texture variant needs OES.
 
 namespace h3d::shaders {
 
@@ -53,8 +52,7 @@ void main() {
 )";
 
     // ---------------------------------------------------------- panel lights
-    // averages every panel into one texel of a 16x1 texture, which the world
-    // shader then uses as the color of that panel's area light
+    // averages each panel into one texel of a 16x1 texture: its area light color in the world shader
 
     constexpr const char* LIGHT_VS = R"(#version 300 es
 layout(location = 0) in vec2 aPos;
@@ -82,7 +80,7 @@ void main() {
         }
     }
     sum /= 16.0;
-    // un-premultiply so a mostly transparent panel still has a hue, keep the coverage in a
+    // un-premultiply so mostly transparent panels keep their hue; coverage in a
     fragColor = vec4(sum.rgb / max(sum.a, 0.001), sum.a);
 }
 )";
@@ -199,8 +197,7 @@ void main() {
 }
 )";
 
-    // sun, sky and panel light, shared by the built-in world and loaded maps
-    // (needs SKY_COMMON_GLSL)
+    // sun, sky and panel light for the built-in world and loaded maps (needs SKY_COMMON_GLSL)
     constexpr const char* LIGHTING_GLSL = R"(
 uniform highp sampler2DShadow uShadow;
 uniform sampler2D uLightTex;
@@ -211,7 +208,7 @@ uniform vec4 uLightB[16]; // right xyz, half width
 uniform vec4 uLightC[16]; // normal xyz, half height
 uniform float uShadowBias; // in shadow map depth
 uniform float uFog;        // density per meter
-uniform float uExposure;   // eyes adjusting to dark places (loaded maps)
+uniform float uExposure;   // eye adaptation (loaded maps)
 
 const vec3 SUN_COLOR = vec3(1.0, 0.9, 0.74) * 3.2;
 
@@ -240,7 +237,7 @@ vec3 panelLights(vec3 P, vec3 N) {
         vec3 d = P - c;
         if (dot(d, n) < -0.01)
             continue; // behind the panel
-        // representative point: closest point on the panel, pulled a bit towards the center
+        // representative point: the closest on the panel, pulled toward the center
         vec3 q = c + r * clamp(dot(d, r), -hw, hw) + u * clamp(dot(d, u), -hh, hh);
         q = mix(q, c, 0.25);
         vec3 L = q - P;
@@ -255,7 +252,7 @@ vec3 panelLights(vec3 P, vec3 N) {
     return sum;
 }
 
-// the sky's light and the ground's, on a surface facing N
+// sky and ground ambient on a surface facing N
 vec3 ambientLight(vec3 N) {
     vec3 skyAmb = srgbToLinear(vec3(0.55, 0.66, 0.85)) * 0.75;
     vec3 gndAmb = srgbToLinear(vec3(0.70, 0.56, 0.40)) * 0.45;
@@ -302,7 +299,7 @@ in float vAO;
 in vec4 vSun;
 out vec4 fragColor;
 
-// returns albedo (sRGB) and writes a roughness-ish specular weight
+// returns albedo (sRGB); writes a specular weight and a cavity factor
 vec3 material(int m, vec2 uv, vec3 p, vec3 n, out float spec, out float cavity) {
     spec = 0.0;
     cavity = 1.0;
@@ -385,7 +382,7 @@ layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aUV;
 layout(location = 3) in vec2 aUV1;
 layout(location = 4) in vec4 aColor;
-layout(location = 5) in vec4 aAO; // w: the second layer's weight
+layout(location = 5) in vec4 aAO; // w: layer 2 weight
 layout(location = 6) in vec4 aTangent;
 layout(location = 7) in vec3 aLight;
 layout(location = 8) in uvec4 aLighting; // x: eMapLight
@@ -403,7 +400,7 @@ out vec3 vAO;
 out float vBlend;
 out vec4 vSun;
 out vec4 vTangent;
-centroid out vec3 vLight; // (as CS2 has it: a pixel on an edge doesn't read the lightmap past its triangle's corner)
+centroid out vec3 vLight; // as in CS2: no lightmap reads past the triangle
 out vec2 vLightHash;
 flat out int vLightMode;
 void main() {
@@ -416,14 +413,14 @@ void main() {
     vBlend = aAO.w;
     vTangent = aTangent;
     vLight = aLight;
-    // CS2's hash of the lightmap uv's bits: the same where the corners share their u (or v)
+    // CS2's lightmap uv hash: equal where the corners share u (or v)
     uvec2 h = floatBitsToUint(aLight.xy);
     h ^= h << 13u;
     h ^= h >> 17u;
     h ^= h << 5u;
     vLightHash = (uintBitsToFloat(0x3f800000u | (h >> 9u)) - 1.0) * 65535.0;
     vLightMode = int(aLighting.x);
-    // push the shadow lookup off the surface, on the side the sun lights
+    // shadow lookup offset to the sun-lit side
     vec3 n = dot(aNormal, uSunDir) < 0.0 ? -aNormal : aNormal;
     vSun = uSunViewProj * vec4(aPos + n * uNormalOffset, 1.0);
     gl_Position = uViewProj * vec4(aPos, 1.0);
@@ -441,71 +438,71 @@ in vec4 vColor;
 in vec3 vAO;
 in float vBlend;
 in vec4 vSun;
-in vec4 vTangent;       // xyz and the bitangent's sign; 0: none
-centroid in vec3 vLight; // the lightmap uv, or the probe atlas texel (vLightMode)
-in vec2 vLightHash;     // a hash of the lightmap uv (the same across a triangle whose corners share their u or v)
-flat in int vLightMode; // eMapLight: 0 hypr3d's own, 1 lightmap, 2 light probes, 3 flat
+in vec4 vTangent;       // xyz, w = bitangent sign; 0 = none
+centroid in vec3 vLight; // lightmap uv or probe atlas texel (vLightMode)
+in vec2 vLightHash;     // lightmap uv hash (see MAP_VS)
+flat in int vLightMode; // eMapLight: 0 own, 1 lightmap, 2 probes, 3 flat
 // the material (texture units in setMaterial())
 uniform sampler2D uBaseTex;        // sRGB
 uniform sampler2D uEmissiveTex;    // sRGB
-uniform sampler2D uOccTex;         // r: occlusion; g roughness and b metalness when uOrm
+uniform sampler2D uOccTex;         // r occlusion; g roughness, b metalness when uOrm
 uniform sampler2D uLayerTex;       // sRGB
-uniform sampler2D uLayerMaskTex;   // g (or a): where the layers meet, r: how soft the edge is
+uniform sampler2D uLayerMaskTex;   // g (or a): layer boundary, r: edge softness
 uniform sampler2D uNormalTex;
-uniform sampler2D uLayerNormalTex; // the second layer's normal, roughness in alpha
+uniform sampler2D uLayerNormalTex; // layer 2 normal, roughness in alpha
 uniform sampler2D uDetailTex;      // data (mod2x's middle grey is 0.5)
 uniform sampler2D uDetailMaskTex;
 uniform vec4 uBaseColor;
 uniform vec4 uBaseXf;           // KHR_texture_transform, mat2 columns
 uniform vec2 uBaseOffset;
-uniform int uLayer;             // 0 none, 1 blended by vBlend, 2 by vBlend through the mask
+uniform int uLayer;             // 0 none, 1 by vBlend, 2 by vBlend through the mask
 uniform vec4 uLayerColor;
 uniform vec4 uLayerXf;
 uniform vec2 uLayerOffset;
 uniform float uLayerSoftness;   // < 0: the mask's red channel
 uniform int uLayerMaskChannel;  // 1: g, 3: a
 uniform int uLayerNormal;
-uniform vec4 uLayerMaskXf;       // the mask's uvs (CS2's blend modulation can have its own transform)
+uniform vec4 uLayerMaskXf;       // mask uvs (CS2's blend modulation transform)
 uniform vec2 uLayerMaskOffset;
-uniform vec3 uLayer1Tint;        // the first layer's own tint (the base color tints both)
-uniform vec3 uBorderTint;        // CS2's border tint: the first layer tinted in a band along the edge between the layers
-uniform vec3 uBorder;            // strength (0: none), softness, offset of the painted weight
+uniform vec3 uLayer1Tint;        // layer 1 tint (the base color tints both)
+uniform vec3 uBorderTint;        // CS2 border tint: layer 1 along the layer edge
+uniform vec3 uBorder;            // strength (0 = none), softness, weight offset
 uniform vec3 uEmissive;
 uniform int uEmissiveUV;
 uniform vec4 uEmissiveXf;
 uniform vec2 uEmissiveOffset;
-uniform float uSelfIllumAlbedo; // the emissive color takes this much of the base color
-uniform int uGlass;             // blended, but its reflections don't fade with its opacity
-uniform int uVertexColor;       // vColor is: 0 linear, 1 sRGB, 2 not a color, 3 a tint as strong as its alpha, 4 part of the tint
+uniform float uSelfIllumAlbedo; // share of the base color in the emissive
+uniform int uGlass;             // blended; reflections ignore opacity
+uniform int uVertexColor;       // vColor: 0 linear, 1 sRGB, 2 unused, 3 tint by its alpha, 4 in the tint
 uniform int uOccUV;
 uniform float uOccStrength;
 uniform int uOrm;
 uniform vec2 uRoughMetal;       // factors
-uniform int uNormal;            // has a normal map: 1 rgb, 2 just x and y (BC5)
+uniform int uNormal;            // normal map: 1 rgb, 2 xy only (BC5)
 uniform float uNormalScale;
-uniform float uNormalY;         // -1: green points down the bitangent (Source)
-uniform vec2 uSpecular;         // from the sun, from the surroundings: 0 or 1
+uniform float uNormalY;         // -1: green down the bitangent (Source)
+uniform vec2 uSpecular;         // sun, environment: 0 or 1
 uniform int uDetail;            // 0 none, 1 mod2x, 2 overlay
 uniform vec4 uDetailXf;
 uniform vec2 uDetailOffset;
 uniform vec3 uDetailTint;
-uniform vec2 uDetailBlend;      // how much, how much at least where the mask says none
-uniform int uDetailMask;        // 0 none, 1 the base color's uvs, 2 uv1
-uniform int uDetailUV;          // the detail texture on 0 the vertex uv, 1 uv1
+uniform vec2 uDetailBlend;      // amount, minimum where the mask is 0
+uniform int uDetailMask;        // 0 none, 1 base color uvs, 2 uv1
+uniform int uDetailUV;          // 0 vertex uv, 1 uv1
 uniform int uAlphaMode; // 0 opaque, 1 mask, 2 blend
 uniform int uBlendMode; // 0 by alpha, 1 mod2x, 2 added
-uniform int uMod2xLinear; // mod2x's color is linear (csgo_unlitgeneric's), not as it's stored (static overlays')
-uniform int uNoFog;     // the game's fog leaves it alone
-uniform vec2 uScroll;   // the base color's uvs move by this much a second
+uniform int uMod2xLinear; // linear mod2x color (csgo_unlitgeneric's)
+uniform int uNoFog;     // no game fog
+uniform vec2 uScroll;   // base color uv scroll per second
 uniform int uDoubleSided;
-uniform int uOverSky;   // added light in the 3D skybox (its clouds, the sun's glow): the sky is what's behind it
-// Source 2's tint mask and decal texture, on the layers' units (materials that have them have no layers)
-uniform int uTintMask;  // 0 none, else the base color's rgb (the tint) only as much as its r says: 1 on the base color's uvs, 2 uv1
-uniform int uDecal;     // 0 none, 1 mixed in by its alpha, 2 multiplied, 3 a second color texture (CS2's unlit F_TWOTEXTURE)
-uniform int uDecalUV;   // 0 the base color's uvs, 1 uv1
-uniform vec4 uDecalXf;  // the second color texture's uvs, from the vertex uv: mat2 columns
+uniform int uOverSky;   // additive 3D skybox effect over the sky
+// Source 2 tint mask and decal texture, on the layer units (unused by layered materials)
+uniform int uTintMask;  // tint by mask r; 0 none, 1 base color uvs, 2 uv1
+uniform int uDecal;     // 0 none, 1 alpha mix, 2 multiply, 3 F_TWOTEXTURE
+uniform int uDecalUV;   // 0 base color uvs, 1 uv1
+uniform vec4 uDecalXf;  // F_TWOTEXTURE uvs from the vertex uv, mat2 columns
 uniform vec2 uDecalOffset;
-// CS2's csgo_effects (clouds, dust, glows): its masks are in uLayerTex, uLayerMaskTex and uDetailMaskTex
+// csgo_effects (clouds, dust, glows); masks in uLayerTex, uLayerMaskTex, uDetailMaskTex
 uniform int uEffect;
 uniform int uEffectMasks;
 uniform vec4 uEffectMask[3];    // uv scale, scroll speed
@@ -514,39 +511,37 @@ uniform vec4 uEffectFade;       // distance, falloff, min, max
 uniform vec4 uEffectFresnel;    // exponent, falloff, min, max
 uniform float uTime;
 uniform float uCutoff;
-// the avatar's (unity2hypr3d's material extras, MToon's outlines)
-uniform int uOutline;       // 0: the surface, else its outline
+// avatars (unity2hypr3d material extras, MToon outlines)
+uniform int uOutline;       // 0 surface, else outline
 uniform vec4 uOutlineColor; // linear
-uniform vec3 uOutlineMix;   // how much of the base color it takes, how much it's multiplied by it, how much it's shaded
-uniform vec2 uOutlineTex;   // its color's texture (on the detail texture's unit): the color times it, and mixed towards it
+uniform vec3 uOutlineMix;   // x: base color share, y: times base, z: shaded
+uniform vec2 uOutlineTex;   // detail-unit texture: x times it, y mix toward
 uniform vec4 uOutlineTexXf; // its uv: mat2 columns
 uniform vec2 uOutlineTexOffset;
-uniform int uBack;          // back faces: 0 as the front, 1 uBackColor, 2 uBackColor times uLayerTex (avatars have no layers)
+uniform int uBack;          // back faces: 0 as front, 1 uBackColor, 2 x uLayerTex
 uniform vec4 uBackColor;
 uniform vec4 uBackXf;
 uniform vec2 uBackOffset;
-uniform vec3 uLightClamp;   // UnlitWF's: the light's brightness kept between x and 1, 1 from y up (y 0: not), its chroma z
-// toon shading (MToon, lilToon, UnlitWF, Poiyomi): the sun lights it from its shade color to its lit one as N·L goes
-// from lo to hi; and a matcap. Their textures go where the layer mask and the detail mask would (an avatar has
-// neither, and the samplers are all taken)
-uniform int uToon;          // 0 none, 1 toon, 2 with the shade's texture (uLayerMaskTex)
-uniform vec4 uToonShade;    // the shade's color (linear), and how much it's times the base color
-uniform vec3 uToonStep;     // N·L where it's all shade, where it's all lit, how much of the shade shows
-uniform int uMatcap;        // 0 none, else eMatcapMode + 1: added, multiplied, mixed in, lighter and darker (uDetailMaskTex)
-uniform vec4 uMatcapColor;  // its color (the median's: how much lighter, 0 darker), how much of it
-uniform float uMatcapLit;   // how much it's lit as the surface is (0: as if in full light, wherever it is)
+uniform vec3 uLightClamp;   // UnlitWF anti-glare, see clampLight()
+// toon shading (MToon, lilToon, UnlitWF, Poiyomi) and matcap; textures on the layer and detail mask units
+uniform int uToon;          // 0 none, 1 toon, 2 + shade texture (uLayerMaskTex)
+uniform vec4 uToonShade;    // shade color (linear); a: times base color
+uniform vec3 uToonStep;     // N·L: all shade, all lit; shade amount
+uniform int uMatcap;        // 0 none, else eMatcapMode + 1 (uDetailMaskTex)
+uniform vec4 uMatcapColor;  // color (median mode: 1 lighter, 0 darker), amount
+uniform float uMatcapLit;   // 0 = full light, 1 = lit like the surface
 uniform vec3 uViewUp;       // the camera's up
-uniform mat4 uSunViewProj;  // (as the vertex shader has them)
+uniform mat4 uSunViewProj;  // as in the vertex shader
 uniform float uNormalOffset;
-uniform float uAgain;       // > 0: drawn again where the stencil hid it, this much as opaque (MaskOut_Blend)
+uniform float uAgain;       // > 0: stencil-hidden redraw opacity (MaskOut_Blend)
 uniform int uMode;      // 0 lit, 1 unlit, 2 sky
 // the game's own lighting (HYPR3D_lighting)
 uniform int uBaked;
 uniform sampler2D uIrradianceTex;  // RGB9E5
-uniform sampler2D uDirectionalTex; // xy: main direction in tangent space, z: directionality, a: specular occlusion
+uniform sampler2D uDirectionalTex; // xy direction (tangent space), z directionality, a specular AO
 uniform sampler2D uBakedShadowTex; // r: the sun's baked shadow
-uniform int uBakedShadow;          // the lighting set has one (a sun without a baked shadow channel: only ours)
-uniform highp sampler3D uProbeTex; // six blocks: light along +x +y +z -x -y -z (Source's axes); a: the sun's shadow
+uniform int uBakedShadow;          // has a baked sun shadow (else ours only)
+uniform highp sampler3D uProbeTex; // 6 blocks: +x +y +z -x -y -z (Source axes); a: sun shadow
 uniform vec3 uProbeDims;           // texels of a block
 uniform vec3 uAmbient;             // for what has neither
 uniform vec3 uSunColor;
@@ -557,11 +552,11 @@ uniform vec3 uSkyAverage;          // light from all of the sky
 uniform float uSkyLod;             // its coarsest mip for the fog
 uniform vec4 uFogA;                // start, 1 / (end - start), exponent, max opacity (0: none)
 uniform vec4 uFogB;                // height: offset, scale, exponent; lod bias
-uniform vec2 uFogSpace;            // distance scale, height offset: the backdrop's own units (for its effects' fading)
+uniform vec2 uFogSpace;            // 3D skybox units: distance scale, height offset
 uniform vec4 uCurveA;              // tone curve: shoulder, linear strength, linear angle, toe strength
 uniform vec4 uCurveB;              // toe numerator, toe denominator, white point, 1 / curve(white point)
 #ifdef H3D_DUAL
-// blending's second source (EXT_blend_func_extended): how much of what's behind stays, channel by channel
+// dual-source blending (EXT_blend_func_extended): fragKeep = background kept per channel
 layout(location = 0, index = 0) out vec4 fragColor;
 layout(location = 0, index = 1) out vec4 fragKeep;
 #else
@@ -577,7 +572,7 @@ vec3 srgbDecode(vec3 c) {
     return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
 }
 
-// the game's tone curve (an Uncharted 2 style one) after its exposure: CS2 scales the scene by 2.8 first
+// CS2's tone curve (Uncharted 2 style); CS2 scales the scene by 2.8 first
 vec3 gameCurve(vec3 c) {
     c = min(c * 2.8, vec3(uCurveB.z));
     vec3 num = c * (uCurveA.x * c + uCurveA.y * uCurveA.z) + uCurveB.x * uCurveA.w;
@@ -585,15 +580,14 @@ vec3 gameCurve(vec3 c) {
     return clamp((num / den - uCurveB.x / uCurveB.y) * uCurveB.w, 0.0, 1.0);
 }
 
-// the sky panorama (the dome's lat-long mapping) in a direction
+// sky panorama (the dome's lat-long mapping) in direction d
 vec3 skyLight(vec3 d, float lod) {
     float u = atan(d.z, d.x) * 0.15915494;
     float v = acos(clamp(d.y, -1.0, 1.0)) * 0.31830989;
     return textureLod(uSkyTex, vec2(fract(u), v), lod).rgb * uSkyColor;
 }
 
-// CS2's cubemap fog: the blurred sky, more of it farther away and lower down. The 3D skybox is fogged where it
-// appears, at its full size (CS2 converts the fog's distances into the skybox's units)
+// CS2's cubemap fog: blurred sky, more with distance and lower down; the 3D skybox is fogged at full size
 vec3 gameFog(vec3 c, vec3 P, out float opacity) {
     opacity = 0.0;
     if (uFogA.w <= 0.0 || uNoFog != 0)
@@ -607,26 +601,23 @@ vec3 gameFog(vec3 c, vec3 P, out float opacity) {
     return mix(c, fog, opacity);
 }
 
-// light added onto the sky behind it, as CS2 adds it (to the linear scene, before the tone curve), less what the sky
-// shows alone: exact where the sky is what's behind (added after the curve, faint clouds came out too bright over the
-// sky, and a bright glow's faint rim hardly showed)
+// additive light over the sky as CS2 adds it: in the linear scene before the tone curve, minus the sky alone
 vec3 addedOverSky(vec3 add) {
     vec3 sky = skyLight(normalize(vPos - uEye), 0.0);
     return srgbEncode(gameCurve((sky + add) * uExposure)) - srgbEncode(gameCurve(sky * uExposure));
 }
 
-// the self-illumination mask's uvs: it scrolls with the base color on the same uv set, as CS2's does
+// self-illumination mask uvs, scrolled with the base color on the same uv set (as in CS2)
 vec2 emissiveUV() {
     return mat2(uEmissiveXf.xy, uEmissiveXf.zw) * (uEmissiveUV == 0 ? vUV : vUV1) + uEmissiveOffset +
         (uEmissiveUV == 0 ? fract(uScroll * uTime) : vec2(0.0));
 }
 
-// the sun's baked shadow as CS2 filters it at its high shader quality: bilinear up to its MinSpecLightmapSize (4096,
-// csgo_core's gameinfo.gi: the 3D skyboxes' 512s), above that a cubic B-spline in four bilinear taps, whose taps CS2's
-// shaders put a texel lower than a centred one ((i + h) - 0.5, where Valve's own bicubic has + 0.5)
+// baked sun shadow as CS2 filters it: bilinear up to MinSpecLightmapSize (4096), else a cubic B-spline in four bilinear
+// taps, a texel low like CS2's ((i + h) - 0.5)
 float bakedShadowAt(vec2 uv) {
     vec2 size = vec2(textureSize(uBakedShadowTex, 0));
-    // (and bilinear on a triangle whose corners share their lightmap u or v: Valve packs those into a texel's row)
+    // also bilinear where corners share a lightmap u or v (Valve packs those into a texel row)
     if (size.x <= 4096.0 || min(fwidth(vLightHash.x), fwidth(vLightHash.y)) <= 0.1)
         return textureLod(uBakedShadowTex, uv, 0.0).r;
     vec2 p = uv * size - 1.5, i = floor(p), f = p - i;
@@ -638,8 +629,7 @@ float bakedShadowAt(vec2 uv) {
         s1.y * (s0.x * textureLod(uBakedShadowTex, vec2(a.x, b.y), 0.0).r + s1.x * textureLod(uBakedShadowTex, b, 0.0).r);
 }
 
-// Valve's directional lightmap (ComputeLightmapShading): the irradiance leans towards where most of
-// it comes from, as the normal map sees it (n in tangent space)
+// Valve's directional lightmap (ComputeLightmapShading) against n in tangent space
 vec3 lightmapShading(vec3 irr, vec4 dir, vec3 n, vec3 Ng) {
     vec2 xy = dir.xy * 2.0 - 1.0;
     xy *= 0.99619 / max(0.99619, length(xy)); // at least 5 degrees up
@@ -678,8 +668,7 @@ float luma(vec3 c) {
     return dot(c, vec3(0.2125, 0.7154, 0.0721));
 }
 
-// UnlitWF's anti-glare (calcLightColorFrag): the light's brightest channel p kept between uLightClamp.x and 1,
-// reaching 1 at uLightClamp.y, its color uLightClamp.z as saturated; in the units the tone curve takes
+// UnlitWF anti-glare (calcLightColorFrag): brightest channel kept in uLightClamp.x..1, 1 from .y up, saturation .z
 vec3 clampLight(vec3 L) {
     float p = max(max(L.r, L.g), L.b);
     if (p <= 0.0)
@@ -687,15 +676,12 @@ vec3 clampLight(vec3 L) {
     return mix(vec3(p), L, uLightClamp.z) * mix(clamp(p / uLightClamp.y, 0.0, 1.0), 1.0, uLightClamp.x) / p;
 }
 
-// the sun's shadow for toon shading: looked up a little towards the sun, past where a surface's own silhouette in the
-// shadow map would shadow it (grazing, near where N·L is 0, its depth changes fast across a texel): its step is a
-// clean line, as N·L draws it, not the shadow map's staircase. Shadows cast from farther away show as they are
+// toon sun shadow sampled toward the sun, past the surface's own shadow map silhouette: a clean N·L terminator
 float toonShadow() {
     return sunShadow(uSunViewProj * vec4(vPos + uSunDir * max(0.1, uNormalOffset * 3.0), 1.0));
 }
 
-// toon shading: the albedo the sun lights, the shade's where N·L is under uToonStep.x, the lit one over .y; a cast
-// shadow takes it to the shade (as MToon has it)
+// toon albedo: shade below uToonStep.x of N·L, lit above .y; cast shadows shade it (as MToon)
 vec3 toonAlbedo(vec3 albedo, vec2 uv, vec3 N, float sunVis) {
     vec3 dark = uToonShade.rgb * mix(vec3(1.0), albedo, uToonShade.a);
     if (uToon == 2)
@@ -705,13 +691,12 @@ vec3 toonAlbedo(vec3 albedo, vec2 uv, vec3 N, float sunVis) {
     return mix(dark, albedo, clamp((x - uToonStep.x) / max(uToonStep.y - uToonStep.x, 1e-4), 0.0, 1.0));
 }
 
-// the matcap: a texture looked up by the normal as the eye sees it (turned with the eye, not rolled with it, as MToon
-// has it), over c; light: the light here, full: in full light
+// matcap over c by the normal as seen (turned with the eye, not rolled, as MToon); light: here, full: in full light
 vec3 matcap(vec3 c, vec3 N, vec3 light, vec3 full) {
     vec3 V = normalize(uEye - vPos);
     vec3 up = uViewUp - V * dot(V, uViewUp);
     up = dot(up, up) > 1e-8 ? normalize(up) : vec3(0.0, 1.0, 0.0);
-    vec2 uv = vec2(dot(cross(up, V), N), dot(up, N)) * 0.495 + 0.5; // (its rim: not the far edge's texels)
+    vec2 uv = vec2(dot(cross(up, V), N), dot(up, N)) * 0.495 + 0.5; // avoid the texture's edge texels
     vec3 t = texture(uDetailMaskTex, uv).rgb, m = t * uMatcapColor.rgb;
     vec3 lit = mix(full, light, uMatcapLit);
     float k = uMatcapColor.a;
@@ -721,7 +706,7 @@ vec3 matcap(vec3 c, vec3 N, vec3 light, vec3 full) {
         return c * mix(vec3(1.0), m, k);
     if (uMatcap == 3)
         return mix(c, m * lit, k);
-    // UnlitWF's median: lighter where it's over mid grey, darker under, the color saying how much of which
+    // UnlitWF's median mode: above mid grey lightens, below darkens, weighted by the color
     vec3 d = t - 0.2140;
     return c + mix(min(d, 0.0), max(d, 0.0), uMatcapColor.rgb) * lit * k;
 }
@@ -729,20 +714,19 @@ vec3 matcap(vec3 c, vec3 N, vec3 light, vec3 full) {
 void shade() {
     vec2 uv = mat2(uBaseXf.xy, uBaseXf.zw) * vUV + uBaseOffset + fract(uScroll * uTime);
     vec4 color = texture(uBaseTex, uv);
-    vec4 tint = uVertexColor == 4 ? uBaseColor * vColor : uBaseColor; // (csgo_complex's vertex paint is in its tint)
+    vec4 tint = uVertexColor == 4 ? uBaseColor * vColor : uBaseColor; // csgo_complex vertex paint is in the tint
     vec4 base = color * tint;
-    if (uTintMask != 0) // the tint only where the mask says
+    if (uTintMask != 0) // tint only where masked
         base.rgb = color.rgb * mix(vec3(1.0), tint.rgb, texture(uLayerMaskTex, uTintMask == 1 ? uv : vUV1).r);
     if (uDecal == 3)
         base *= texture(uLayerTex, mat2(uDecalXf.xy, uDecalXf.zw) * vUV + uDecalOffset);
-    if (uBack != 0 && !gl_FrontFacing) // UnlitWF's back faces: their own color (and texture) in place of the base's
+    if (uBack != 0 && !gl_FrontFacing) // UnlitWF back faces: own color (and texture)
         base.rgb = uBackColor.rgb * (uBack == 2 ? texture(uLayerTex, mat2(uBackXf.xy, uBackXf.zw) * vUV + uBackOffset).rgb : vec3(1.0));
     if (uEffect != 0) {
-        // csgo_effects: the color, through its scrolling masks, less of it up close and edge on
+        // csgo_effects: color through scrolling masks, faded up close and edge-on
         vec4 col = base * vColor;
         float o = col.a * uEffectA.y;
-        // (the masks at (uv + scroll t) scale + pan t, as CS2 has them: the color's scroll wraps every tile, which
-        // wouldn't be a whole one of theirs)
+        // masks at (uv + scroll t) scale + pan t as in CS2, from the unwrapped uv
         vec2 uv0 = uv - fract(uScroll * uTime);
         if (uEffectMasks > 0)
             o *= texture(uLayerTex, uv0 * uEffectMask[0].xy + fract((uScroll * uEffectMask[0].xy + uEffectMask[0].zw) * uTime)).r;
@@ -753,8 +737,8 @@ void shade() {
         vec3 ray = vPos - uEye;
         float facing = dot(-normalize(ray), normalize(vNormal));
         if (uDoubleSided == 0 && facing < 0.0)
-            discard; // CS2 draws a one-sided card (its dust sheets) from the front only
-        float fres = clamp(abs(facing), 0.0001, 1.0); // (a two-sided one's back faces turn their normal round)
+            discard; // CS2 draws one-sided cards front only
+        float fres = clamp(abs(facing), 0.0001, 1.0); // two-sided: back faces flip the normal
         fres = mix(uEffectFresnel.z, uEffectFresnel.w, clamp(pow(fres, uEffectFresnel.x) * uEffectFresnel.y, 0.0, 1.0));
         float fade = clamp(length(ray) * uFogSpace.x / max(uEffectFade.x, 0.0001), 0.0, 1.0);
         fade = pow(max(mix(uEffectFade.z, uEffectFade.w, fade), 1e-9), uEffectFade.y);
@@ -764,7 +748,7 @@ void shade() {
         if (uEffectA.z > 0.5) {
             if (uBaked != 0 && uBlendMode == 2) {
                 gameFog(c, vPos, fogged);
-                o *= 1.0 - fogged; // added light fades out in the fog, as CS2 fades it
+                o *= 1.0 - fogged; // additive light fades in fog, as in CS2
             } else
                 c = uBaked != 0 ? gameFog(c, vPos, fogged) : applyFog(c, vPos);
         }
@@ -791,12 +775,12 @@ void shade() {
             float soft = max(uLayerSoftness < 0.0 ? mask.r : uLayerSoftness, 0.002);
             t = smoothstep(max(edge - soft, 0.0), min(edge + soft, 1.0), t);
             if (uBorder.x > 0.0) {
-                // CS2's border tint: the first layer tinted in a band along the same edge, of the painted weight as it is
+                // CS2's border tint: layer 1 tinted in a band along the edge of the raw painted weight
                 float b = smoothstep(max(edge - uBorder.y, 0.0), min(edge + uBorder.y, 1.0), clamp(vBlend + uBorder.z, 0.0, 1.0));
                 first *= mix(vec3(1.0), uBorderTint, (1.0 - abs(b * 2.0 - 1.0)) * uBorder.x);
             }
         }
-        // the mesh's tint (the base color) on both layers, as CS2 tints the blend
+        // the base color tints both layers, as CS2 tints the blend
         base = mix(color * vec4(first, 1.0), texture(uLayerTex, luv) * uLayerColor, t) * uBaseColor;
         if (uLayerNormal != 0) {
             // Source 2 blends the textures, not the normals
@@ -831,7 +815,7 @@ void shade() {
     else if (uVertexColor == 3)
         base.rgb *= mix(vec3(1.0), vColor.rgb, vColor.a);
     if (uOutline != 0) {
-        // none where the texture is see-through (in place of UnlitWF's canceller), then the line's color
+        // discard see-through texels (UnlitWF's canceller), then the line color
         if (base.a < (uAlphaMode == 1 ? uCutoff : uAlphaMode == 2 ? 0.5 : 0.0))
             discard;
         vec3 line = uOutlineColor.rgb;
@@ -848,7 +832,7 @@ void shade() {
         a *= uAgain;
 
     if (uBaked != 0 && uMode != 0) {
-        // unlit and the sky: straight through the game's fog and tone curve
+        // unlit and sky: only the game's fog and tone curve
         vec3 c = uMode == 2 ? base.rgb * uSkyColor : base.rgb;
         float fogged = 0.0;
         if (uMode == 1) {
@@ -856,9 +840,8 @@ void shade() {
             c = uBlendMode == 2 ? c * (1.0 - fogged) : inFog; // added light fades out in the fog
         }
         if (uBlendMode == 1) {
-            // mod2x: the scene times twice the color (in linear light, which is a power of 1/2.2 in the display's
-            // terms): a static overlay's color as it's stored, going to 1 in the fog; csgo_unlitgeneric's linear, and
-            // fogged like a color
+            // mod2x: scene times twice the color in linear light; static overlays' stored color fades to 1 in fog,
+            // csgo_unlitgeneric's is linear and fogged
             vec3 f = uMod2xLinear != 0 ? 2.0 * gameFog(mix(vec3(0.5), base.rgb, base.a), vPos, fogged)
                                        : mix(2.0 * mix(vec3(0.5), srgbEncode(base.rgb), base.a), vec3(1.0), fogged);
             fragColor = vec4(0.5 * pow(f, vec3(1.0 / 2.2)), 1.0);
@@ -885,8 +868,8 @@ void shade() {
         vec3 Ng = cross(dFdx(vPos), dFdy(vPos));
         if (dot(Ng, uEye - vPos) < 0.0)
             Ng = -Ng;
-        vec3 N = uOutline != 0 || dot(Nv, Ng) >= 0.0 ? Nv : -Nv; // (an outline: the surface's under it)
-        // the normal map, in tangent space the way Source has it
+        vec3 N = uOutline != 0 || dot(Nv, Ng) >= 0.0 ? Nv : -Nv; // outline: keep the surface's normal
+        // normal map in Source's tangent space convention
         vec3 nTs = vec3(0.0, 0.0, 1.0);
         if (uNormal != 0 && dot(vTangent.xyz, vTangent.xyz) > 0.01) {
             nTs = nrm.rgb * 2.0 - 1.0;
@@ -901,8 +884,7 @@ void shade() {
         }
         float occ = 1.0 + uOccStrength * (orm.r - 1.0);
         if (uBaked != 0) {
-            // the game's lighting: what its lightmap or probes say came from everywhere but the sun,
-            // then the sun through its baked shadow and ours
+            // game lighting: lightmap or probes for all but the sun, then the sun through baked and real-time shadows
             vec3 V = normalize(uEye - vPos);
             vec3 albedo = base.rgb;
             vec3 diffuse = albedo * (1.0 - metal);
@@ -926,8 +908,7 @@ void shade() {
             }
             float ndl = max(dot(N, uSunDir), 0.0);
             float sun = ndl > 0.0 && baked > 0.001 ? baked * sunShadow(vSun) : 0.0;
-            // rough enough not to sparkle where the surface curves fast (Valve's specular antialiasing: how much the
-            // vertex normal turns from one pixel to the next)
+            // Valve's specular antialiasing: roughness from the per-pixel normal change
             float geoRough = pow(clamp(max(dot(dFdx(Nv), dFdx(Nv)), dot(dFdy(Nv), dFdy(Nv))), 0.0, 1.0), 0.333);
             float r = max(rough, geoRough);
             float specAO = min(specOcc, occ);
@@ -935,7 +916,7 @@ void shade() {
             if (uSpecular.x > 0.5 && sun > 0.0)
                 glint = sunSpecular(N, V, uSunDir, r, F0) * uSunColor * sun * (1.0 + F0 * 0.125 * pow(2.0 * r, 4.0) * max(dot(N, V), 0.0));
             if (uSpecular.y > 0.5 && uHasSky != 0) {
-                // the surroundings: the sky, dimmed as much as the diffuse light is
+                // environment: the sky, dimmed like the diffuse light
                 vec3 R = reflect(-V, N);
                 float dim = clamp(luma(indirect) / max(luma(uSkyAverage), 1e-3), 0.0, 1.0);
                 spec += skyLight(R, r * uSkyLod) * envBRDF(F0, r, max(dot(N, V), 0.0)) * dim;
@@ -943,7 +924,7 @@ void shade() {
             bool toon = uToon != 0 && uOutline == 0, cap = uMatcap != 0 && uOutline == 0;
             vec3 here = vec3(0.0), full = vec3(0.0); // the matcap's light: here, and in full light
             if (toon || cap) {
-                // the sun as far as it gets here (the baked shadow), and its cast shadow, however the surface faces
+                // sun visibility: baked and cast shadow, regardless of facing
                 float sunVis = baked > 0.001 ? (toon ? toonShadow() : sunShadow(vSun)) : 0.0;
                 vec3 around = indirect + panelLights(vPos, N);
                 vec3 alb = toon ? toonAlbedo(diffuse, uv, N, sunVis) : diffuse;
@@ -973,13 +954,8 @@ void shade() {
                 mix(vec3(1.0), albedo, uSelfIllumAlbedo);
             float fogged;
             if (uGlass != 0 && a < 1.0) {
-                // its own color by its opacity and what it reflects of the surroundings, over a background it hides
-                // by its opacity and by as much as it reflects (Fresnel): blended as one color at that cover, and
-                // encoded before it's scaled by it, as the frame is (encoded after, a pane came out two or three times
-                // too bright). The sun's glint then screens all that: it takes each channel g of the way to white, g
-                // being how far it takes the pane's own light there on the screen. So a glint on clear glass reaches
-                // white, not only the cover, and never darkens what's behind. With a second source what's behind is
-                // kept by 1 - g channel by channel; else by the least of them (a glint's edge a little brighter)
+                // glass: color by opacity plus reflections at cover = opacity + Fresnel, encoded before scaling by
+                // cover; the sun glint then screens each channel g toward white, keeping 1 - g of what's under it
                 float cover = clamp(a + (1.0 - a) * luma(envBRDF(F0, r, max(dot(N, V), 0.0))), a, 1.0);
                 vec3 own = c * a + spec * specAO;
                 vec3 pane = srgbEncode(gameCurve(gameFog(own / cover, vPos, fogged) * uExposure)) * cover;
@@ -1002,7 +978,7 @@ void shade() {
         bool toon = uToon != 0 && uOutline == 0, cap = uMatcap != 0 && uOutline == 0;
         vec3 here = vec3(0.0), full = vec3(0.0);
         if (toon || cap) {
-            // as above, with hypr3d's own light: the sun, the sky, the panels, the sun bounced
+            // as above with hypr3d's own light: sun, sky, panels, bounce
             float sunVis = toon ? toonShadow() : sunShadow(vSun), ndl = max(dot(N, uSunDir), 0.0);
             vec3 around = ambientLight(N) * local * mix(0.45, 1.0, vAO.y) + panelLights(vPos, N) * local + SUN_COLOR * (vAO.z * 0.8 * occ);
             vec3 alb = toon ? toonAlbedo(base.rgb, uv, N, sunVis) : base.rgb;
@@ -1019,7 +995,7 @@ void shade() {
                 uExposure;
         else {
             c = shade(base.rgb, vPos, N, vSun, local * mix(0.45, 1.0, vAO.y), local, 0.0);
-            // sunlight bounced off the surroundings (baked), off surfaces of about this albedo
+            // baked sun bounce, off surroundings of about this albedo
             c += base.rgb * SUN_COLOR * (vAO.z * 0.8 * occ);
         }
         if (cap)
@@ -1036,7 +1012,7 @@ void main() {
     fragKeep = vec4(-1.0);
     shade();
     if (fragKeep.a < 0.0)
-        fragKeep = vec4(1.0 - fragColor.a); // (as premultiplied alpha keeps it)
+        fragKeep = vec4(1.0 - fragColor.a); // premultiplied alpha
 }
 )";
 
@@ -1077,7 +1053,7 @@ layout(location = 3) in vec2 aUV1;
 layout(location = 4) in vec4 aColor;
 layout(location = 5) in uvec4 aJoints;
 layout(location = 6) in vec4 aWeights;
-layout(location = 7) in vec3 aMorphPos; // what the morphs move it by
+layout(location = 7) in vec3 aMorphPos; // morph offset
 layout(location = 8) in vec3 aMorphNormal;
 uniform highp sampler2D uJoints;
 uniform mat4 uModel;
@@ -1095,24 +1071,24 @@ mat4 skinMatrix() {
 }
 )";
 
-    // pairs with MAP_FS_BODY: it's lit like the map, with its sky and bounce from probes around the player
+    // pairs with MAP_FS_BODY: lit like the map, with probe sky and bounce near the player
     constexpr const char* AVATAR_VS_BODY = R"(
 uniform mat4 uViewProj;
 uniform mat4 uSunViewProj;
 uniform vec3 uSunDir;
 uniform float uNormalOffset;
-uniform float uSky;    // how much sky is around, 0..1
-uniform float uBounce; // sunlight bounced off the surroundings
-uniform int uLightMode;    // eMapLight: hypr3d's own (uSky, uBounce), the map's light probes, or its average light
-uniform mat4 uProbeMatrix; // world -> the probe atlas (texels)
-uniform vec3 uProbeMin, uProbeMax; // the volume's block of it, half a texel in
-// an outline (the mesh again, pushed out: an inverted hull): 0 none, 1 in metres, 2 in NDC units (as wide on screen)
+uniform float uSky;    // sky visibility, 0..1
+uniform float uBounce; // bounced sunlight
+uniform int uLightMode;    // eMapLight: own (uSky, uBounce), probes, or average
+uniform mat4 uProbeMatrix; // world -> probe atlas texels
+uniform vec3 uProbeMin, uProbeMax; // the volume's block, inset half a texel
+// inverted hull outline: 0 none, 1 width in meters, 2 in NDC (constant on screen)
 uniform int uOutline;
-uniform vec4 uOutlineA;    // width, shift towards the eye (m), how much thinner up close, up to how far (m)
-uniform vec4 uOutlineMask; // which of the mask's channels scales the width
+uniform vec4 uOutlineA;    // width, eye shift (m), distance scaling, its cap (m)
+uniform vec4 uOutlineMask; // mask channel weights for the width
 uniform float uOutlineInvert;
 uniform float uOutlineMaxW; // on screen: as wide up to this far, then thinner
-uniform float uAspect;      // the output's height over its width
+uniform float uAspect;      // output height / width
 uniform sampler2D uOutlineMaskTex;
 uniform vec3 uEye;
 uniform vec4 uBaseXf; // the mask has the base color's uvs
@@ -1157,7 +1133,7 @@ void main() {
     vSun = uSunViewProj * vec4(vPos + n * uNormalOffset, 1.0);
     gl_Position = uViewProj * p;
     if (uOutline == 2) {
-        // MToon's screen width: along the normal as the screen shows it, none where it faces the eye
+        // MToon screen width: along the projected normal, none facing the eye
         vec2 sn = (uViewProj * vec4(vNormal, 0.0)).xy;
         float facing = abs(dot(vNormal, normalize(uEye - p.xyz)));
         gl_Position.xy += sn / max(length(sn), 1e-6) * vec2(uAspect, 1.0) * w * min(gl_Position.w, uOutlineMaxW) * (1.0 - facing);
@@ -1201,7 +1177,7 @@ uniform vec3 uOrigin; // world position of the top left corner
 uniform vec3 uRight;  // full width vector
 uniform vec3 uDown;   // full height vector
 out vec2 vA;
-invariant gl_Position; // the depth pre-pass and the color pass must produce identical depths
+invariant gl_Position; // pre-pass and color pass depths must match
 void main() {
     vA = aPos;
     gl_Position = uViewProj * vec4(uOrigin + uRight * aPos.x + uDown * aPos.y, 1.0);
@@ -1314,7 +1290,7 @@ void main() {
     constexpr const char* HUD_VS = R"(#version 300 es
 layout(location = 0) in vec2 aPos;
 uniform vec2 uViewport; // pixels
-uniform vec4 uRect;     // x, y of the top left, w, h: output pixels, y down
+uniform vec4 uRect;     // top-left x, y, w, h: output pixels, y down
 out vec2 vUV;
 void main() {
     vUV = aPos;
@@ -1327,7 +1303,7 @@ void main() {
     constexpr const char* HUD_FS = R"(#version 300 es
 precision highp float;
 in vec2 vUV;
-uniform sampler2D uTex; // cairo's premultiplied ARGB, which is BGRA in memory
+uniform sampler2D uTex; // cairo premultiplied ARGB = BGRA in memory
 uniform vec2 uSize;     // its pixels
 uniform vec3 uCursor;   // x, y in its pixels, radius (0 = none)
 uniform float uAlpha;

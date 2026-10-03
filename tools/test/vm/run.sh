@@ -1,32 +1,20 @@
 #!/usr/bin/env bash
-# run.sh OUTDIR: hypr3d.so in a real Hyprland, in NixOS VMs (vm.nix) that QEMU runs with no window, driven through
-# the VM's own keyboard, mouse and tablet (QMP input events, so they go through libinput and Hyprland's input stack
-# to the plugin's hooks), with PipeWire and a virtual microphone singing test vowels. checks.py is the checklist.
+# run.sh: hypr3d.so in a real Hyprland in headless NixOS VMs (vm.nix), driven by QMP input events (so they go through
+# libinput and Hyprland's input stack to the plugin's hooks), with PipeWire and a virtual microphone singing test
+# vowels. checks.py is the checklist.
 #
 #   tools/test/vm/run.sh [--avatars DIR] [--booth DIR] [--only ITEMS] [--gpu virgl] OUTDIR
 #
-#   --avatars DIR  take BoothAccessories.glb (with its settings file) and BoothGimmicks.hands.vrma from DIR, as
-#                  regress.sh --keep leaves them in OUT/new; else they're converted here from the Booth-style
-#                  packages (synth/booth.py, then unity2hypr3d.py)
+#   --avatars DIR  take BoothAccessories.glb (with its settings) and BoothGimmicks.hands.vrma from DIR, as
+#                  regress.sh --keep leaves them in OUT/new; else convert them here (synth/booth.py, unity2hypr3d.py)
 #   --booth DIR    the Booth-style packages to convert (booth.py makes them there if missing)
-#   --only ITEMS   only these sections of checks.py, by item, separated by commas (and "0", which starts Hyprland
-#                  and loads the plugin): for working on one
-#   --gpu virgl    a GPU of this machine draws, through virglrenderer (QEMU's egl-headless display on the render
-#                  node H3D_RENDERNODE, /dev/dri/renderD129 by default: the Intel iGPU here), instead of Mesa's
-#                  llvmpipe in the VM
+#   --only ITEMS   only these checks.py sections, comma-separated ("0" starts Hyprland and loads the plugin)
+#   --gpu virgl    draw on this machine's GPU through virglrenderer (QEMU egl-headless on H3D_RENDERNODE, default
+#                  /dev/dri/renderD129) instead of llvmpipe in the VM
 #
-# Only synthetic things go into the VM: those two avatars, ToonTest.glb and TestRoom.glb (assets.py), LitCourt.glb
-# (litmap.py), the vowels (synth/vowels.py, and 30 dB down: synth/attenuate.py), a microphone's hiss and an emote's
-# song (two tones, HandsSong.ogg, made with ffmpeg), overlay.qml
-# (a shell's see-through overlay, for quickshell), launcher.qml (a launcher on a keybind, the same way) and topbar.qml
-# (a bar on the top layer), wheel.py, touchpad.py, gamepad.py, the test apps written here
-# (h3dgame.c, which vm.nix builds, tkapp.py, tkfs.py, page.html, electron/ and obsws.py), the live check script and
-# hypr3d.so; the apps the checks run are open-source ones from nixpkgs (vm.nix). OUTDIR gets results.txt (a line
-# per check), results.json, frames/ (grim's PNGs from inside the VMs), logs/ (Hyprland's logs, the journal,
-# pw-dump, the apps' own logs in logs/apps; logs/hidpi: the second VM's), live/ (the live check's results and
-# frames) and driver.log. OUTDIR/driver is the driver (a GC root: delete OUTDIR to let the VMs' closure go). The
-# Hyprland is the running one's, as for build.sh, or HYPR_BIN's. Exit status: 0 when every check passed (a "known"
-# failure is Hyprland's own bug).
+# Hyprland is the running one (as for build.sh) or HYPR_BIN's. OUTDIR gets results.txt, results.json, frames/, logs/,
+# live/ and driver.log; OUTDIR/driver is a GC root. Exit status 0 when every check passed ("known" failures,
+# Hyprland's own bugs, don't count).
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 VM="$REPO/tools/test/vm"
@@ -50,7 +38,7 @@ say() { echo ":: $*"; }
 die() { echo "run.sh: $*" >&2; exit 1; }
 START=$(date +%s)
 
-# the Hyprland hypr3d.so was built for: the running one's, as build.sh finds it
+# the Hyprland hypr3d.so was built for: the running one, found as build.sh does
 HYPR_BIN="${HYPR_BIN:-}"
 if [[ -z "$HYPR_BIN" ]]; then
     pid="$(pgrep -x Hyprland | head -n1 || true)"
@@ -73,7 +61,7 @@ cp "$REPO/hypr3d.so" "$VM/wheel.py" "$VM/touchpad.py" "$VM/gamepad.py" "$VM/tkap
 cp -r "$VM/electron" "$IN/"
 python3 "$VM/assets.py" "$IN" > /dev/null
 python3 "$VM/litmap.py" "$IN" > /dev/null
-# tools/test/live/check.sh, as you'd run it on your desktop (its section runs it in the VM)
+# tools/test/live/check.sh, for the section that runs it in the VM as on a desktop
 mkdir -p "$IN/repo/tools/test/live" "$IN/repo/tools/test/vm"
 cp "$REPO/tools/test/live/check.sh" "$REPO/tools/test/live/util.py" "$IN/repo/tools/test/live/"
 cp "$VM/assets.py" "$IN/repo/tools/test/vm/"
@@ -93,17 +81,16 @@ if [[ -z "$AVATARS" ]]; then
     python3 "$REPO/tools/unity2hypr3d.py" "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_Gimmicks_VRCFury_v1.0.unitypackage" \
         -o "$AVATARS/BoothGimmicks.glb" > "$OUT/work/BoothGimmicks.log" 2>&1 || die "converting BoothGimmicks failed, see $OUT/work"
 fi
-# by name, so nothing else in the folder (a Booth item's conversion) comes along
+# copied by name, so nothing else in the folder comes along
 for f in BoothAccessories.glb BoothAccessories.hypr3d.json BoothGimmicks.hands.vrma; do
     [[ -f "$AVATARS/$f" ]] || die "no $AVATARS/$f"
 done
 cp "$AVATARS/BoothAccessories.glb" "$AVATARS/BoothGimmicks.hands.vrma" "$IN/"
 cp "$AVATARS/BoothGimmicks.hands.vrma" "$IN/emotes/Hands.vrma"
-# a song for an emote (its "sound"): 440 Hz on the left, 660 Hz on the right, 2 s, Ogg Vorbis
+# an emote's song (its "sound" setting)
 ffmpeg -v error -y -f lavfi -i "aevalsrc=exprs=0.5*sin(2*PI*440*t)|0.5*sin(2*PI*660*t):s=48000:d=2" -c:a libvorbis -q:a 6 "$IN/HandsSong.ogg" ||
     die "ffmpeg couldn't make HandsSong.ogg"
-# its settings with three emotes more: BoothGimmicks' hand poses (a 7 s VRM animation) at twice its speed, as it is,
-# and over and over with that song
+# its settings plus three emotes of BoothGimmicks' 7 s hand poses: double speed, normal, and looped with the song
 python3 - "$AVATARS/BoothAccessories.hypr3d.json" "$IN/BoothAccessories.hypr3d.json" << 'EOF'
 import json, sys
 s = json.load(open(sys.argv[1], encoding='utf-8'))
@@ -112,7 +99,7 @@ s['emotes'] = s.get('emotes', []) + [{'name': 'Hands Fast', 'file': 'BoothGimmic
                                      {'name': 'Hands Song', 'file': 'BoothGimmicks.hands.vrma', 'loop': True, 'sound': 'HandsSong.ogg'}]
 json.dump(s, open(sys.argv[2], 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
 EOF
-# the vowels sung for longer (the WAVs are 0.8 s): the same file eight times over, and a man's o then hiss
+# longer vowels (the WAVs are 0.8 s): each one eight times over, and a man's o then hiss
 python3 - "$IN/wav" << 'EOF'
 import os, sys, wave
 d = sys.argv[1]
@@ -129,8 +116,8 @@ with wave.open(os.path.join(d, 'o_then_hiss_long.wav'), 'wb') as w:
     w.setparams(params)
     w.writeframes(frames)
 EOF
-# a quieter microphone: the vowels 30 dB down (q30_*); and a microphone's own hiss, white noise at -75 dBFS for 10 s (raw
-# 32-bit floats, looped into the test microphone)
+# a quieter microphone: the vowels 30 dB down (q30_*); and mic hiss: 10 s of white noise at -75 dBFS as raw f32, looped
+# into the test microphone
 for f in "$IN"/wav/{man,woman}_[aiueo]_long.wav; do
     python3 "$REPO/tools/test/synth/attenuate.py" "$IN/wav/q30_$(basename "$f")" 30 "$f" &
 done
@@ -150,14 +137,13 @@ BUILT=$(date +%s)
 
 say "running the checks (checks.py); the VM has no window"
 rm -rf "$OUT/frames" "$OUT/logs" "$OUT/live" "$OUT/results.txt" "$OUT/results.json"
-# The driver keeps the VMs' disk images, its shared folder and its sockets in XDG_RUNTIME_DIR (before TMPDIR): a
-# folder of this run's, on disk (the runtime dir is a small tmpfs, which a core dump fills) and with a short path (a
-# socket's path can't be long), gone afterwards
+# the driver keeps disk images, its shared folder and sockets in XDG_RUNTIME_DIR (before TMPDIR): use a per-run dir on
+# disk (the runtime tmpfs is small and a core dump fills it) with a short path (socket paths are limited)
 RUNDIR="$(mktemp -d "${H3D_VM_TMP:-/tmp}/h3d-vm.XXXXXX")"
 trap 'rm -rf "$RUNDIR"' EXIT
 set +e
-# no DISPLAY or WAYLAND_DISPLAY: the driver then starts QEMU with -nographic (the VM's config asks for it too). With
-# virgl, a WAYLAND_DISPLAY that goes nowhere keeps it off, so QEMU's display is egl-headless, which opens no window
+# no DISPLAY or WAYLAND_DISPLAY: the driver starts QEMU with -nographic. virgl needs QEMU's egl-headless display
+# instead: a WAYLAND_DISPLAY that goes nowhere stops -nographic, and egl-headless opens no window
 NODISPLAY=(-u WAYLAND_DISPLAY)
 [[ "$GPU" == virgl ]] && NODISPLAY=(WAYLAND_DISPLAY=/nonexistent/no-display)
 env -u DISPLAY "${NODISPLAY[@]}" TMPDIR="$RUNDIR" XDG_RUNTIME_DIR="$RUNDIR" H3D_IN="$IN" H3D_OUT="$OUT" H3D_ONLY="$ONLY" \

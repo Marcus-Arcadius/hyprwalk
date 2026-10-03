@@ -140,7 +140,7 @@ os_ = sc.go('Spine', oh, (0, 1.1, 0))
 oc = sc.go('Chest', os_, (0, 1.3, 0))
 merge_comp(sc, oa, 'Armature')
 pbO = pb(sc, os_)
-pbO2 = pb(sc, os_, root=oc)  # another on the same bone, for Chest: kept, and so the bone stays
+pbO2 = pb(sc, os_, root=oc)  # another on Spine, rooted at Chest: kept, so the bone stays
 ma = sc.run({'Hips': hips, 'Spine': spine, 'Chest': chest, 'Head': head})
 check('the copy dropped', (id(pbO) in ma.dead, id(pbO2) in ma.dead, id(pbA) in ma.dead), (True, False, False))
 check('outfit Spine kept: a live PhysBone on it', id(os_) in ma.deleted, False)
@@ -703,7 +703,7 @@ sc.comp(cut, {'m_center': {'x': '0', 'y': '0.5', 'z': '0'}, 'm_axis': {'x': '0',
               'm_selectionMode': '1'}, script=AXIS)
 sc.comp(cut, {'m_bone': {'referencePath': 'Body', 'targetObject': None}, 'm_threshold': '0.3', 'm_selectionMode': '2'},
         script=BONE)
-under = sc.go('UnderBody', body, (0, 0, 0))  # a cutter under its own mesh: the mesh's being on is no condition
+under = sc.go('UnderBody', body, (0, 0, 0))  # under its own mesh: the mesh being on isn't a condition
 sc.comp(under, {'m_inverted': '1', 'm_object': {'referencePath': 'Body', 'targetObject': None}}, script=CUTTER)
 sc.comp(under, {'m_shapes': ['Shrink'], 'm_threshold': '0.002', 'm_selectionMode': '2'}, script=SHAPEF)
 sc.comp(under, {'m_shapes': ['Shrink']}, script=SHAPEF)  # the same filter twice: one key
@@ -752,9 +752,9 @@ check('with the item on: its cut is in effect; the inverted one is not, the dele
     k[2][0] + ('+%d' % k[2][1] if k[2][0] == 'cutter' else '') for k in u.cuts_in(vals)), ['cutter+0', 'shape'])
 
 print('== cut_meshes: what the vertex filters pick, cut away for good or made a part toggles hide')
-# a 4 x 2 grid of quads in the GLB's XY plane, x = 0..4, y = 0..2, skinned to two bones (x <= 1: the first, x = 2:
-# both, x >= 3: the second), with a shape key moving the top row 5 mm and the middle one 0.5 mm, UVs (x / 4, y / 2)
-# as Unity has them. The renderer stands at Unity's origin, so in its space a vertex is at (-x, y, 0)
+# a 4 x 2 grid of quads in the GLB's XY plane (x 0..4, y 0..2) skinned to two bones (x <= 1 the first, x = 2 both, x >=
+# 3 the second); a shape key moves the top row 5 mm and the middle one 0.5 mm; UVs (x / 4, y / 2) as Unity has them. The
+# renderer is at Unity's origin, so a vertex is at (-x, y, 0) in its space
 
 
 def grid_glb():
@@ -823,8 +823,8 @@ fb = NS(av=NS(gos=[gsc.root, grid_go, bone0, bone1], ma=None), U={id(grid_go): M
 
 
 def cut(cutters, cuts0, kept):
-    """run cut_meshes with these cutters {name: (multi, [filters])}, the cuts in effect at rest and per toggle (by
-    name): (the triangles left, as sets of their corners' (x, y); the parts made {name: triangles}; the GLB)"""
+    """cut_meshes with cutters {name: (multi, [filters])} and the cuts in effect at rest and per toggle; returns
+    (triangles left as sets of corner (x, y), parts {name: triangles}, the GLB)"""
     js, binc = grid_glb()
     fb._masks = {}
     keys = {n: ('cutter', m, n) for n, (m, fs) in cutters.items()}
@@ -957,7 +957,7 @@ check('the objects it is on, not their children, and nothing said', (sorted(u.go
 st = u.Settings.__new__(u.Settings)
 st.ma, st.nodes, st.index = ma, [{'name': 'Lamp'}, {'name': 'Pen'}], {'Lamp': 0, 'Pen': 1}
 for g in ma.fixed:
-    g.name = u.go_name(g)  # (as the avatar's objects are named when it's read)
+    g.name = u.go_name(g)  # as when the avatar is read
 check('... their nodes, for the settings file\'s "fixed"', sorted(st.nodes[n]['name'] for n in (st.node(g) for g in ma.fixed)),
       ['Lamp', 'Pen'])
 

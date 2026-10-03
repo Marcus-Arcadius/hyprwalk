@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# ctl_check.sh: the plugin's avatar commands and Action Menu glue (src/control.cpp, which main.cpp and the harness
-# share) driven through the harness as hyprctl and the keyboard and mouse would: sliders (one and two axes, by
-# number and percent), toggles and the material variants they switch, the menu's pages (the root's nine), a slider's
-# dial by the mouse, the wheel and a click, a two-axis puppet's stick, an emote's speed and its sound (listed, or
-# said not to be there), and a node held in the world (MA's World Fixed Object) while the avatar walks away.
+# ctl_check.sh: the avatar commands and Action Menu glue (src/control.cpp, shared by main.cpp and the harness),
+# driven through the harness as hyprctl, keys and mouse would.
+#
 #   tools/test/harness/ctl_check.sh DIR
+#
 # DIR has BoothAccessories.glb and SynthDances.glb with their settings and emote files, as regress.sh --keep (with
 # --items) leaves them in OUT/new. Needs build/test/shot (tools/test/harness/build.sh), and ffmpeg for the sound.
 set -uo pipefail
@@ -13,13 +12,13 @@ REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 SHOT="$REPO/build/test/shot"
 [[ -x "$SHOT" ]] || { echo "no $SHOT: tools/test/harness/build.sh builds it" >&2; exit 1; }
 FAILS=0
-check() { # what, the harness output, a line it must have
+check() { # WHAT OUTPUT LINE: OUTPUT must contain LINE
     if grep -qF -- "$3" <<< "$2"; then echo "ok   $1"; else echo "FAIL $1: no \"$3\""; FAILS=$((FAILS + 1)); fi
 }
 
 A="$DIR/BoothAccessories.glb"
 if [[ -f "$A" ]]; then
-    # (at the VM's 1280x800, the menu's radius is 224 px: the same numbers as tools/test/vm/checks.py's)
+    # 1280x800 as in the VM: menu radius 224 px, the same numbers as tools/test/vm/checks.py
     out="$("$SHOT" --size 1280x800 --avatar "$A" \
         --ctl "avatar slider ニーハイの緩さ 50%" --ctl "avatar slider しっぽの向き 0.5 -0.25" \
         --ctl "avatar slider しっぽの向き 0.5" --ctl "avatar toggle 紺の制服 on" --ctl "avatar parts" --ctl "avatar parts reset" \
@@ -39,8 +38,8 @@ if [[ -f "$A" ]]; then
     check 'Backspace and Esc: closed' "$out" 'ctl menu -> {"open": false}'
     check 'what the dial and the stick set, kept' "$out" '{"name": "ニーハイの緩さ", "value": 0.250}'
     check '...' "$out" '{"name": "しっぽの向き", "value": [0.414, 0.207]}'
-    # the root page's nine (no "More"): Avatars last, its hint the avatar's name; a wheel notch back from the middle and
-    # the mouse up and left (320 degrees round, the ninth's middle) point at it, and pick takes 1-9
+    # the root page: nine slots (no "More"), Avatars last; a wheel notch back from the middle or the mouse at 320
+    # degrees reaches the ninth; pick takes 1-9
     out="$("$SHOT" --size 1280x800 --avatar "$A" --key tab --ctl menu --wheel -1 --ctl menu --key esc --key tab --ctl menu \
         --mouse -96 -115 --ctl menu --ctl "menu pick 10" 2>&1)"
     check 'the root page: nine, Avatars last, its hint the avatar'"'"'s name' "$out" '{"slot": 9, "label": "Avatars", "hint": "BoothAccessories", "on": false, "disabled": false, "submenu": true'
@@ -51,7 +50,7 @@ if [[ -f "$A" ]]; then
         echo "FAIL the ninth by the wheel and the mouse: highlights $hl(want 0 9 0 9)"; FAILS=$((FAILS + 1))
     fi
     check '... pick takes 1-9' "$out" 'ctl menu pick 10 -> error: pick 1-9, or 0 for the middle'
-    # its tail held in the world ("fixed", as the converter writes MA's World Fixed Object), without its spring
+    # the tail held in the world ("fixed", the converter's form of MA's World Fixed Object), without its spring
     W="$(mktemp -d)"
     cp "$A" "$W/"
     python3 -c 'import json, sys; s = json.load(open(sys.argv[1], encoding="utf-8")); s["fixed"] = ["Tail"]; s.pop("springs", None)
@@ -87,8 +86,8 @@ if [[ -f "$D" ]]; then
     else
         echo "FAIL twice as fast: 90 frames and 180 differ"; FAILS=$((FAILS + 1))
     fi
-    # an emote's sound (the settings file's "sound", next to it): decoded as the avatar loads and listed with it; one
-    # that isn't there is said, and its emote plays without (the harness plays no sound: tools/test/sound does)
+    # an emote's "sound" (a file next to the settings): decoded at load and listed; a missing one is reported and its
+    # emote plays without it
     if command -v ffmpeg > /dev/null; then
         ffmpeg -v error -y -f lavfi -i "aevalsrc=exprs=0.5*sin(2*PI*440*t):s=44100:d=1.5" -c:a libvorbis "$T/song.ogg"
         sed -e 's/"name": "Loli Kami Requiem",/"name": "Loli Kami Requiem", "sound": "song.ogg",/' \

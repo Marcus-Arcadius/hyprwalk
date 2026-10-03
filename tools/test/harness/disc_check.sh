@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
-# disc_check.sh: the settings file's disc colliders and a spring's radius bone by bone (the plugin's physics, through
-# the harness): a model of short chains, each by flat round discs (radius 0.4 m, 2 cm thick each side) and pulled into
-# them by its own gravity: one lying level over a disc, down onto its top (a tail over a tutu: a ring of capsules round
-# its edge would let it through, and then push it further in); one lying level under one, up into its underside, each
-# starting a little in it; one lying level between two, at their height, pulled sideways into the edge of one (which:
-# the way the plugin turns the model round). Each chain's joints must be out of its discs as far as their own radius,
-# on the side they started (off a disc's nearest face, never through it), from the first step on, for 3 s; the chains'
-# radii are [0.04, 0.05] (the last for the rest down the chain), and a chain with no disc hangs on down (the harness's
-# --springdump: the joints and colliders in the world). Read as anything else (an older hypr3d makes a sphere of a
-# disc's own radius round its middle), the chains go through.
+# disc_check.sh: disc colliders and per-bone spring radii (the plugin's physics, through the harness's --springdump).
+# Short chains fall by their own gravity onto, up into and sideways into flat discs (0.4 m radius, 2 cm thick each
+# side; a tail over a tutu, which a ring of capsules lets through): each joint must stay out by its own radius, on the
+# side it started, for 3 s.
+#
 #   tools/test/harness/disc_check.sh [DIR]   (DIR: where the model and logs go, a temporary one by default)
+#
 # Needs build/test/shot (tools/test/harness/build.sh).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -19,8 +15,8 @@ DIR="${1:-}"
 [[ -n "$DIR" ]] || { DIR="$(mktemp -d)"; trap 'rm -rf "$DIR"' EXIT; }
 mkdir -p "$DIR"
 
-# the model: chains of three 25 cm bones, and their discs (level) on "Root"; a triangle to draw. Its settings file
-# names each chain's discs; discs.design.json says which side of them each chain must stay (1 over, -1 under, 0 any)
+# the model: chains of three 25 cm bones with level discs on "Root", and a triangle to draw; discs.design.json gives the
+# side each chain must stay on (1 over, -1 under, 0 any)
 python3 - "$DIR" << 'EOF'
 import base64, json, struct, sys
 D = sys.argv[1]

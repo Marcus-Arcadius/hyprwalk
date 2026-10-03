@@ -47,8 +47,8 @@ namespace h3d {
             return s;
         }
 
-        // $XDG_DATA_HOME, then $XDG_DATA_DIRS: the spec's order, earlier ones first. Without $XDG_DATA_DIRS (a
-        // compositor started with little of the session's environment), NixOS's and Flatpak's as well as the default
+        // $XDG_DATA_HOME, then $XDG_DATA_DIRS in the spec's order; without $XDG_DATA_DIRS (a compositor with a bare
+        // environment), NixOS's and Flatpak's dirs plus the default
         std::vector<fs::path> dataDirs() {
             const std::string     home = env("HOME", "/tmp"), user = env("USER");
             std::vector<fs::path> out{env("XDG_DATA_HOME", home + "/.local/share")};
@@ -80,7 +80,7 @@ namespace h3d {
             return out;
         }
 
-        // Exec without its field codes (files and URLs to open: none here; the icon, name and file: not needed)
+        // Exec with field codes dropped (no files or URLs to pass; icon, name and file aren't needed)
         std::string stripFieldCodes(const std::string& exec) {
             std::string out;
             for (size_t i = 0; i < exec.size(); ++i) {
@@ -154,7 +154,7 @@ namespace h3d {
 
         std::vector<std::string> iconThemes() {
             std::vector<std::string> out;
-            // the GTK theme's, as GTK apps show them
+            // the GTK icon theme first, as GTK apps use it
             std::ifstream ini(env("XDG_CONFIG_HOME", env("HOME", "/tmp") + "/.config") + "/gtk-3.0/settings.ini");
             for (std::string line; std::getline(ini, line);) {
                 if (const size_t eq = line.find('='); eq != std::string::npos && trim(line.substr(0, eq)) == "gtk-icon-theme-name")
@@ -246,7 +246,7 @@ namespace h3d {
                 std::ranges::replace(id, '/', '-');
                 id.resize(id.size() - 8);
                 if (!seen.insert(id).second)
-                    continue; // (an earlier dir's wins, even a hidden one)
+                    continue; // an earlier dir's wins, even a hidden one
                 if (auto e = readEntry(f, id, desktops))
                     out.push_back(std::move(*e));
             }
@@ -330,8 +330,7 @@ namespace h3d {
             SAppRule           r;
             r.pattern = trim(p.substr(0, colon));
             std::istringstream in(p.substr(colon + 1));
-            // the height: metres, or auto (as big as on your screen), which it is when left out: left or right can come
-            // straight after the distance, a side in metres only after a height or auto
+            // height: metres or auto (the default: screen size); a side in metres needs a height or auto before it
             std::string height, side;
             if (!(in >> r.distance) || r.distance < 0.3f) {
                 error = std::format("app rule \"{}\": the distance is metres (0.3 or more)", p);
@@ -365,8 +364,7 @@ namespace h3d {
     }
 
     SAppRule appRule(const std::vector<SAppRule>& user, const std::string& cls) {
-        // (no heights: each comes as big as on your screen. A height of their own made a window as tall as the screen
-        // half as big as it is there)
+        // no fixed heights, so windows open as big as on your screen (a fixed one shrank tall windows)
         static const std::vector<SAppRule> BUILT_IN = {
             // games (Steam's, Proton's, gamescope's): further off
             {"steam_app_.*|gamescope|.*\\.exe|steam_proton|chocolate-doom|supertux2|retroarch|.*minecraft.*|h3dgame.*", 2.0f, 0.f, 0.f},

@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# spring_check.sh: an avatar's springs (its hair, skirt, necktie...: the plugin's physics, through the harness) as it
-# stands, walks and stops, runs and stops, turns right round, turns on the spot, jumps, dances (the built-in Dance) and
-# runs in first person (what the harness has of those), at the plugin's own speeds and accelerations. Checks that no
-# bone with a limit (a PhysBone's, VRMC_springBone_limit's) ever gets out of it, as the harness works out on its own
-# where each one is (--limits, every 5 frames), and that the kinds of spring named (a spring's name up to its first
-# '.', as Necktie for Necktie.A.001) are never put more than 2 cm deeper inside the body than the animation has them
-# (--springclip, every frame), and that every kind swings as smoothly at 143.9 frames a second (a 144 Hz monitor's) as
-# at 60 (--springtrace), in first person turning too. Prints how deep every kind went, in each move.
-#   tools/test/harness/spring_check.sh AVATAR [DIR] [KIND...]   (DIR: where the logs go, a temporary one by default; "" too)
-# Hatsune Miku NT's necktie (a Booth avatar, local only): spring_check.sh ~/.local/share/hypr3d/avatars/Miku/Miku.glb ""
-# Necktie. Needs build/test/shot (tools/test/harness/build.sh).
+# spring_check.sh: an avatar's springs (the plugin's physics, through the harness) standing, walking, running,
+# turning, jumping, dancing and running in first person: bones stay within their limits (--limits), the named KINDs (a
+# spring's name up to its first '.') never go over 2 cm deeper into the body than the animation has them
+# (--springclip), and every kind swings as smoothly at 143.9 frames a second as at 60 (--springtrace).
+#
+#   tools/test/harness/spring_check.sh AVATAR [DIR] [KIND...]
+#                                      (DIR: where the logs go, a temporary one by default; "" too)
+#   e.g. spring_check.sh ~/.local/share/hypr3d/avatars/Miku/Miku.glb "" Necktie
+#
+# Needs build/test/shot (tools/test/harness/build.sh).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 SHOT="$REPO/build/test/shot"
@@ -25,9 +24,8 @@ check() { # what, ok (1/0), the value
     if [[ "$2" == 1 ]]; then echo "ok   $1${3:+: $3}"; else echo "FAIL $1${3:+: $3}"; FAILS=$((FAILS + 1)); fi
 }
 
-# (as the plugin moves: 10 m/s² to a walk or a run, 14 to a stop, 7 turning right back, the body turned toward where it
-# goes; a harness from before it walked so has neither, and no first person body: 40 m/s², and those moves left out;
-# --limits every 5 frames)
+# moves as the plugin's: 10 m/s² to a walk or run, 14 to a stop, 7 turning back, the body facing where it goes; an older
+# harness without those options gets 40 m/s² and skips those moves
 has() { grep -qaF -- "$1" "$SHOT"; }
 lim=()
 for i in $(seq 60); do lim+=(--frames 5 --limits); done
@@ -58,11 +56,9 @@ for m in "${moves[@]}"; do
         { echo "FAIL the harness ($name): $(tail -3 "$DIR/$name.log")"; exit 1; }
 done
 
-# smooth at any frame rate: the springs step 60 times a second, and a monitor's frames (143.9 a second) fall between
-# the steps. How each kind of spring swings on what it hangs from (each bone's tail in its parent's frame), its wobble
-# about its own smooth path (the angle from a moving 1/20 s average, rms over the frames, its bones' mean), at 143.9
-# frames a second no more than half as much again as at 60, and 0.05 deg: in first person turning (the sleeves on the
-# arms in view), walking round a corner, running, dancing, turning on the spot
+# smooth at any frame rate: the springs step at 60 Hz and a 143.9 Hz monitor's frames fall between the steps. Each
+# kind's wobble (bone tails in their parent's frame, rms angle from a moving 1/20 s average, mean over its bones) at
+# 143.9 must stay within 1.5x that at 60 plus 0.05 deg
 if has --springtrace; then
     secs() { awk -v s="$1" -v dt="$2" 'BEGIN { printf "%d", s / dt + 0.5 }'; }
     smooth=(fpturn walkturn run dance spot)

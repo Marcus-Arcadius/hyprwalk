@@ -1,19 +1,13 @@
 #!/usr/bin/env bash
-# attack_check.sh: the avatar's attacks (the plugin's left click on nothing, hyprctl hypr3d avatar attack; the harness's
-# --attack, the plugin's own animator), as the built in clips have them (assets/attack.vrma and
-# attack-first-person.vrma: a hook made in Blender, see tools/blender/README.md): a click swings the right arm, the fists
-# closed: wound up with the right fist out past the shoulder (seen from behind, past long hair), ahead of the body, the
-# chest turned a little right; then swept round in front of the face as the chest turns left, the left fist up by the
-# chin; held, back to a guard and down to where they hung. Clicks while one swings are the other arm's (the mirror
-# image), one after the other (R L R L), a click while one's waiting is dropped, after a pause the right's again; nothing
-# jumps (each wrist frame to frame); walking it goes on walking; the hair the springs swing (long twin tails) stays out of
-# the arms; in first person the fist drawn back at the bottom right of the view, struck to the crosshair and back to
-# where it was held ready, the left held ready, no further ahead than there's room (a wall); an emote stops; a model that
-# isn't a humanoid has no arms to swing. From the harness's --attackstatus, --wrists, --fpstatus and --hairclip lines (the
-# wrists from the feet in the avatar's frame; in first person where they are in the view, 0..1 across and down) and two
-# frames from behind.
-#   tools/test/harness/attack_check.sh AVATAR [DIR]   (a humanoid: a VRM, or regress.sh --keep's OUT/new/BoothAccessories.glb;
-#                                                     DIR: where the frames and logs go, a temporary one by default)
+# attack_check.sh: the avatar's attacks (left click on nothing, hyprctl hypr3d avatar attack; the harness's --attack)
+# with the built-in hook clips (assets/attack.vrma, attack-first-person.vrma; see tools/blender/README.md), from the
+# harness's status lines and two frames from behind.
+#
+#   tools/test/harness/attack_check.sh AVATAR [DIR]
+#
+#   AVATAR  a humanoid: a VRM, or regress.sh --keep's OUT/new/BoothAccessories.glb
+#   DIR     where the frames and logs go (default: a temporary one)
+#
 # Needs build/test/shot (tools/test/harness/build.sh).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -25,20 +19,20 @@ DIR="${2:-}"
 [[ -n "$DIR" ]] || { DIR="$(mktemp -d)"; trap 'rm -rf "$DIR"' EXIT; }
 mkdir -p "$DIR"
 
-run() { # name, avatar, then the harness's options (640x360 as a 16:10-ish monitor's view)
+run() { # NAME AVATAR OPTIONS... (640x360, a monitor's aspect)
     local name="$1" avatar="$2"
     shift 2
     "$SHOT" --size 640x360 --avatar "$avatar" "$@" > "$DIR/$name.log" 2>&1 || { echo "FAIL the harness ($name): $(tail -3 "$DIR/$name.log")"; exit 1; }
 }
-frames() { # n, then what to print each frame
+frames() { # N OPTIONS...: N frames, printing OPTIONS each
     local n="$1" i
     shift
     for i in $(seq "$n"); do printf '%s\n' --frames 1 "$@"; done
 }
 st=(--wrists --attackstatus)
 mapfile -t each < <(frames 60 "${st[@]}")
-# one click, standing, the hair inside the arms measured from half a second before it; then from behind (as third
-# person's camera is, over the right shoulder), at rest and wound up
+# one click standing, hair inside the arms measured from 0.5 s before it; then from behind (third person's camera, over
+# the right shoulder), at rest and wound up
 run single "$AVATAR" --frames 30 --hairclip "$DIR/hair.txt" --frames 30 --wrists --attack next "${each[@]}"
 run behind "$AVATAR" --view 180 --pitch 15 --dist 2.6 --shift 0.4 0 0 --frames 60 --out "$DIR/rest.png" --attack next --frames 8 --out "$DIR/wound.png"
 # clicks every quarter second (15 frames): R L R L ...; every 3 frames (quicker than they go); a pause between two

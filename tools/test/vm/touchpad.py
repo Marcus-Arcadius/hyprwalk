@@ -1,10 +1,8 @@
-# touchpad.py [h|d|z]D...: a touchpad made through uinput (as root, in tools/test/vm's VM) that scrolls with two
-# fingers: for each amount, both fingers go down, move D device units together (30 a millimetre; > 0 down, towards
-# you; "h" first: right, "d": down and right at once) in steps of 1 mm, 12 ms apart, stay a moment and lift, 0.5 s
-# before the next. "z" first pinches instead: the fingers move D units apart (< 0: together), each half of it
-# sideways, which libinput makes a pinch gesture of (zwp_pointer_gestures_v1: a browser zooms). libinput makes finger scrolling of that (wl_pointer axis_source finger, both axes in a frame when
-# they move both ways, then axis_stop when they lift). The touchpad goes away afterwards.
-# It's on USB, so libinput pairs it with no keyboard and doesn't disable it while typing.
+# touchpad.py [h|d|z]D...: a uinput touchpad (as root in the VM) that scrolls with two fingers: per step both go down,
+# move D units (30/mm, > 0 down; "h": right, "d": down and right) in 1 mm steps 12 ms apart, then lift, 0.5 s before the
+# next; libinput sends finger scrolling (axis_source finger, axis_stop on lift). "z" pinches instead: the fingers move D
+# apart (< 0 together), a pinch gesture. On USB, so libinput pairs it with no keyboard and doesn't disable it while
+# typing
 import fcntl
 import os
 import struct
@@ -17,7 +15,7 @@ ABS_X, ABS_Y, ABS_MT_SLOT, ABS_MT_POSITION_X, ABS_MT_POSITION_Y, ABS_MT_TRACKING
 BTN_LEFT, BTN_TOOL_FINGER, BTN_TOUCH, BTN_TOOL_DOUBLETAP, BTN_TOOL_TRIPLETAP = 0x110, 0x145, 0x14a, 0x14d, 0x14e
 INPUT_PROP_POINTER, INPUT_PROP_BUTTONPAD = 0x00, 0x02
 UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_ABSBIT, UI_SET_PROPBIT = 0x40045564, 0x40045565, 0x40045567, 0x4004556E
-UI_DEV_SETUP, UI_ABS_SETUP, UI_DEV_CREATE, UI_DEV_DESTROY = 0x405C5503, 0x401C5504, 0x5501, 0x5502  # (92 and 28 bytes)
+UI_DEV_SETUP, UI_ABS_SETUP, UI_DEV_CREATE, UI_DEV_DESTROY = 0x405C5503, 0x401C5504, 0x5501, 0x5502
 BUS_USB = 0x03
 W, H, RES = 3000, 2000, 30  # 100 x 67 mm
 
@@ -28,9 +26,9 @@ def main(steps):
         fcntl.ioctl(fd, UI_SET_EVBIT, ev)
     for key in (BTN_LEFT, BTN_TOOL_FINGER, BTN_TOUCH, BTN_TOOL_DOUBLETAP, BTN_TOOL_TRIPLETAP):
         fcntl.ioctl(fd, UI_SET_KEYBIT, key)
-    for prop in (INPUT_PROP_POINTER, INPUT_PROP_BUTTONPAD):  # a clickpad, as most are
+    for prop in (INPUT_PROP_POINTER, INPUT_PROP_BUTTONPAD):  # a clickpad, like most
         fcntl.ioctl(fd, UI_SET_PROPBIT, prop)
-    # (struct uinput_abs_setup: the code, padding, then input_absinfo: value, min, max, fuzz, flat, resolution)
+    # uinput_abs_setup: code, padding, then input_absinfo value, min, max, fuzz, flat, resolution
     for code, hi, res in ((ABS_X, W, RES), (ABS_Y, H, RES), (ABS_MT_SLOT, 4, 0), (ABS_MT_POSITION_X, W, RES),
                           (ABS_MT_POSITION_Y, H, RES), (ABS_MT_TRACKING_ID, 65535, 0)):
         fcntl.ioctl(fd, UI_SET_ABSBIT, code)
@@ -54,11 +52,11 @@ def main(steps):
             evs += [(EV_KEY, BTN_TOUCH, 1), (EV_KEY, BTN_TOOL_DOUBLETAP, 1)]
         emit(*evs, (EV_ABS, ABS_X, round(pts[0][0])), (EV_ABS, ABS_Y, round(pts[0][1])))
 
-    time.sleep(1.5)  # for libinput, and Hyprland, to take it in
+    time.sleep(1.5)  # let libinput and Hyprland add it
     for step in steps:
         d = int(step.lstrip('hdz'))
         if step[0] == 'z':
-            # two fingers from 25 mm apart in the middle, each moving d/2 away from the other
+            # fingers 25 mm apart in the middle, each moving d/2 outwards
             x0, y0 = W / 2 - 375, H / 2
             n = max(1, round(abs(d) / 2 / RES))
             fingers([(x0, y0), (x0 + 750, y0)], first=True)

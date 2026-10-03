@@ -1,16 +1,16 @@
-"""h3d_rig: the rig the attacks are made with, in Blender: IK controls on a humanoid imported from a glTF (Hatsune Miku
-NT's GLB: BONES names her bones), and key poses given in her own terms. See README.md here.
+"""h3d_rig: the Blender rig the attacks are made with: IK controls on a humanoid imported from a glTF (Hatsune Miku NT's
+GLB; BONES names her bones), and key poses in her own terms. See README.md here.
 
-Her right is -X, ahead -Y, up +Z (a glTF model facing +Z, imported). A pose (a dict; what it leaves out is at rest):
-  spine, chest, neck, head: (yaw, pitch, roll) degrees, each the bone's whole turn in the world (not from the one
-      below): yaw to her left, pitch bending ahead, roll leaning to her left
-  shoulder.R/.L: (ahead, up) degrees, the collarbone's own turn, on the chest's
-  wrist.R/.L: (out, up, ahead) meters from the chest's joint, in the chest's turned frame (out: to that arm's side);
+Her right is -X, ahead -Y, up +Z (an imported glTF facing +Z). A pose is a dict; what it leaves out is at rest:
+  spine, chest, neck, head: (yaw, pitch, roll) degrees, the bone's whole turn in the world: yaw to her left, pitch
+      bending ahead, roll leaning to her left
+  shoulder.R/.L: (ahead, up) degrees, the collarbone's own turn on the chest's
+  wrist.R/.L: (out, up, ahead) meters from the chest's joint, in the chest's turned frame (out: that arm's side);
       ("world", v): the same, not turned; ("reach", v, f): f of the arm's length from its shoulder toward v (not turned)
-  elbow.R/.L: where the elbow points to (the IK's pole), as a wrist is given
-  along.R/.L, palm.R/.L: the way the hand points (wrist to knuckles) and its palm faces, as a wrist is given (directions)
-Keys: key(frame, pose) or key(frame, mix(A, B, trunk=u, R=u, L=u)): A to B, each part that far along (the arms in
-straight lines in the world, their hands turning the short way)
+  elbow.R/.L: where the elbow points (the IK pole), given like a wrist
+  along.R/.L, palm.R/.L: the directions the hand points (wrist to knuckles) and its palm faces, given like a wrist
+Keys: key(frame, pose) or key(frame, mix(A, B, trunk=u, R=u, L=u)): A to B, each part that far along (arms in straight
+lines in the world, hands turning the short way)
 """
 import math
 
@@ -64,7 +64,7 @@ def collarbone(side, ahead=0.0, up=0.0):
 
 
 def frame_from(along, palm):
-    """a rotation taking the hand bone's rest axes (y along it, the palm -z at rest: palms down in the T pose) to these"""
+    """rotation from the hand bone's rest axes (y along it, palm -z: palms down in the T pose) to these"""
     y = along.normalized()
     z = -(palm - y * palm.dot(y)).normalized()
     x = y.cross(z)
@@ -82,7 +82,7 @@ def ctl_name(kind, side):
 
 
 def setup(fps=60, start=0, end=45):
-    """the controls: per arm an IK target at the wrist (its rotation the hand's) and a pole for the elbow"""
+    """creates per arm an IK target at the wrist (its rotation drives the hand) and an elbow pole"""
     sc = bpy.context.scene
     sc.render.fps = fps
     sc.render.fps_base = 1
@@ -109,7 +109,7 @@ def setup(fps=60, start=0, end=45):
         ik.chain_count = 2
         ik.use_tail = True
         ik.use_stretch = False
-        # (bent a little to start from: a straight arm doesn't know which way to bend; the pole's angle for this rig's rolls)
+        # pre-bent: a straight arm has no bend direction; the pole angles match this rig's bone rolls
         lower.rotation_quaternion = Quaternion((0, 0, 1), math.radians(25 if s == "R" else -25))
         ik.pole_angle = 0.0 if s == "R" else math.pi
         hand = pbone(f"hand.{s}")
@@ -123,7 +123,7 @@ def setup(fps=60, start=0, end=45):
 
 
 def basis(k, q_world, q_parent):
-    """the bone's own rotation (its pose channel) for a turn of q_world in the world, its parent's being q_parent"""
+    """pose channel rotation for world turn q_world, given the parent's q_parent"""
     r = rest_q(k)
     return (r.inverted() @ q_parent.inverted() @ q_world @ r).normalized()
 
@@ -139,7 +139,7 @@ def trunk_of(pose):
 
 
 def solve_trunk(t):
-    """(each bone's turn in the world, where its joint is) for the trunk's numbers"""
+    """(world turns, joint positions) of the trunk's bones for its numbers"""
     q = {"hips": Quaternion()}
     for k in TRUNK:
         q[k] = turn(*t[k])
@@ -155,7 +155,7 @@ def solve_trunk(t):
 
 
 def arm_of(pose, s, q, j):
-    """(wrist, elbow pole, along, palm) in the world for the pose's arm s, the trunk as q, j have it"""
+    """(wrist, elbow pole, along, palm) in the world for arm s of the pose, given the trunk's q, j"""
     o, qc = j["chest"], q["chest"]
 
     def at(key, point=True):
@@ -215,7 +215,7 @@ def key(frame, p, interp='BEZIER'):
         w.location = wrist
         e.location = elbow
         r = frame_from(along, palm)
-        # (the short way from the key before: quaternion curves go component by component)
+        # take the short way from the previous key: quaternion curves interpolate per component
         if r.dot(w.rotation_quaternion) < 0:
             r.negate()
         w.rotation_quaternion = r
@@ -267,8 +267,7 @@ def clear():
 
 
 def fist(curl=(80, 100, 70), thumb=(20, 35, 35)):
-    """both hands roughly in fists to look at, unkeyed (not exported: the plugin closes the avatar's own fists): each
-    finger's bones curled toward the palm (palms down at rest), about the hand's forward axis, the thumb's less"""
+    """curls both hands into rough fists for viewing, unkeyed (the plugin makes the avatar's own fists)"""
     for s in "RL":
         axis = Vector((0, -1, 0)) * (1 if s == "R" else -1)
         for f in FINGERS:
@@ -292,8 +291,8 @@ def eval_points():
 
 
 def fp_view(fov_y=70.0, aspect=16 / 9):
-    """first person, as the plugin's camera in her eyes looking straight ahead sees them now: each wrist (and the fist,
-    a hand's length on) on the view, 0..1 across and down; and where the eyes are"""
+    """where the wrists and fists show in the plugin's first person view (from her eyes, looking ahead), 0..1 across and
+    down, and the eye position"""
     bpy.context.view_layer.update()
     a = ob()
     pb = a.pose.bones

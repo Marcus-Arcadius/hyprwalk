@@ -1,6 +1,5 @@
-# util_check.py: util.py's desktop comparison on made-up frames (plain python3): a bar's clock ticking, an animated
-# wallpaper and the check's own terminal scrolling must be left out (--same, --mask), while a window that moved or
-# changed colour must still show.
+# util_check.py: util.py diff on made-up frames: a ticking clock, an animated wallpaper and the check's own terminal
+# must be left out (--same, --mask); a window that moved or changed colour must still show.
 #   python3 tools/test/live/util_check.py [WORKDIR]
 import os, subprocess, sys, tempfile
 

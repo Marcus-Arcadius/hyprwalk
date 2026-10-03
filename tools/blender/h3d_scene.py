@@ -1,6 +1,5 @@
-"""h3d_scene: the attack's Blender scene from nothing: Hatsune Miku NT imported into a scene of her own, the rig on her
-(h3d_rig), the hook keyed (h3d_hook: third person's at frames 0-45, first person's at 100-130), the hands in fists to
-look at. In Blender: import h3d_scene; h3d_scene.build() (the avatar: h3d_scene.AVATAR, or build(path))"""
+"""h3d_scene: builds the attack's Blender scene from scratch: Hatsune Miku NT in a scene of her own, rigged (h3d_rig),
+the hook keyed (h3d_hook), hands in fists. In Blender: import h3d_scene; h3d_scene.build() (or build(avatar_path))"""
 import math
 import os
 
@@ -20,8 +19,7 @@ def build(avatar=AVATAR):
     if "Armature" not in sc.objects:
         bpy.ops.import_scene.gltf(filepath=avatar, bone_heuristic='BLENDER')
     arm = bpy.data.objects["Armature"]
-    # the bones the attack keys shown (not the importer's spheres for them), in front; the rest (her hair's, her skirt's,
-    # her fingers': hundreds) in a bone collection of their own, hidden
+    # show the attack's bones in front, minus the importer's spheres; hide the hundreds of others (hair, skirt, fingers)
     for pb in arm.pose.bones:
         pb.custom_shape = None
     keyed = {h3d_rig.BONES[k] for k in h3d_rig.BONES}
@@ -38,7 +36,7 @@ def build(avatar=AVATAR):
     if ico:
         ico.hide_set(True)
         ico.hide_render = True
-    # (Workbench shows each material's base color texture: the image node feeding the BSDF's base color)
+    # Workbench's texture mode shows the active image node: pick the one feeding the BSDF's base color
     for m in bpy.data.materials:
         if not m.node_tree:
             continue

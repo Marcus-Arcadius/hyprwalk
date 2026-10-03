@@ -1,10 +1,7 @@
-# assets.py OUTDIR: two small glTF files for tools/test/vm, made from boxes and quads (plain python3):
-#   ToonTest.glb  an avatar of a sort (no skeleton) with what unity2hypr3d's toon materials carry as extras: eyes that
-#                 write the stencil (UnlitWF's way, render queue 2448) behind a fringe that doesn't draw over them
-#                 (queue 2449, stencil "notequal"), so the cyan eyes show through the magenta fringe in front of
-#                 them; and a body with a green inverted-hull outline. Both faces (+Z and -Z) have eyes and a fringe.
-#   TestRoom.glb  a map: a 20 m square room with a floor, four walls and a pillar, and the hypr3d_spawn and
-#                 hypr3d_desktop nodes (the desktop on the north wall)
+# assets.py OUTDIR: two small glTF files for tools/test/vm, built from boxes and quads:
+#   ToonTest.glb  no skeleton; cyan eyes write the stencil (UnlitWF's way, queue 2448) and show through the magenta
+#                 fringe (queue 2449, stencil notequal) on both faces; body with a green inverted-hull outline
+#   TestRoom.glb  a 20 m square room with walls, a pillar, hypr3d_spawn and hypr3d_desktop (on the north wall)
 import json, math, os, struct, sys
 
 
@@ -152,7 +149,7 @@ def room(path):
     g.mesh('Walls', [(wall, walls)])
     g.mesh('Pillar', [(pillar, box(3.0, 0.0, -2.0, 3.8, H, -1.2))])
     g.node('hypr3d_spawn', translation=(0, 0, 4.0))           # facing -Z, the north wall
-    g.node('hypr3d_desktop', translation=(0, 1.7, -S + 0.01))  # its front is +Z
+    g.node('hypr3d_desktop', translation=(0, 1.7, -S + 0.01))  # front faces +Z
     g.write(path)
 
 

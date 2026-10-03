@@ -1,55 +1,24 @@
-# litmap.py OUTDIR: LitCourt.glb, a small map with everything tools/cs2map.py writes for a game's own lighting, made
-# up here from boxes, quads and gradients (plain python3; nothing of CS2's), for testing hypr3d's map path offscreen and
-# in tools/test/vm; and LitCourtRuntimeSun.glb, the same with a sun that has no baked shadow channel (as cs2map writes
-# a Dynamic or Stationary sun without one: no shadows lightmap, no probe shadows), which lights lightmapped and
-# probe-lit surfaces alike, shadowed by the realtime shadow map alone. A 20 m court with 5 m walls, open to the sky,
-# and scenery far out around it:
-#   HYPR3D_lighting    two lighting sets. The court's: a lightmap (irradiance as RGBE, its directional part, the sun's
-#                      baked shadow) and light probes (an atlas of two volumes, the indoor one of higher priority). The
-#                      backdrop's: a lightmap and a probe volume of its own. Then the sun, fog (by distance and height,
-#                      its colour from the sky), the sky panorama, an exposure range and a tone curve.
-#   _LIGHTMAP_UV       on the court's floor and walls ("node000_..." as Source 2 Viewer names world meshes) and on the
-#                      backdrop's hills. The props have none, so the probes light them.
-#   HYPR3D_materials_source2  normal maps with y down, the specular flags, a mod2x decal, detail textures (mod2x on the
-#                      walls; an overlay through a mask on the second uv set on the crates), self-illumination (the
-#                      sign), glass, the vertex colour modes (srgb on the walls, paint on the crates, and none on the
-#                      floor, whose red COLOR_0 must not show) and a csgo_effects glow
-#   HYPR3D_materials_blend  the floor's second layer (moss), painted in by a _BLEND attribute through a mask, with its
-#                      own normal map (roughness in alpha)
-#   hypr3d_backdrop    hills and towers 340-430 m out, at 16x their own size: past the map's far plane (200 m), so
-#                      they only show if the backdrop's own depth range works
-#   textures           what the loader block compresses: BC1 (colours, sRGB or not), BC3 (with alpha) and BC5 (the
-#                      floor's normal map); the sky stays plain
-#   also               instanced bollards (EXT_mesh_gpu_instancing), a trigger brush the loader drops, and
-#                      hypr3d_spawn and hypr3d_desktop as in assets.py's TestRoom: the desktop on the north wall,
-#                      13 m in front of the spawn
-#
-# What a correct render shows from the spawn (shot --size 1280x800 --map LitCourt.glb --spawn --autoexp 1: the plugin's
-# own first person camera there, eye 0 1.67 3 looking along -z, 70 degrees high). Boxes are fractions of the frame
-# (x0 y0 x1 y1), colours mean sRGB as the harness drew them on NVIDIA; in the plugin the desktop covers .43 .41 .57 .54:
-#   exposure 0.35  the bottom of the map's range (the metering wants 0.21; without the range it would be 1.00)
-#   floor          the lightmap's 5 m checker: orange .15 .80 .40 .88 (188 155 117) and teal .60 .80 .85 .88
-#                  (141 160 166) in the sun, and the row nearer, .10 .91 .40 .99 and .60 .91 .90 .99, the other way
-#                  round. The baked shadow's band (z -2.2 to -1.2) darkens both: .10 .735 .42 .775 (171 122 72) and
-#                  .58 .735 .80 .775 (75 127 149). The moss (the blend layer): .28 .635 .42 .67 (92 109 41).
-#   sky            .02 .02 .30 .08 (162 100 150), violet (hypr3d's own sky is blue)
-#   backdrop       green hills .20 .20 .33 .29 (108 145 67), its own lightmap; gold towers .375 .12 .405 .28
-#                  (198 169 100), its own probes; both past the far plane, and fogged where they appear, as CS2 fogs
-#                  its 3D skybox: over the fog's 30 m, so hardly at all
-#   north wall     .17 .33 .26 .45 (190 158 111) over .38 .555 .425 .585 (129 81 54): its light is brighter higher up
-#   props          the pillar .615 .42 .643 .58 (157 73 146), magenta: the indoor probe volume, by its priority. The
-#                  crates' south faces .19 .575 .228 .615 (142 125 52) and east faces .238 .575 .258 .605 (174 82 47):
-#                  the outdoor probes' green and red.
-#   sign           some 1500 glowing cyan pixels (g > 150, g > r + 40, b > r + 30) in .40 .34 .60 .40
-#   decal          in .567 .649 .74 .721 some 330 pixels darker than 75 (its ring) and 320 brighter than 200 (its
-#                  spot): it multiplies the floor (mod2x)
+# litmap.py OUTDIR: LitCourt.glb, a made-up map with everything tools/cs2map.py writes for a game's own lighting, and
+# LitCourtRuntimeSun.glb, the same with a sun lacking a baked shadow channel (cs2map's Dynamic or Stationary sun: realtime
+# shadow map only). A 20 m court with 5 m walls, open to the sky: HYPR3D_lighting with two lighting sets (lightmaps,
+# probe volumes of different priority), fog, exposure range and tone curve; _LIGHTMAP_UV on world meshes ("node000_..."
+# as Source 2 Viewer names them) while probes light the props; HYPR3D_materials_source2 and HYPR3D_materials_blend
+# (the floor's red COLOR_0 must not show); a hypr3d_backdrop 340-430 m out, past the far plane (200 m), shown only if
+# its own depth range works; BC1/BC3/BC5 textures, EXT_mesh_gpu_instancing, a trigger brush the loader drops, and
+# hypr3d_spawn and hypr3d_desktop (north wall, 13 m ahead).
+# Correct render from the spawn (shot --size 1280x800 --map LitCourt.glb --spawn --autoexp 1), as frame fractions
+# x0 y0 x1 y1 and sRGB on NVIDIA: exposure 0.35 (the range's bottom); floor checker orange .15 .80 .40 .88 (188 155 117)
+# and teal .60 .80 .85 .88 (141 160 166); baked shadow band .10 .735 .42 .775 (171 122 72); moss .28 .635 .42 .67
+# (92 109 41); violet sky .02 .02 .30 .08 (162 100 150); hills .20 .20 .33 .29 (108 145 67); towers lit by the
+# backdrop's probes .375 .12 .405 .28 (198 169 100); magenta pillar (indoor probes) .615 .42 .643 .58 (157 73 146);
+# glowing cyan sign in .40 .34 .60 .40; the decal's dark ring and bright spot in .567 .649 .74 .721
 import math, os, struct, sys, zlib
 
-sys.dont_write_bytecode = True  # (no __pycache__ left next to it)
+sys.dont_write_bytecode = True  # no __pycache__ next to it
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from assets import GLB  # noqa: E402
 
-H = 5.0                      # the court's walls
+H = 5.0                      # court wall height, m
 SUN = (0.3687, 0.7660, 0.5265)  # towards the sun: 50 degrees up, from the south-south-east
 BACKDROP_SCALE = 16.0
 BACKDROP_Y = -8.0
@@ -102,8 +71,7 @@ def srgb_to_linear(c):
 # ---------------------------------------------------------------- images
 
 def png(w, h, channels, px):
-    """an 8-bit PNG (1 grey, 3 RGB, 4 RGBA channels) of bytes in rows, top first; every row filtered by the byte to its
-    left or by the one above, whichever deflates the whole image smaller"""
+    """8-bit PNG from rows of bytes, top first (1, 3 or 4 channels); Sub or Up filter, whichever deflates smaller"""
     stride = w * channels
     rows = [bytes(px[y * stride:(y + 1) * stride]) for y in range(h)]
     sub = [b'\1' + bytes((a - b) & 255 for a, b in zip(r, bytes(channels) + r[:-channels])) for r in rows]
@@ -129,7 +97,7 @@ def image(w, h, channels, fn):
 
 
 def rgbe(c):
-    """linear RGB as the RGBE bytes cs2map writes: mantissas, then the exponent + 128 (decoded (m + 0.5) 2^(e - 136))"""
+    """linear RGB as cs2map's RGBE bytes: mantissas, then exponent + 128; decodes as (m + 0.5) 2^(e - 136)"""
     m = max(c)
     if m <= 1e-9:
         return (0, 0, 0, 0)
@@ -145,7 +113,7 @@ def hash01(i, j, seed):
 
 
 def fbm(size, seed):
-    """tileable value noise in 0..1, size x size: lumps 1/4 of it across, and smaller ones"""
+    """tileable size x size value noise in 0..1, octaves from 1/4 of the size down"""
     out = [0.0] * (size * size)
     for period, weight in ((4, 0.45), (8, 0.25), (16, 0.18), (32, 0.12)):
         lat = [[hash01(i, j, seed + period) for i in range(period)] for j in range(period)]
@@ -181,7 +149,7 @@ def n128(x, y, shift=0):
 
 
 def normal_px(height, x, y, size, k):
-    """a tangent space normal from a tileable height field, the way Source keeps them (green down the texture)"""
+    """tangent-space normal from a tileable height field, green pointing down as in Source"""
     dx = height((x + 1) % size, y) - height((x - 1) % size, y)
     dy = height(x, (y + 1) % size) - height(x, (y - 1) % size)
     n = unit((-dx * k, -dy * k, 1.0))
@@ -202,7 +170,7 @@ GLYPHS = {
 
 
 def lettering(text, w, h, scale):
-    """where the text's letters are, as a set of pixels, in the middle of w x h"""
+    """set of pixels covered by the text, centred in w x h"""
     on = set()
     x0, y0 = (w - (len(text) * 6 - 1) * scale) // 2, (h - 7 * scale) // 2
     for k, ch in enumerate(text):
@@ -231,7 +199,7 @@ def textures():
     t['floor_base'] = image(256, 256, 3, floor)
     t['floor_normal'] = image(256, 256, 3, lambda x, y: normal_px(tile_height, x, y, 256, 3.0))
 
-    # the floor's second layer: moss, where it meets the tiles (g) and how softly (r), and its bumps with roughness
+    # floor's moss layer; mask g = where it meets the tiles, r = how softly; normal map with roughness in alpha
     t['moss'] = image(128, 128, 3, lambda x, y: mix((0.16, 0.30, 0.07), (0.45, 0.62, 0.16), n128(x, y) ** 1.5))
     t['moss_mask'] = image(128, 128, 3, lambda x, y: (0.08 + 0.12 * n128(x, y, 40), 0.2 + 0.6 * n128(x, y, 11), 0.0))
     t['moss_normal'] = image(128, 128, 4, lambda x, y: normal_px(lambda a, b: n128(a, b, 23), x, y, 128, 6.0) + (0.92,))
@@ -247,7 +215,7 @@ def textures():
     t['wall_base'] = image(256, 256, 3, wall)
     t['wall_detail'] = image(128, 128, 3, lambda x, y: (0.5 + 0.9 * (n128(x, y, 70) - 0.5),) * 3)
 
-    # crates: planks, scratches for the overlay, and where they show (the faces' edges, on the second uv set)
+    # crates: planks, overlay scratches, and a mask on the second uv set showing them at the face edges
     def crate(x, y):
         frame = min(x, 127 - x, y, 127 - y) < 12
         g = n128(x * 4 % 128, y // 4, 90)
@@ -274,7 +242,7 @@ def textures():
     t['sign_base'] = image(256, 64, 3, lambda x, y: (0.75, 0.78, 0.8) if (x, y) in letters or border(x, y) else (0.09, 0.1, 0.12))
     t['sign_glow'] = image(256, 64, 3, lambda x, y: (1.0,) * 3 if (x, y) in letters else (0.35,) * 3 if border(x, y) else (0.0,) * 3)
 
-    # the decal, multiplied in (mod2x): a dark ring round a bright spot, 0.5 grey (none) outside
+    # the decal, multiplied in (mod2x): a dark ring round a bright spot, no change outside
     def decal(x, y):
         r = math.hypot(x - 63.5, y - 63.5) / 64.0
         ring = smooth(0.62, 0.7, r) * (1.0 - smooth(0.86, 0.94, r))
@@ -291,7 +259,7 @@ def textures():
     # the backdrop's hills: grass and rock
     t['hills'] = image(64, 64, 3, lambda x, y: mix((0.36, 0.40, 0.22), (0.55, 0.50, 0.40), n128(x * 2, y * 2, 150)))
 
-    # the sky: violet at the top, coral at the horizon, dusty pink under it (what the fog takes), the sun's glow
+    # sky: violet zenith, coral horizon, dusty pink below (the fog's colour), sun glow
     zenith, horizon, ground = (0.30, 0.20, 0.62), (0.9, 0.5, 0.45), (0.55, 0.33, 0.36)
 
     def sky(x, y):
@@ -324,8 +292,8 @@ def sunlit(p, n):
 
 
 class Lightmap:
-    """a lightmap's three images, by charts: each surface a rectangle of texels, with a border that repeats its edge
-    so filtering and the mip levels don't reach into the next one"""
+    """a lightmap's three images in charts: a texel rectangle per surface, its edge repeated into a PAD border so
+    filtering and mips don't bleed"""
     PAD = 6
 
     def __init__(self, w, h):
@@ -355,9 +323,8 @@ ORANGE, TEAL = (1.6, 0.7, 0.22), (0.15, 0.8, 1.4)
 
 
 def floor_light(s, t):
-    """the court's floor: 5 m cells of orange and teal light, darker by the walls, and the sun's baked shadow with a band
-    across (z -2.2 to -1.2) that only the baked shadow has. Its directional part has the light come from +x on the west
-    half and from -x on the east half, with less specular where the walls are near."""
+    """floor: 5 m orange/teal checker, darker by the walls; baked sun shadow plus a band (z -2.2..-1.2) only it has;
+    directional light from +x on the west half, -x on the east, less specular near walls"""
     x, z = -10.0 + 20.0 * s, -10.0 + 20.0 * t
     cell = (int((x + 10.0) // 5.0) + int((z + 10.0) // 5.0)) % 2
     d = min(10.0 - abs(x), 10.0 - abs(z))
@@ -371,7 +338,7 @@ def floor_light(s, t):
     return irr, dr, shadow
 
 
-# the walls: from their left end as seen from inside, along, facing, and their light at the top and at the bottom
+# per wall: left end seen from inside, direction along, facing, light at the top and at the bottom
 WALLS = {
     'north': ((-10.0, 0.0, -10.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (1.8, 1.55, 1.0), (0.55, 0.42, 0.32)),
     'east': ((10.0, 0.0, -10.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0), (1.5, 0.6, 1.1), (0.45, 0.2, 0.36)),
@@ -390,22 +357,21 @@ def wall_light(name):
 
 
 def hills_light(s, t):
-    """the backdrop's hills: terraces of lime and sea green light (its probes are gold), down from the crest (t 0) to
-    the foot (t 1), the foot in the sun's baked shadow"""
+    """backdrop hills: lime and sea-green terraces from crest (t 0) to foot (t 1), the foot in baked shadow"""
     band = int(t * 5.0) % 2
     return mul((0.35, 1.9, 1.1) if band else (0.8, 2.6, 0.45), 1.0 - 0.45 * t), (0.5, 0.5, 1.0, 1.0), 1.0 if t > 0.72 else 0.0
 
 
-# light probes: the atlas's blocks are the light arriving along Source's +x +y +z -x -y -z, i.e. at surfaces facing
-# glTF's +z (south), +x (east), +y (up), -z (north), -x (west) and -y (down)
+# probe atlas blocks hold the light along Source's +x +y +z -x -y -z, i.e. onto surfaces facing glTF's +z (south), +x
+# (east), +y (up), -z (north), -x (west) and -y (down)
 CUBE_OUTDOOR = ((0.3, 1.5, 0.35), (1.6, 0.3, 0.25), (0.8, 0.6, 1.7), (1.3, 1.1, 0.15), (0.25, 0.5, 1.8), (0.5, 0.35, 0.25))
 CUBE_INDOOR = ((1.5, 0.25, 1.3), (1.5, 0.25, 1.3), (1.8, 0.3, 1.55), (1.5, 0.25, 1.3), (1.5, 0.25, 1.3), (0.4, 0.07, 0.35))
 CUBE_BACKDROP = ((1.8, 1.2, 0.35), (1.6, 0.7, 0.3), (1.2, 1.2, 1.4), (0.5, 0.45, 0.4), (0.9, 0.6, 0.35), (0.2, 0.18, 0.15))
 
 
 def volume(lo, hi, offset, size, priority):
-    """a probe volume as cs2map writes one: glTF world -> 0..1 in its box, whose axes are Source's (x along glTF z,
-    y along glTF x, z up), column major; where its probes are in the atlas; its corners"""
+    """probe volume as cs2map writes it: column-major glTF world -> 0..1 box matrix (Source axes: x = glTF z, y = glTF
+    x, z up), atlas place, corners"""
     sx, sy, sz = hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]
     rows = [[0, 0, 1 / sz, -lo[2] / sz], [1 / sx, 0, 0, -lo[0] / sx], [0, 1 / sy, 0, -lo[1] / sy], [0, 0, 0, 1]]
     return {'matrix': [float(rows[r][c]) for c in range(4) for r in range(4)], 'min': list(lo), 'max': list(hi),
@@ -413,8 +379,8 @@ def volume(lo, hi, offset, size, priority):
 
 
 def probe_atlas(dims, vols, cube, shadow, cols=16):
-    """the irradiance atlas (RGBE) and the sun's baked shadow for the first block, slices in a grid cols wide;
-    cube(volume, p, block) and shadow(volume, p) at each probe's place p (glTF)"""
+    """RGBE irradiance atlas (6 blocks of z slices, cols wide) and baked sun shadow (one block); cube(volume, p, block)
+    and shadow(volume, p) get each probe's glTF position"""
     W, Hh, D = dims
     rows = (6 * D + cols - 1) // cols
     irr = bytearray(cols * W * rows * Hh * 4)
@@ -438,8 +404,7 @@ def probe_atlas(dims, vols, cube, shadow, cols=16):
 # ---------------------------------------------------------------- geometry
 
 def rect(origin, du, dv, us, vs, attrs):
-    """a grid over origin + s du + t dv, at the fractions us x vs, facing cross(du, dv); attrs(s, t, p) gives each
-    vertex's attributes besides POSITION and NORMAL"""
+    """grid over origin + s du + t dv at fractions us x vs, facing cross(du, dv); attrs(s, t, p) adds vertex attributes"""
     n = unit(cross(du, dv))
     verts = []
     for t in vs:
@@ -480,7 +445,7 @@ def face_uv(f, s, t, p):
 
 
 class Map(GLB):
-    """assets.py's GLB and what a map needs besides: images, textures, any vertex attribute, nodes in a tree"""
+    """assets.py's GLB plus images, textures, any vertex attribute and a node tree"""
 
     def __init__(self):
         super().__init__()
@@ -572,7 +537,7 @@ def litcourt(path, baked_shadow=True):
     kinds = ('irradiance', 'directional', 'shadows') if baked_shadow else ('irradiance', 'directional')
     lm0 = [g.image('map_' + k, d) for k, d in zip(kinds, lm.images())]
 
-    # two volumes the pillar is in: the indoor one only wins by its priority (the pillar is nearer the other's middle)
+    # the pillar is in both volumes, nearer the outdoor one's middle: the indoor one wins only by priority
     outdoor = volume((-10.5, -0.5, -10.5), (10.5, 7.5, 10.5), (0, 0, 0), (6, 6, 3), 0)
     indoor = volume((2.0, -0.5, -10.5), (10.5, 7.5, 10.5), (6, 0, 0), (2, 2, 2), 1)
 
@@ -748,7 +713,7 @@ def litcourt(path, baked_shadow=True):
 
     # ------------------------------------------------ where to start and where the desktop hangs
     g.place('hypr3d_spawn', translation=[0.0, 0.0, 3.0])             # facing -Z, the north wall
-    g.place('hypr3d_desktop', translation=[0.0, 2.1, -9.99])         # its front is +Z
+    g.place('hypr3d_desktop', translation=[0.0, 2.1, -9.99])         # front faces +Z
 
     # ------------------------------------------------ HYPR3D_lighting
     def lightmaps(ims):

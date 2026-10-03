@@ -1,12 +1,4 @@
-// hypr3d: walk around your Hyprland desktop in first person.
-//
-// While 3D mode is on, a custom pass element covers the whole monitor. It
-// draws a small procedural world plus every window/layer/popup as a textured
-// panel hanging on its north wall, and hands the result back to Hyprland as a
-// plain texture. Input is taken over: the mouse turns the camera, WASD walks,
-// and clicks/scrolls go to whatever surface the crosshair points at. With an
-// avatar loaded (plugin:hypr3d:avatar), V switches to a third person view of it,
-// and Tab opens the Action Menu: its emotes, expressions, gestures and outfit.
+// hypr3d: walk around your Hyprland desktop in first person, its windows drawn as panels in a 3D world
 
 #include "apps.hpp"
 #include "compat.hpp"
@@ -77,7 +69,7 @@
 
 namespace h3d {
     namespace {
-        // the last lines logged, for hyprctl hypr3d log: Hyprland writes its log only with debug:disable_logs off
+        // recent log lines for hyprctl hypr3d log (Hyprland logs only with debug:disable_logs off)
         constexpr size_t        LOG_LINES = 400;
         std::mutex              g_logMutex;
         std::deque<std::string> g_logLines;
@@ -124,39 +116,35 @@ namespace h3d {
 using namespace h3d;
 
 namespace {
-    PHLWINDOW   parentOf(const PHLWINDOW& w); // (apps and windows, below)
+    PHLWINDOW   parentOf(const PHLWINDOW& w);
     std::string classOf(const PHLWINDOW& w);
-    int         keyHand(uint32_t key);        // (first person: the hand that types it)
+    int         keyHand(uint32_t key);
 
     constexpr float F_PI            = std::numbers::pi_v<float>;
     constexpr float FOV_Y         = 70.f * F_PI / 180.f;
     constexpr float ENTER_TIME    = 0.8f;
     constexpr float EXIT_TIME     = 0.6f;
-    constexpr float PLAY_TIME     = 0.35f; // the camera going to a window played, and back
-    constexpr float PLAY_FILL     = 0.94f; // how much of the view it fills, the way it fits
-    // played in place in tiling mode's ring: how much of the view it takes (plugin:hypr3d:play_size's default),
-    // Super+wheel's notch, and the least and the most play_size can be (the most: as much as filling the view)
+    constexpr float PLAY_TIME     = 0.35f;
+    constexpr float PLAY_FILL     = 0.94f; // of the view
+    // play_size: default, Super+wheel step, limits
     constexpr float PLAY_SIZE      = 0.5f;
     constexpr float PLAY_SIZE_STEP = 0.05f;
     constexpr float PLAY_SIZE_MIN  = 0.25f;
     constexpr float PLAY_SIZE_MAX  = PLAY_FILL;
-    constexpr float PLAY_SIZE_TELL = 0.5f; // seconds without a notch before the size is said (a notification a turn of the wheel)
-    constexpr float FRONT_FIT     = 0.85f; // the most of the view's height and width a window opening in front of you takes
-    constexpr float THIRD_FIT     = 0.6f;  // ... in third person (past the avatar: less, so it and the world round it show)
-    constexpr float WHEEL_SIZE    = 0.95f; // a wheel notch down while carrying: that much smaller (up: bigger)
-    constexpr float CARRY_NEAREST = 0.6f;  // the nearest a window is carried: to your eye, or in third person past the avatar
-    constexpr float TILE_RADIUS   = 2.f;   // tiling mode's ring (T): how far out round your eye the windows stand
-    constexpr float TILE_PAST     = 1.f;   // ... in third person round the avatar's head, this far past the camera's boom
-                                           // (the camera inside the ring sees every window from the front)
-    constexpr float TILE_MIN_PX   = 100;   // a window smaller than that either way (a status pill, a splash) isn't tiled
-    constexpr float TILE_REPULL   = 0.05f; // the ring going with you: what's in the way of a window worked out again when it went this far since
-    constexpr int   TILE_REPULLS  = 2;     // ... for this many windows a frame at most (153 rays each; the rest the next frames)
-    constexpr int   ICON_PX       = 96;    // the apps' pictures in the Action Menu (it scales them)
-    // play mode that ended by itself (not Super+Esc): a game's keys held back till this long (seconds) without one
+    constexpr float PLAY_SIZE_TELL = 0.5f; // notify after this long without a notch
+    constexpr float FRONT_FIT     = 0.85f; // view fraction a new window fits in
+    constexpr float THIRD_FIT     = 0.6f;  // ... in third person
+    constexpr float WHEEL_SIZE    = 0.95f; // per wheel notch
+    constexpr float CARRY_NEAREST = 0.6f;
+    constexpr float TILE_RADIUS   = 2.f;
+    constexpr float TILE_PAST     = 1.f;   // third person: past the camera boom
+    constexpr float TILE_MIN_PX   = 100;
+    constexpr float TILE_REPULL   = 0.05f; // ring move before re-checking obstacles
+    constexpr int   TILE_REPULLS  = 2;     // windows re-checked a frame at most
+    constexpr int   ICON_PX       = 96;
+    // held game keys go back to walking after this long idle (s)
     constexpr float PLAY_PAUSE_IDLE = 4.f;
-    // the window a shortcut went to that had the keyboard closed, at most this long (seconds) after (Super+Q, pressed
-    // again for a window slow to close, a game saving as it quits): shortcuts are for no window till you turn this far
-    // (radians), move this far (metres) or this long (seconds) goes by
+    // after a shortcut's window closes (within CLOSE_TIME s), hold shortcuts till you turn, move or HOLD_TIME s pass
     constexpr float SHORTCUT_CLOSE_TIME = 30.f;
     constexpr float SHORTCUT_HOLD_TURN = 2.f * F_PI / 180.f;
     constexpr float SHORTCUT_HOLD_MOVE = 0.3f;
@@ -169,16 +157,15 @@ namespace {
     constexpr float EYE_CROUCH    = 1.1f;
     constexpr float GRAVITY       = 20.f;
     constexpr float JUMP_SPEED    = 6.3f;
-    constexpr float WALK_SPEED    = 1.6f; // (plugin:hypr3d:walk_speed's default: an easy walk)
-    constexpr float RUN_SPEED     = 4.5f; // (plugin:hypr3d:run_speed's: a run)
-    // (plugin:hypr3d:emote_volume's: emotes' sounds at half their own level, 6 dB down: a dance's song is often mastered
-    // louder than the rest of what plays, Freddy's at -6 LUFS)
+    constexpr float WALK_SPEED    = 1.6f; // default walk_speed
+    constexpr float RUN_SPEED     = 4.5f; // default run_speed
+    // default emote_volume: -6 dB (dance songs are mastered loud)
     constexpr float EMOTE_VOLUME  = 0.5f;
     constexpr float CROUCH_SPEED  = 1.f;
     constexpr float FLY_SPEED     = 8.f;
-    constexpr float ACCEL         = 10.f; // m/s², on the ground: up to a walk in a step, as people start
-    constexpr float DECEL         = 14.f; // (and stop)
-    constexpr float TURN_BACK     = 7.f;  // (and back the other way: through a stand, as quick as a person's feet can)
+    constexpr float ACCEL         = 10.f; // m/s²
+    constexpr float DECEL         = 14.f;
+    constexpr float TURN_BACK     = 7.f;  // m/s² when reversing
 
     // evdev key codes
     enum : uint32_t {
@@ -232,7 +219,6 @@ namespace {
         return (uint32_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     }
 
-    // XWayland's (an X11 window's, or one of its menus'): its X clients get the pointer through it
     bool fromXWayland(const SP<CWLSurfaceResource>& surf) {
         return surf && g_pXWayland && g_pXWayland->m_server && surf->client() == g_pXWayland->m_server->m_xwaylandClient;
     }
@@ -248,18 +234,17 @@ namespace {
         return {std::sin(yaw) * std::cos(pitch), std::sin(pitch), -std::cos(yaw) * std::cos(pitch)};
     }
 
-    // the keys walking reads (simulate()): they still walk while a game's other keys are held back
+    // still walk while a game's keys are held back
     bool walkKey(uint32_t k) {
         return k == K_W || k == K_A || k == K_S || k == K_D || k == K_UP || k == K_DOWN || k == K_LEFT || k == K_RIGHT || k == K_SPACE || k == K_LSHIFT || k == K_LCTRL ||
             k == K_C;
     }
 
-    // Super, Alt, Ctrl and Shift themselves
     bool modifierKey(uint32_t k) {
         return k == K_LMETA || k == K_RMETA || k == K_LALT || k == K_RALT || k == K_LCTRL || k == K_RCTRL || k == K_LSHIFT || k == K_RSHIFT;
     }
 
-    // at most n bytes of s, cut where a UTF-8 character starts, with "…" when it's cut
+    // cuts at a UTF-8 boundary, adding "…"
     std::string clipped(const std::string& s, size_t n) {
         if (s.size() <= n)
             return s;
@@ -268,8 +253,7 @@ namespace {
         return s.substr(0, n) + "…";
     }
 
-    // the window a dialog belongs to at the top of its parents (itself, for a window of its own), 8 up at most (as
-    // keyboardWith: X11 clients can make WM_TRANSIENT_FOR go round)
+    // at most 8 hops: X11 WM_TRANSIENT_FOR can loop
     PHLWINDOW topParent(PHLWINDOW w) {
         for (int hops = 0; w && hops < 8; ++hops) {
             const auto up = parentOf(w);
@@ -296,20 +280,19 @@ struct SCamera {
     float yaw = 0, pitch = 0;
 };
 
-// a window taken off the desktop wall and put somewhere in the world
+// a window taken off the desktop wall into the world
 struct SPlacement {
     PHLWINDOWREF window;
-    V3           center, targetCenter; // world position of the window's middle
-    Quat         rot, targetRot;       // local x = right, y = up, z = the side the content faces
+    V3           center, targetCenter;
+    Quat         rot, targetRot;       // x right, y up, z out of the front
     float        scale = 1, targetScale = 1; // meters per logical px
-    bool         returning = false;    // flying back to the wall, dropped once it's there
-    bool         settled   = false;    // current pose caught up with the target
-    uint64_t     pinned    = 0;        // follows the view in its top right corner (the order it was pinned in), 0 = not
-    // what it was before it was pinned: its size (metres per logical px) and how far from your eye, for taking it back
-    // into your hands as big as it was (0 = not known)
+    bool         returning = false;    // flying back to the wall
+    bool         settled   = false;    // pose reached the target
+    uint64_t     pinned    = 0;        // pin order, 0 = not pinned
+    // scale and eye distance before pinning (0 = unknown)
     float        pinnedFromScale = 0, pinnedFromDist = 0;
-    bool         tiled   = false; // in tiling mode's row (T): where it goes is the row's, every frame
-    uintptr_t    follows = 0;     // a dialog: in front of that window (its parent), as it is over it on the 2D desktop
+    bool         tiled   = false; // laid out by the tiling ring
+    uintptr_t    follows = 0;     // dialog: the parent it sits in front of
 };
 
 namespace {
@@ -321,24 +304,24 @@ namespace {
     SP<Config::Values::CStringValue> g_cfgAvatar;
     SP<Config::Values::CFloatValue>  g_cfgAvatarHeight;
     SP<Config::Values::CBoolValue>   g_cfgAvatarPhysics;
-    SP<Config::Values::CBoolValue>   g_cfgFirstPersonBody; // first person shows the avatar's body and hands
+    SP<Config::Values::CBoolValue>   g_cfgFirstPersonBody;
     SP<Config::Values::CBoolValue>   g_cfgLipSync;
     SP<Config::Values::CStringValue> g_cfgLipSyncGain;   // dB, or auto
-    SP<Config::Values::CStringValue> g_cfgLipSyncSource; // the microphone, "" = the default one
+    SP<Config::Values::CStringValue> g_cfgLipSyncSource; // "" = default
     SP<Config::Values::CStringValue> g_cfgAvatarEmotes;
-    SP<Config::Values::CFloatValue>  g_cfgEmoteVolume; // how loud emotes' sounds play, 0 = not at all
-    SP<Config::Values::CStringValue> g_cfgApps;     // the Apps page's favourites
+    SP<Config::Values::CFloatValue>  g_cfgEmoteVolume; // 0 = muted
+    SP<Config::Values::CStringValue> g_cfgApps;     // Apps page favourites
     SP<Config::Values::CStringValue> g_cfgAppRules; // where apps launched from 3D open
-    SP<Config::Values::CFloatValue>  g_cfgPinSize;  // how much of the view's height a pinned window takes
-    SP<Config::Values::CStringValue> g_cfgMonitor;  // the monitor 3D goes on, "" = the focused one
+    SP<Config::Values::CFloatValue>  g_cfgPinSize;  // fraction of the view's height
+    SP<Config::Values::CStringValue> g_cfgMonitor;  // "" = the focused one
     SP<Config::Values::CFloatValue>  g_cfgWalkSpeed; // m/s
     SP<Config::Values::CFloatValue>  g_cfgRunSpeed;
-    SP<Config::Values::CBoolValue>   g_cfgTiling;    // tiling mode (T) from the start
-    SP<Config::Values::CBoolValue>   g_cfgTilingFollow; // ... its row going with you, or staying where it is (Y)
-    SP<Config::Values::CStringValue> g_cfgPlayView;     // how P plays a window: here (in place), or fill (the view); Shift+P the other
-    SP<Config::Values::CFloatValue>  g_cfgPlaySize;     // how much of the view a window played here in tiling mode's ring takes
+    SP<Config::Values::CBoolValue>   g_cfgTiling;    // on at start (T)
+    SP<Config::Values::CBoolValue>   g_cfgTilingFollow; // ring follows you (Y)
+    SP<Config::Values::CStringValue> g_cfgPlayView;     // here or fill (P); Shift+P the other
+    SP<Config::Values::CFloatValue>  g_cfgPlaySize;     // view fraction when played here in the ring
 
-    // a file named in the config, "" when unset
+    // config path, ~ expanded; "" when unset
     std::string configuredPath(const SP<Config::Values::CStringValue>& value) {
         std::string v = value ? value->value() : "";
         if (v == "[[EMPTY]]")
@@ -349,7 +332,7 @@ namespace {
         return v;
     }
 
-    // a path as it's given: without quotes, ~ for the home folder
+    // trims, unquotes and expands ~
     std::string unquote(std::string v) {
         const size_t a = v.find_first_not_of(" \t"), b = v.find_last_not_of(" \t\n");
         v              = a == std::string::npos ? "" : v.substr(a, b - a + 1);
@@ -361,7 +344,7 @@ namespace {
         return v;
     }
 
-    // the emote files and folders in the config, separated by commas
+    // emote files and folders, comma-separated
     std::vector<std::string> configuredEmotes() {
         std::string v = g_cfgAvatarEmotes ? g_cfgAvatarEmotes->value() : "";
         if (v == "[[EMPTY]]")
@@ -376,7 +359,7 @@ namespace {
         return out;
     }
 
-    // the configured map, "" for the built-in courtyard
+    // "" = the built-in courtyard
     std::string configuredMap() {
         return configuredPath(g_cfgMap);
     }
@@ -386,27 +369,24 @@ namespace {
         return v > 0.f ? std::min(v, 0.5f) : 0.02f;
     }
 
-    // plugin:hypr3d:play_view as it's set, in lower case ("" unset)
+    // play_view lower-cased, "" when unset
     std::string configuredPlayView() {
         std::string v = g_cfgPlayView ? unquote(g_cfgPlayView->value()) : "";
         std::ranges::transform(v, v.begin(), [](unsigned char c) { return (char)std::tolower(c); });
         return v == "[[empty]]" ? "" : v;
     }
 
-    // ... P fills the view with the window played (fill), or plays it where it is (here, anything else: checkPlayConfig
-    // says so)
+    // anything but fill plays here
     bool configuredPlayFill() {
         return configuredPlayView() == "fill";
     }
 
-    // plugin:hypr3d:monitor as it's set, "" for the focused monitor
     std::string configuredMonitor() {
         const std::string v = g_cfgMonitor ? unquote(g_cfgMonitor->value()) : "";
         return v == "[[EMPTY]]" ? "" : v;
     }
 
-    // a monitor by its name as hyprctl monitors lists it (DP-1), or by desc: and the start of its description, as
-    // Hyprland's monitor rules take them; null when no monitor that's connected is
+    // by name (DP-1) or desc:prefix, like monitor rules; null if not connected
     PHLMONITOR monitorNamed(const std::string& name) {
         const std::string v = unquote(name);
         if (v.empty())
@@ -417,8 +397,7 @@ namespace {
         return nullptr;
     }
 
-    // into 3D from another monitor: the keyboard focus doesn't stay with a window there, unseen (Super+Q would close
-    // it); what's clicked, typed into or played in 3D gets it. Whether it took it
+    // entering 3D: unfocus an unseen window on another monitor (Super+Q would close it)
     bool unfocusOthers(const PHLMONITOR& mon) {
         if (const auto w = Desktop::focusState()->window(); !w || w->m_monitor.lock() == mon)
             return false;
@@ -436,37 +415,31 @@ class CDesktop3D {
     void                          exit(bool immediate = false);
     void                          toggle();
     std::string                   setTyping(bool on);
-    // the mouse and keyboard to the desktop on another monitor, the 3D view staying up on its own (Super+Esc), or
-    // back into 3D
+    // Super+Esc: input to another monitor, the 3D view staying up; false = back
     std::string                   setAway(bool away);
     bool                          away() const {
         return m_away;
     }
 
     std::string                   hyprctl(const std::string& request);
-    // the Action Menu: open [page], close, toggle, back, pick [n], move dx dy, scroll n; none = what it shows
     std::string                   menuCommand(const std::vector<std::string>& args);
     std::string                   menuDispatch(const std::string& arg); // nothing = toggle, a page = open it, else a command
 
-    // P: the window under the crosshair gets every key, button and the mouse (a game), played where it is, the view as
-    // it was (here), or with the camera facing it, filling the view (fill); nullopt = plugin:hypr3d:play_view's. A view
-    // asked for while playing is switched to, the game played on
+    // P: all input to the aimed window (a game), here or filling the view; nullopt = play_view
     std::string                   setPlay(bool on, std::optional<bool> fill = std::nullopt);
-    std::string                   playDispatch(const std::string& arg); // [on|off|toggle] [here|fill]; nothing = P or Super+Esc
-    bool                          inOwnView(const V3& at) const; // a point in your own view (not play mode's facing a window)
-    void                          turnTo(const V3& at);          // you turn to face a point, at once
-    void                          checkPlayConfig();             // play_view: one it doesn't know said once; play_size: the live size its again
+    std::string                   playDispatch(const std::string& arg);
+    bool                          inOwnView(const V3& at) const;
+    void                          turnTo(const V3& at);
+    void                          checkPlayConfig();
     bool                          playing() const {
         return m_play.on;
     }
 
-    // T: tiling mode. The windows in the world, and the desktop wall's, side by side in a ring round where you stood, each
-    // facing you (tiling.cpp); one that opens goes in where you look, one carried goes where it's put down in the air.
-    // Off again, they go back where they were. Y: the ring goes with you, or stays where it is
+    // T: tiling mode, windows in a ring round you (tiling.cpp)
     std::string                   setTiling(bool on);
-    std::string                   tileHere(); // Shift+T: the ring round you here, the row's middle where you look now
-    std::string                   setTileFollow(bool on);               // Y: the ring going with you, or staying where it is
-    std::string                   tileDispatch(const std::string& arg); // nothing = T, here = Shift+T, follow = Y
+    std::string                   tileHere();
+    std::string                   setTileFollow(bool on);
+    std::string                   tileDispatch(const std::string& arg);
     bool                          tiling() const {
         return m_tiling.on;
     }
@@ -475,11 +448,10 @@ class CDesktop3D {
     bool                          onRelativeMotion(const IPointer::SMotionEvent& e);
     bool                          onAbsoluteMotion(const Vector2D& abs);
     void                          onPointerFrame();
-    bool                          holdsPointer() const { // in 3D, or going in or out, and the mouse isn't away on another monitor
+    bool                          holdsPointer() const {
         return m_mode != MODE_OFF && !m_away;
     }
-    // drawn in 3D this frame: it gets presentation feedback from here, as presented, instead of Hyprland's
-    // "discarded" for what the 3D view covers
+    // drawn in 3D this frame: presented, not "discarded"
     bool                          drawsSurface(const CWLSurfaceResource* s) const {
         return m_mode != MODE_OFF && m_drawnSurfaces.contains(s);
     }
@@ -499,7 +471,7 @@ class CDesktop3D {
     uint64_t                              m_frames = 0, m_framesAtLastFps = 0;
     std::chrono::steady_clock::time_point m_lastFps;
     float                                 m_minDt = 1.f;
-    float                                 m_updateMs = 0, m_renderMs = 0; // the plugin's own time a frame (averaged): its update, its drawing (the CPU's)
+    float                                 m_updateMs = 0, m_renderMs = 0; // averaged CPU ms a frame
 
     // world
     SWorld         m_world;
@@ -514,32 +486,30 @@ class CDesktop3D {
     // loaded maps
     CMapLoader           m_mapLoader;
     wl_event_source*     m_mapSource = nullptr;
-    std::string          m_mapPath;          // shown (or being loaded), "" = the courtyard
+    std::string          m_mapPath;          // shown or loading, "" = the courtyard
     std::string          m_mapConfigured;    // last value seen in the config
-    float                m_mapScale = 0;     // what the loaded map was scaled by
+    float                m_mapScale = 0;
 
-    // the avatar: the player's body, seen in third person (and its shadow in first)
+    // avatar
     CAvatarLoader                 m_avatarLoader;
     wl_event_source*              m_avatarSource = nullptr;
-    std::string                   m_avatarPath;       // shown (or being loaded), "" = none
-    std::string                   m_avatarConfigured; // last value seen in the config
-    int                           m_physicsConfigured = -1; // the same for avatar_physics (hyprctl can change it in between)
-    float                         m_avatarHeight = 0; // asked for, 0 = as it comes
+    std::string                   m_avatarPath;       // shown or loading, "" = none
+    std::string                   m_avatarConfigured;
+    int                           m_physicsConfigured = -1;
+    float                         m_avatarHeight = 0; // 0 = the model's own
     std::shared_ptr<SAvatarModel> m_avatar;
     CAvatarAnimator               m_anim;
-    CAvatarControl                m_ctl{m_anim}; // what hyprctl and the Action Menu do to it (control.cpp), and what was set by hand
-    // lip sync: asked for (the config, hyprctl, the menu); the microphone listens only while that's so and the 3D
-    // desktop is up with an avatar, and a badge says so
+    CAvatarControl                m_ctl{m_anim};
+    // lip sync on: the mic listens only in 3D with an avatar
     bool                          m_lipsync = false;
-    int                           m_lipsyncConfigured = -1; // the config's, last seen
+    int                           m_lipsyncConfigured = -1;
     CMicrophone                   m_mic;
     CLipSync                      m_lip;
     std::vector<float>            m_micSamples;
-    std::string                   m_lipsyncSource;                  // the microphone asked for, "" = the default one
-    std::string                   m_lipsyncSourceConfigured = "\n"; // the config's, last seen
-    std::string                   m_lipsyncGainConfigured   = "\n"; // the same for lipsync_gain
-    // an emote's sound (a dance's song: the speaker plays it while the emote does, in 3D): what it was started for (the
-    // emote, which start of it, its sound), and the last error said of it
+    std::string                   m_lipsyncSource;                  // "" = default
+    std::string                   m_lipsyncSourceConfigured = "\n";
+    std::string                   m_lipsyncGainConfigured   = "\n";
+    // emote sound: what it was started for, and the last error
     CSpeaker                      m_speaker;
     struct {
         int           emote  = -1;
@@ -547,35 +517,34 @@ class CDesktop3D {
         const SSound* sound  = nullptr;
     }                             m_soundFor;
     std::string                   m_soundError;
-    // what the microphone is doing, watched a few times a second: for the badge, one notification each time it
-    // starts listening, and hyprctl
+    // microphone state for the badge, notifications and hyprctl
     struct {
-        int         problem  = -1;    // eMicProblem, as the badge has it
-        bool        notified = false; // this time listening
+        int         problem  = -1;    // eMicProblem
+        bool        notified = false; // this listening session
         std::chrono::steady_clock::time_point looked; // last
-        float       broken = 0;       // seconds the stream has been broken, to open it again
-        std::string error;            // what broke it last (until it's linked again)
-        std::string source;           // the source it was linked to last (node.name)
+        float       broken = 0;       // seconds broken, to reopen
+        std::string error;            // last error, until relinked
+        std::string source;           // last linked node.name
     } m_micWatch;
     std::vector<uint32_t>         m_badge;
-    std::string                   m_badgeText; // what m_badge says
+    std::string                   m_badgeText;
     int                           m_badgeW = 0, m_badgeH = 0;
-    CBox                          m_badgeBox; // where it was drawn last, output pixels (empty: it wasn't)
+    CBox                          m_badgeBox; // output px, empty: not drawn
     float                         m_badgeScale = 0;
     uint64_t                      m_badgeSerial = 0;
-    // emotes from files: the config's, and those hyprctl adds (made again for each avatar that loads)
+    // emote files from the config and hyprctl
     CEmoteLoader                  m_emoteLoader;
     wl_event_source*              m_emoteSource = nullptr;
     std::vector<std::string>      m_emoteFiles;             // added with hyprctl, absolute
-    std::vector<std::string>      m_emoteLoading;           // what m_emoteLoader makes, till it's done
-    std::string                   m_emotesConfigured = "\n"; // last value seen in the config ("\n" = none seen)
-    std::string                   m_emotePlay;              // a file whose first emote plays when it's made
+    std::vector<std::string>      m_emoteLoading;           // being built
+    std::string                   m_emotesConfigured = "\n"; // "\n" = none seen
+    std::string                   m_emotePlay;              // plays its first emote once built
     int                           m_emotePlayLoop = -1;
-    float                         m_bodyYaw = 0;      // where the body faces
-    V3                            m_wish;             // the velocity the keys ask for (horizontal)
+    float                         m_bodyYaw = 0;
+    V3                            m_wish;             // horizontal velocity the keys ask for
     bool                          m_bodyTurning = false;
-    float                         m_lookYaw = 0, m_lookPitch = 0; // where its head turns, relative to the body
-    // light around it, measured the way the map bakes its own
+    float                         m_lookYaw = 0, m_lookPitch = 0; // head turn relative to the body
+    // light around the avatar, measured as the map bakes its own
     struct {
         std::array<float, 32> sky{}, bounce{};
         int                   next = 0;
@@ -583,22 +552,19 @@ class CDesktop3D {
         float                 skyAvg = 1, bounceAvg = 0;
     } m_avatarLight;
 
-    // first person with the avatar's body (plugin:hypr3d:first_person_body, hyprctl's view body): the camera in its eyes,
-    // its head not drawn, its hands in view doing what you do (fpBody())
+    // first person body: camera in the avatar's eyes, head hidden
     bool            m_fpBodyOn         = true;
     int             m_fpBodyConfigured = -1;
     SFirstPersonEye m_fpEye;
-    bool            m_fpPress = false; // a button went down on a window (the finger pokes), for the next frame
-    float           m_fpTouch = 0;     // ... and the finger stays out that much longer at least (a click), seconds
-    int             m_fpTap   = -1;    // a key went down typing: the hand that taps it (0 left, 1 right), for the next frame
-    bool            m_fpTapRight = false; // (the space bar's: one thumb, then the other)
-    float           m_aimDist = 0;        // how far ahead the window the crosshair is on is (m_aimed)
-    // an emote in first person with the body: the camera goes out behind the avatar as in third person while it plays
-    // (it moves the whole body, its head too: seen from inside, the body would turn round the camera), back into its
-    // eyes as it ends; 0 in the eyes .. 1 out, eased
+    bool            m_fpPress = false; // finger pokes next frame
+    float           m_fpTouch = 0;     // seconds the finger stays out
+    int             m_fpTap   = -1;    // hand tapping next frame (0 left, 1 right)
+    bool            m_fpTapRight = false; // space bar: thumbs alternate
+    float           m_aimDist = 0;
+    // emotes move the whole body: first person steps out behind it (0 eyes .. 1 out)
     float           m_emoteView = 0;
-    eFirstHands     m_fpHands   = FPH_READY; // what the hands did last frame (the status)
-    bool            m_fpCramped = false;     // its eyes above what's over them (a low ceiling): the camera would be in its body
+    eFirstHands     m_fpHands   = FPH_READY;
+    bool            m_fpCramped = false;     // low ceiling: camera in the body, not drawn
 
     // third person: the camera hangs behind the avatar's shoulder
     bool  m_thirdPerson = false;
@@ -606,20 +572,20 @@ class CDesktop3D {
     float m_camSide     = 0.4f; // over the right shoulder
     float m_camBoom     = 0;    // actual, after walls pulled it in
 
-    // eyes adjusting to the dark: a few rays a frame measure the light around the camera
+    // auto exposure: a few rays a frame sample the light
     float                 m_exposure = 1;
     float                 m_lightAvg = 0;
     std::array<float, EXPOSURE_SAMPLES> m_lightProbe{};
     int                   m_lightNext = 0;
-    bool                  m_lightFull = false; // false: measure everything again at once (after a jump)
+    bool                  m_lightFull = false; // false: resample all at once
 
     // player
-    SWalker m_body; // (its feet, velocity, on the ground)
+    SWalker m_body;
     float m_yaw = 0, m_pitch = 0;
     float m_eyeHeight = EYE;
     bool  m_crouched  = false;
     bool  m_fly       = false;
-    bool  m_running   = false;   // Shift held, going somewhere (the avatar runs)
+    bool  m_running   = false;   // Shift held while moving
     float m_sens      = 0.0022f; // radians per mouse count
     float m_scriptWalk = 0;      // hyprctl "walk": seconds left
     V3    m_scriptDir;
@@ -631,47 +597,43 @@ class CDesktop3D {
     std::unordered_set<uint32_t> m_consumed;    // key presses we ate, so their releases get eaten too
     std::unordered_set<uint32_t> m_sentButtons; // buttons forwarded to clients and not released yet
     bool                         m_typing = false;
-    PHLWINDOWREF                 m_typingInto;          // (its dialogs too): typing ends when it goes, as play mode does
-    float                        m_typingUnfocused = 0; // seconds no window has had the keyboard meanwhile
+    PHLWINDOWREF                 m_typingInto;          // with its dialogs; typing ends when it goes
+    float                        m_typingUnfocused = 0; // seconds without a focused window
     Vector2D                     m_look;
     Vector2D                     m_lastAbs{-1, -1};
     struct {
         bool     negative = false;
         uint32_t axis = 0, timeMs = 0;
-        uint32_t acc = 0; // 1/120ths of a notch not sent as a whole one yet
-    } m_wheel;            // a high-resolution wheel's notches made up for the window aimed at, as Hyprland does
-    bool                         m_axisFramePending = false; // a touchpad's scrolling sent, its frame not yet (the device's)
-    // Away: the mouse and keyboard are the desktop's on another monitor (Super+Esc, or a keybind that moved the focus
-    // and the cursor there), while the 3D view stays up on its own monitor; the cursor coming back onto that one
-    // comes back into 3D. In 3D Hyprland's cursor stays on the 3D monitor, where nothing shows it
+        uint32_t acc = 0; // unsent 1/120ths of a notch
+    } m_wheel;            // hi-res wheel summed into notches
+    bool                         m_axisFramePending = false; // touchpad frame still to send
+    // away: input on another monitor's desktop, the 3D view staying up
     bool                         m_away = false;
-    bool                         m_awayTold = false;   // how to come back was said, this time in 3D
-    std::optional<Vector2D>      m_desktopAt;          // where the cursor was last on another monitor (Super+Esc goes there)
-    bool                         m_ownMove = false;    // the plugin's own input.mouse.move (a drag moved where you point)
+    bool                         m_awayTold = false;   // the way back was shown
+    std::optional<Vector2D>      m_desktopAt;          // last cursor spot elsewhere (Super+Esc)
+    bool                         m_ownMove = false;    // our own input.mouse.move (a drag)
     UP<SEventLoopDoLaterLock>    m_followLater;        // followCursor() after this frame
 
-    // A layer surface on the 3D monitor that has the keyboard (a launcher from a keybind, a clipboard picker, a shell's
-    // menu): drawn over the 3D view as on the 2D desktop, where it can be seen and used, with the keys and a pointer of
-    // its own, till it lets go of the keyboard (and a moment more, as it closes). Off the desktop wall meanwhile
+    // a layer surface with the keyboard (a launcher), drawn over the 3D view
     struct {
         PHLLSREF               layer;
-        bool                   input   = false; // it has the keyboard: the keys and the mouse are its
+        bool                   input   = false; // gets keys and mouse
         float                  closing = 0;     // seconds since it let go of the keyboard
         Vector2D               pointer;         // over the monitor, logical px
-        WP<CWLSurfaceResource> grab;            // pressed on: gets the pointer till the buttons are up
-        Vector2D               grabAt;          // where that surface is (global logical px)
+        WP<CWLSurfaceResource> grab;            // has the pointer until release
+        Vector2D               grabAt;          // global logical px
     } m_shell;
 
-    // the Action Menu (Tab), like VRChat's: while it's open the mouse moves its cursor, not the camera
+    // the Action Menu (Tab), like VRChat's: the mouse moves its cursor while open
     CActionMenu m_menu{[this](const std::string& id) {
                            if (id == "apps" || id == "apps/all" || id == "windows" || id.starts_with("win:") || id.starts_with("close:") || id == "maps" ||
                                id == "avatars")
-                               return ownPage(id); // (the apps and the windows: Hyprland's; the maps and the avatars: files)
+                               return ownPage(id);
                            const auto gain = m_lip.gainSetting();
                            return actionPage(id, {m_avatar.get(), &m_anim, m_avatarLoader.busy(), m_thirdPerson, m_fly, m_lipsync, CMicrophone::available(),
                                                   gain ? *gain : NAN, m_lip.gain(), m_mapLoader.busy() ? "loading…" : m_world.name});
                        },
-                       [this](const SMenuItem& it, float v, float v2) { // a slider's dial (a stick: both); lip sync's gain
+                       [this](const SMenuItem& it, float v, float v2) { // slider or stick dial
                            if (it.action == MA_LIPSYNC_GAIN)
                                m_lip.setGain(v < 0.025f ? std::nullopt : std::optional<float>(std::round(v * MIC_GAIN_MAX)));
                            else
@@ -691,66 +653,55 @@ class CDesktop3D {
         WP<CWLSurfaceResource> surface;
         Vector2D               offset; // hit-root local - surface local at press time
     } m_drag;
-    // where the pointer is on the panels, for the app's cursor: the panel (key, 0 = none) and a point on it
+    // pointer on the panels for the app's cursor (panel key 0 = none)
     struct {
         uintptr_t panel = 0;
         Vector2D  local;
     } m_pointerAt;
-    bool                                   m_cursorShown = false; // the app's cursor is drawn this frame
-    std::vector<PHLMONITORREF>             m_cursorLocks; // monitors whose hardware cursor is off while in 3D
+    bool                                   m_cursorShown = false;
+    std::vector<PHLMONITORREF>             m_cursorLocks; // hardware cursor off while in 3D
     std::unordered_set<const CWLSurfaceResource*> m_drawnSurfaces; // the panels' surfaces this frame
     Time::steady_tp                        m_frameTime;
 
-    // play mode (P): a window (a game, mostly) gets every key and button, the wheel, and the mouse the way it wants
-    // it: only relative motion while it locks the pointer, else a pointer that moves over it as over a monitor (kept
-    // in its confinement when it has one). Played here, the view stays as it was, the other windows round it; filling
-    // the view, the camera leaves the player to face it, and comes back when it ends
+    // play mode (P): a window (a game) gets all input, relative motion while it locks the pointer
     struct {
         bool         on = false;
-        bool         fill = false; // the camera goes to face it (Shift+P, or play_view = fill), else it's played where it is
+        bool         fill = false; // camera faces it (Shift+P, play_view fill)
         PHLWINDOWREF window;
-        Vector2D     pointer;    // over it, window-local logical px (its popups' too)
-        Vector2D     box;        // its size as the app draws it, as last seen (grown or shrunk, the pointer's kept on it)
-        Vector2D     lastGlobal; // Hyprland's cursor as last seen: in 3D only a warp moves it (wp_pointer_warp_v1)
-        float        t = 0;      // 0 = the player's own view .. 1 = facing the window (only filling the view)
-        bool         framed = false; // eye and rot are where the camera faces it
-        uintptr_t    framedKey = 0;  // ... the window they're for (one pinned to the view stays in your own view's corner)
-        std::string  configured = "\n"; // plugin:hypr3d:play_view as last seen
-        float        unfocused    = 0;     // seconds no window has had the keyboard (a dialog closed, its window next)
+        Vector2D     pointer;    // window-local logical px
+        Vector2D     box;        // last drawn size; the pointer stays on it
+        Vector2D     lastGlobal; // Hyprland's cursor; in 3D only warps move it
+        float        t = 0;      // 0 own view .. 1 facing it (fill)
+        bool         framed = false; // eye and rot face it
+        uintptr_t    framedKey = 0;  // ... for this window
+        std::string  configured = "\n";
+        float        unfocused    = 0;     // seconds without a focused window
         V3           eye;
         Quat         rot;
-        // played here in tiling mode's ring it takes that much of the view: plugin:hypr3d:play_size, then Super+wheel's
-        // (till the plugin loads again, or the setting changes); the row turned so it's where you look (the next frame,
-        // updateTiling: as it starts or switches to here, and as that changes)
+        // view share played here in the ring (play_size, Super+wheel); centre: turn the row to it
         float                                 size   = PLAY_SIZE;
         bool                                  centre = false;
-        std::optional<uint32_t>               sizeConfigured; // plugin:hypr3d:play_size as last seen (its bits: NaN too)
-        float                                 wheel = 0;      // Super+wheel: a fraction of a notch
-        std::string                           sizeTell;       // what Super+wheel did, said a moment after the last notch
+        std::optional<uint32_t>               sizeConfigured; // as bits, so NaN compares equal
+        float                                 wheel = 0;      // fraction of a notch
+        std::string                           sizeTell;       // Super+wheel result, told after a pause
         std::chrono::steady_clock::time_point sizeAt;         // ... that notch
-        bool                                  wallTold = false; // Super+wheel on one on the desktop wall: said once a play
+        bool                                  wallTold = false; // wall hint told this play
     } m_play;
-    // the window fullscreen on the 3D monitor's workspace, played by itself (autoPlay): the ones whose play you ended
-    // while they were fullscreen, or that were fullscreen already coming into 3D (not played by themselves till they
-    // leave fullscreen), and the ones gone fullscreen that autoPlay hasn't looked at yet (given the keyboard then, when
-    // no window has it)
+    // autoPlay: declined = fullscreen before 3D or play ended in fullscreen; fresh = newly fullscreen, unchecked
     struct {
         std::vector<PHLWINDOWREF> declined, fresh;
     } m_fullscreen;
 
     SCamera                   m_camera;
-    SCamera                   m_ownCamera; // your own view this frame, as it's drawn but for play mode's camera facing a window
-    V3                        m_camFwd{0, 0, -1}, m_camUp{0, 1, 0}; // the view's axes this frame (a window played filling the view: turned with it)
+    SCamera                   m_ownCamera; // own view this frame, ignoring fill play
+    V3                        m_camFwd{0, 0, -1}, m_camUp{0, 1, 0};
     M4                        m_view, m_proj;
     float                     m_depthMul = 0;
 
-    // apps: the XDG desktop entries (read when a page or hyprctl wants them, and again after half a minute), what was
-    // launched from 3D and hasn't opened its window yet, the rules for where they open, and where windows were put in
-    // this world, by class (kept across sessions)
+    // apps: desktop entries (re-read after 30 s), launches, rules, window spots by class
     std::vector<SAppEntry>                       m_apps;
     std::chrono::steady_clock::time_point        m_appsRead{};
-    // the Maps page's maps and the Avatars page's avatars (mapFiles(), avatarFiles(): read again every two seconds
-    // while it's up)
+    // Maps and Avatars pages' files, re-read every 2 s while shown
     struct SModelFile {
         std::string path;  // absolute
         std::string label; // its name, or its folder's
@@ -759,17 +710,15 @@ class CDesktop3D {
     std::vector<SModelFile>                      m_mapFiles, m_avatarFiles;
     std::chrono::steady_clock::time_point        m_mapFilesRead{}, m_avatarFilesRead{};
     struct SLaunch {
-        std::string                           token; // in its environment, as HYPR3D_LAUNCH: its windows are ours
-        std::string                           what, cls; // cls: the class it's expected to have ("" = any)
-        std::string                           steam;     // a Steam game's app id: only its window is ours
+        std::string                           token; // HYPR3D_LAUNCH, marks its windows
+        std::string                           what, cls; // expected class, "" = any
+        std::string                           steam;     // Steam app id: only its window is ours
         int64_t                               pid = 0;
         std::chrono::steady_clock::time_point at;
     };
     std::vector<SLaunch>                         m_launches;
     uint64_t                                     m_launchCount = 0;
-    // Steam games' windows that opened in 3D, the first of a class each (a helper or a launcher of it can come right
-    // after), and when: in a moment, unless the game's played by then, how to play it is said (once a minute for a
-    // class: m_playHinted)
+    // Steam windows opened in 3D: say how to play unless played soon (once a minute per class)
     struct SPlayHint {
         std::string                           cls;
         PHLWINDOWREF                          window;
@@ -777,80 +726,71 @@ class CDesktop3D {
     };
     std::vector<SPlayHint>                                                 m_playHints;
     std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_playHinted;
-    // the window a shortcut went to (m_shortcutFor) closed in 3D, with the keyboard: shortcuts are for no window till you
-    // turn or move (where the view and your feet were then), or a moment goes by (focusForShortcut)
+    // shortcut hold: until you turn or move from here, or a moment passes
     struct {
         bool                                  on = false;
         float                                 yaw = 0, pitch = 0;
         V3                                    feet;
         std::chrono::steady_clock::time_point at;
     } m_shortcutHold;
-    PHLWINDOWREF                          m_shortcutFor; // the window with the keyboard as the last shortcut ran (Hyprland's binds act on it)
+    PHLWINDOWREF                          m_shortcutFor; // focused window at the last shortcut
     std::chrono::steady_clock::time_point m_shortcutAt;  // ... when
-    // the game's window a shortcut took the keyboard from while they were held (Super+Q pressed twice for a popup over
-    // the game): it gets it back once that's over, when no window or layer surface has it by then (updateHolds)
+    // game window a shortcut unfocused during the hold, refocused after (updateHolds)
     PHLWINDOWREF m_giveBack;
-    // play mode that ended by itself (the window played closed or left the 3D view, another window took the keyboard):
-    // a game's keys held back, not walking commands, till Super+Esc, P, the game's window with the keyboard again, or
-    // PLAY_PAUSE_IDLE seconds without one; and the game played last, to play again
+    // play ended by itself: the game's keys are held back till Super+Esc, P, its refocus or PLAY_PAUSE_IDLE
     struct {
         bool                                  on = false;
-        std::chrono::steady_clock::time_point at; // the last key, button or wheel held back (or when it began)
-        PHLWINDOWREF                          window; // the window played last, its process, class and title
+        std::chrono::steady_clock::time_point at; // last held-back input (or the start)
+        PHLWINDOWREF                          window;
         int64_t                               pid = 0;
         std::string                           cls, title;
-        // the game's other windows when one of its windows with the keyboard closed: Hyprland gives the keyboard to
-        // one of them then (input:focus_on_close), which is no reason to play it (only once the keyboard's been
-        // elsewhere): Super+Q pressed twice for a game would close its second window, a game quitting hand play to its
-        // launcher
+        // the game's other windows as its focused one closed; Hyprland focusing one (focus_on_close) won't resume play
         std::vector<PHLWINDOWREF> others;
     } m_held;
     std::string                                  m_rulesConfigured = "\n";
     std::vector<SAppRule>                        m_rules;
     std::unordered_map<std::string, SWindowSpot> m_spots;
-    std::string                                  m_spotsFor = "\n"; // the map they're for ("" = the courtyard)
+    std::string                                  m_spotsFor = "\n"; // map they're for, "" = the courtyard
     uint64_t                                     m_pinCount = 0;
-    size_t                                       m_iconNext = 0; // the next app whose icon the menu's pages load (a few a frame)
-    WP<CWLSurfaceResource>                       m_dndAt;   // what a drag was last moved over, and where
+    size_t                                       m_iconNext = 0; // next icon to load
+    WP<CWLSurfaceResource>                       m_dndAt;   // last drag target and point
     Vector2D                                     m_dndLocal;
 
     // windows out in the world, by window
     std::unordered_map<uintptr_t, SPlacement> m_placements;
     struct {
         uintptr_t  key = 0;      // window being carried, 0 = none
-        float      dist = 2;     // how far in front of the eye (in third person, of the avatar: carryFrom()); ctrl+wheel
-        float      scaleMul = 1; // how big, 1 = as on the desktop wall; the wheel
+        float      dist = 2;     // distance past carryFrom(); Ctrl+wheel
+        float      scaleMul = 1; // 1 = wall size; wheel
         bool       hadBefore = false;
         SPlacement before;       // to put it back on escape
-        int        tileAt = -1;    // its place in tiling mode's row, taken out of it (escape puts it back there), -1 = none
-        bool       onWall = false; // it's flat on something, not in the air (put down so in tiling mode, it stays there)
+        int        tileAt = -1;    // row slot it left, -1 = none
+        bool       onWall = false; // flat on a surface
     } m_hold;
 
-    // tiling mode (T): the ring the windows stand round, the row, and what's kept to undo it
+    // tiling mode (T): the ring, the row, and what undoes it
     struct {
         bool                                      on          = false;
-        bool                                      follow      = true;  // the ring goes with you (Y), else it stays where it is
-        bool                                      anchorLater = false; // round where you are, the next frame in 3D (entering it, another map)
+        bool                                      follow      = true;  // goes with you (Y)
+        bool                                      anchorLater = false; // re-anchor next frame in 3D
         STileRing                                 ring;
         std::vector<uintptr_t>                    order;  // the row, left to right
-        std::unordered_map<uintptr_t, SPlacement> before; // where they were out in the world when they came into it (none: on the wall)
-        std::unordered_set<uintptr_t>             stay;   // came into it while tiling (opened, brought), or out into the world then (away from a ring that stays, on a wall): they stay where they are after
-        std::unordered_set<uintptr_t>             walled; // sent to the wall while tiling (X), or left on it opening away from a ring that stays: not taken into the row again
-        std::unordered_set<uintptr_t>             kept;   // put down on a wall while tiling, or brought or put down away from a ring that stays: they stay out of the row
+        std::unordered_map<uintptr_t, SPlacement> before; // world placement before (none: wall)
+        std::unordered_set<uintptr_t>             stay;   // stay put after tiling
+        std::unordered_set<uintptr_t>             walled; // sent to the wall: not re-gathered
+        std::unordered_set<uintptr_t>             kept;   // put down off the ring: out of the row
         struct SLaid {
             float angle = 0, scale = 0, w = 0, h = 0, pull = 1;
-            V3    at;             // (the ring's middle then)
-            bool  played = false; // (the window played here: not pulled in)
+            V3    at;             // ring centre then
+            bool  played = false; // played here: not pulled in
         };
-        std::unordered_map<uintptr_t, SLaid>      laid;           // where each was laid out, and how far what's in the way pulls it in
-        STileFloor                                floor;          // the ring going with you: the height it stands on (tiling.cpp)
-        V3                                        moved;          // ... how far it went this frame (its windows go along at once)
-        int                                       holdSlot         = -1; // where the window carried goes in the row when it's put down, -1 = nowhere
-        int                                       configured       = -1; // plugin:hypr3d:tiling, last seen
-        int                                       configuredFollow = -1; // plugin:hypr3d:tiling_follow, last seen
-        // the window played here as last laid out (updateTiling): its middle's height over the ring's middle, how far out
-        // from the view it is and the view's pitch to it (what it's sized for), its yaw round the ring, and the row round
-        // it; kept as it was while its keys are held back after its play ended by itself
+        std::unordered_map<uintptr_t, SLaid>      laid;           // layout and obstacle pull-in
+        STileFloor                                floor;          // floor under a following ring
+        V3                                        moved;          // ... its move this frame
+        int                                       holdSlot         = -1; // carried window's slot, -1 = none
+        int                                       configured       = -1;
+        int                                       configuredFollow = -1;
+        // the window played here as last laid out; frozen while its keys are held back
         struct {
             bool                   on = false;
             float                  dy = 0, dist = 0, pitch = 0, angle = 0;
@@ -863,7 +803,7 @@ class CDesktop3D {
 
     // Hyprland glue
     std::vector<CHyprSignalListener> m_listeners;
-    wl_event_source*                 m_configTimer = nullptr; // looks at the config values now and then
+    wl_event_source*                 m_configTimer = nullptr; // config poll
     SP<SHyprCtlCommand>              m_ctlCommand;
     CFunctionHook*                   m_hookMoved  = nullptr;
     CFunctionHook*                   m_hookWarp   = nullptr;
@@ -872,7 +812,7 @@ class CDesktop3D {
     CFunctionHook*                   m_hookFrame  = nullptr;
     CFunctionHook*                   m_hookSoftCursor = nullptr;
     CFunctionHook*                   m_hookDiscard    = nullptr;
-    // idle events of aquamarine's that let go of a removed headless output (holdOutput())
+    // aquamarine idle events holding removed headless outputs (holdOutput)
     std::vector<SP<std::function<void()>>> m_outputHolds;
 
     void                             holdOutput(const PHLMONITOR& mon);
@@ -884,17 +824,17 @@ class CDesktop3D {
     std::string                      requestAvatar(const std::string& path, float height);
     void                             applyAvatar(SAvatarResult&& res);
     std::string                      avatarStatus() const;
-    std::string                      handsStatus() const; // first person: what the hands do, and where they are in the view
-    std::string                      wristsStatus() const; // where the wrists are, from the feet in the avatar's own frame
-    std::string                      loadEmoteFile(const std::string& file, int loop); // hyprctl's: made, then played
+    std::string                      handsStatus() const;
+    std::string                      wristsStatus() const;
+    std::string                      loadEmoteFile(const std::string& file, int loop);
     std::string                      setLipSync(bool on);
-    void                             lipSync(); // every frame: the microphone on or off, what it heard to the mouth
-    void                             emoteSound(); // every frame (and out of 3D): an emote's sound on or off, the dance in time with it
+    void                             lipSync(); // every frame: mic to mouth
+    void                             emoteSound();
     std::string                      emoteSoundStatus() const;
-    void                             watchMicrophone(); // what's wrong with it, if anything: the badge says so
+    void                             watchMicrophone(); // mic problems for the badge
     std::string                      lipSyncStatus() const;
     std::string                      setLipSyncGain(const std::string& v); // dB, or auto
-    void                             setLipSyncSource(const std::string& v); // a microphone, "" = the default one
+    void                             setLipSyncSource(const std::string& v); // "" = default
     std::vector<std::string>         emoteFiles() const; // the config's, then those added
     void                             loadEmoteFiles(std::vector<std::string> files);
     void                             applyEmotes(SEmoteResult&& res);
@@ -904,28 +844,25 @@ class CDesktop3D {
     static void                      listModelFiles(std::vector<SModelFile>& out, const char* folder, std::initializer_list<std::string_view> exts,
                                                     std::initializer_list<std::string> also);
     const std::vector<SModelFile>&   mapFiles();
-    std::string                      pickMap(const std::string& path); // the Maps page's pick, "" = the courtyard
+    std::string                      pickMap(const std::string& path);
     const std::vector<SModelFile>&   avatarFiles();
-    std::string                      pickAvatar(const std::string& path); // the Avatars page's pick
+    std::string                      pickAvatar(const std::string& path);
     std::string                      launch(const std::string& what);
     void                             onWindowOpen(const PHLWINDOW& w);
     void                             onFullscreen(const PHLWINDOW& w);
-    void                             autoPlay(); // every frame: the fullscreen window played once it has the keyboard
-    bool                             fullscreenHere(const PHLWINDOW& w) const; // the 3D monitor's fullscreen window, autoPlay's
-    bool                             focusable(const PHLWINDOW& w) const;      // focusing it switches nothing (a workspace, a scratchpad)
+    void                             autoPlay();
+    bool                             fullscreenHere(const PHLWINDOW& w) const;
+    bool                             focusable(const PHLWINDOW& w) const;
     bool                             placeInFront(const PHLWINDOW& w, const SAppRule& rule);
-    // metres per logical px for a window of `size` logical px, `dist` metres ahead: `height` metres tall, or with none
-    // (0) as big as it looks on your screen, made smaller to fit `fit` of the view
+    // metres per logical px `dist` m ahead: `height` m tall, or 0 = screen size within `fit` of the view
     float                            frontScale(const Vector2D& size, float dist, float height, float fit = FRONT_FIT) const;
-    // how big a window looks from your eye, 1 = as on the 2D desktop
+    // apparent size from your eye, 1 = as on the 2D desktop
     float                            apparentSize(const V3& center, float scale) const;
-    // how far towards the eye a window (its middle c, axes r and u, facing n, half sizes hw and hh) has to come for
-    // nothing to be between the eye and it, 0.1..1: brought that much nearer and smaller, it looks the same
+    // how far (0.1..1) a window must come toward the eye, scaled with it, to be unobstructed
     float                            clearance(const V3& eye, const V3& c, const V3& r, const V3& u, const V3& n, float hw, float hh) const;
-    // how far ahead of the camera a carried window's distance counts from: 0 (your eye), in third person the avatar
     float                            carryFrom() const;
     void                             placeAt(const PHLWINDOW& w, const SWindowSpot& spot);
-    bool                             inSight(const SWindowSpot& spot) const; // in the view, facing you, nothing in the way
+    bool                             inSight(const SWindowSpot& spot) const;
     void                             loadSpots();
     void                             rememberSpot(uintptr_t key);
     void                             forgetSpot(uintptr_t key);
@@ -934,31 +871,31 @@ class CDesktop3D {
     std::string                      windowAction(const PHLWINDOW& w, eWindowAction a);
     std::string                      setPinned(const PHLWINDOW& w, bool on);
     std::string                      togglePin();
-    std::string                      carry(); // G and H: pick up the window under the crosshair, or put down the one carried
+    std::string                      carry();
     std::string                      resizeReal(const PHLWINDOW& w, const Vector2D& size);
     std::string                      windowsStatus() const;
-    void                             anchorRing(bool look = true); // tiling mode's ring round where you are now, centred on where you look (or as it was)
-    void                             followRing(float dt); // ... every frame: going where you go
-    void                             fitRing();     // ... for the view as it is (first or third person, the camera's boom)
-    float                            ringHeight() const; // ... its middle above what it stands on: your eye, or the avatar's head
-    bool                             atRing() const;     // tiling, and at the ring: it goes with you, or you're in it (Y: it stays)
-    void                             keepFromRow(uintptr_t key); // out of the row, and kept out of it where it is now
-    void                             gatherTiles(); // the windows in the world (not pinned, carried or kept out) and the wall's into the row
-    void                             tileWindow(const PHLWINDOW& w, int slot); // into the row there (0 = its left end), off the wall if it's on it
+    void                             anchorRing(bool look = true);
+    void                             followRing(float dt);
+    void                             fitRing();
+    float                            ringHeight() const;
+    bool                             atRing() const;
+    void                             keepFromRow(uintptr_t key);
+    void                             gatherTiles();
+    void                             tileWindow(const PHLWINDOW& w, int slot);
     int                              lookSlot() const;    // where in the row you look
-    float                            ringLookYaw() const; // where your view crosses the ring, as a yaw from its middle
-    float                            ringLookYaw(const V3& eye, float yaw) const; // ... a view from there, that way
+    float                            ringLookYaw() const;
+    float                            ringLookYaw(const V3& eye, float yaw) const;
     std::vector<STileIn>             tileSizes(const std::vector<uintptr_t>& keys) const;
-    PHLWINDOW                        playedInRow() const; // the window played here in the row at the ring (or its keys held back since)
-    void                             updateTiling(float dt); // every frame: who's in the row, and where each goes
-    void                             forgetTiles();  // the placements went (another world): the row starts again
+    PHLWINDOW                        playedInRow() const;
+    void                             updateTiling(float dt);
+    void                             forgetTiles();  // placements dropped: row restarts
     bool                             tileable(const PHLWINDOW& w) const;
     void                             checkTilingConfig();
     std::string                      tilingStatus() const;
     void                             checkAppRules();
     void                             menuPick(const std::optional<SMenuItem>& item);
     std::string                      setView(bool third);
-    bool                             fpBody() const; // first person with the avatar's body
+    bool                             fpBody() const;
     void                             animateAvatar(float dt);
     void                             measureAvatarLight();
     M4                               avatarTransform() const;
@@ -968,46 +905,46 @@ class CDesktop3D {
     SCamera                          playerCamera() const;
     V3                               camPivot() const;   // (third person, with an avatar)
     V3                               avatarHead() const; // (the same)
-    SCamera                          viewCamera(float dt); // first or third person
+    SCamera                          viewCamera(float dt);
     void                             update();
     void                             simulate(float dt);
     bool                             overlaps(const V3& feet, float height) const;
     void                             layoutPanels(float e);
     void                             updatePlacements(float dt);
     void                             grab();
-    void                             takePinned(uintptr_t key); // a window pinned to the view back into your hands
-    void                             releaseButtons();          // what a client thinks is pressed, let go
+    void                             takePinned(uintptr_t key);
+    void                             releaseButtons();
     void                             place();
     void                             cancelHold();
     void                             returnToWall(uintptr_t key);
     SPlacement                       layoutPlacement(const SPanel& p) const;
     void                             aim();
     void                             updatePointer(uint32_t timeMs = 0, bool frame = true, bool relative = false);
-    void                             pointerFrame(bool relative = false); // the end of a frame of pointer events (XWayland: see there)
+    void                             pointerFrame(bool relative = false);
     int                              windowPanel(const PHLWINDOW& w) const; // its panel's index, -1 = none
     void                             endPlay();
-    void                             playEnded(const char* why); // it ended by itself: the game's keys held back a moment
+    void                             playEnded(const char* why);
     void                             declineFullscreen(const PHLWINDOW& played);
     bool                             playedWith(const SPanel& q, const PHLWINDOW& w) const;
     void                             updatePlay(float dt);
-    void                             sizePlayed(int notches); // Super+wheel while playing here: bigger (notches up, < 0) or smaller
-    float                            playedShare() const; // how much of the view the window played takes in tiling mode's row (0: not in it)
+    void                             sizePlayed(int notches);
+    float                            playedShare() const;
     void                             updateTyping(float dt);
-    bool                             keyboardWith(const PHLWINDOW& w) const; // it has the keyboard, or a dialog of its does
+    bool                             keyboardWith(const PHLWINDOW& w) const;
     void                             aimPlay();
     void                             clampPlayPointer();
     void                             playMotion(const IPointer::SMotionEvent& e);
     std::string                      playStatus() const;
     void                             lockCursors(bool lock);
-    bool                             onMouseMove(const Vector2D& pos); // Hyprland's pointer move: false = let it go on
-    bool                             cursorAway() const; // should the mouse be away, going by where the cursor is
-    void                             followCursor();     // away or back, as cursorAway() says
+    bool                             onMouseMove(const Vector2D& pos);
+    bool                             cursorAway() const;
+    void                             followCursor();
     void                             goAway(bool refocus);
     void                             comeBack();
-    std::optional<Vector2D>          desktopSpot() const; // where Super+Esc puts the cursor, none = no other monitor
+    std::optional<Vector2D>          desktopSpot() const;
     void                             addAppCursor();
-    PHLLS                            keyboardLayer() const; // the layer surface on the 3D monitor with the keyboard, if any
-    void                             updateShell(float dt); // it over the 3D view, with the keys and the mouse, or not
+    PHLLS                            keyboardLayer() const;
+    void                             updateShell(float dt);
     void                             shellPointer(uint32_t timeMs = 0);
     void                             shellMotion(const IPointer::SMotionEvent& e);
     void                             drawShell(const PHLMONITOR& mon);
@@ -1016,13 +953,13 @@ class CDesktop3D {
     void                             resetPlayer();
     void                             adaptExposure(float dt);
     void                             onKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info);
-    void                             focusForShortcut(); // a shortcut, walking: Hyprland's keyboard focus to the window it's for
+    void                             focusForShortcut();
     void                             onWindowClose(const PHLWINDOW& w);
-    bool                             sameGame(const PHLWINDOW& w) const; // a window of the game played last
-    bool                             playable(const PHLWINDOW& w) const; // ... that can be played again: drawn, not tiny, not under a fullscreen one
+    bool                             sameGame(const PHLWINDOW& w) const;
+    bool                             playable(const PHLWINDOW& w) const;
     std::string                      playAgain(const PHLWINDOW& w, bool fill);
-    std::string                      playHeldGame(bool fill); // P with a game's keys held back (fill: the view it's played in)
-    void                             updateHolds();  // every frame: the holds on shortcuts and on a game's keys, and a game's hint
+    std::string                      playHeldGame(bool fill);
+    void                             updateHolds();
     void                             onButton(uint32_t timeMs, uint32_t button, bool pressed, Event::SCallbackInfo* info);
     void                             onAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& info);
     std::string                      status();
@@ -1078,7 +1015,7 @@ namespace {
     using FnEnsure     = void (*)(void*);
     using FnMouseWheel = void (*)(void*, IPointer::SAxisEvent, SP<IPointer>);
     using FnFrame      = void (*)(void*);
-    template <typename... Flags> // (the flags after the position: hypr::SOFT_CURSOR_FLAGS)
+    template <typename... Flags> // hypr::SOFT_CURSOR_FLAGS
     using FnSoftCursor = void (*)(void*, PHLMONITOR, const Time::steady_tp&, CRegion&, std::optional<Vector2D>, Flags...);
     using FnDiscard    = void (*)(CSurfacePassElement*);
 
@@ -1089,8 +1026,7 @@ namespace {
     CFunctionHook* g_frame  = nullptr;
     CFunctionHook* g_softCursor = nullptr;
     CFunctionHook* g_discard    = nullptr;
-    // the device of the wheel event being handled: CInputManager::onMouseWheel takes its own scroll factor first, and
-    // the event bus's input.mouse.axis, which it emits, doesn't say
+    // device of the wheel event being handled (input.mouse.axis doesn't carry it)
     WP<IPointer> g_wheelPointer;
 
     void           hkMouseMoved(void* self, IPointer::SMotionEvent e) {
@@ -1099,9 +1035,8 @@ namespace {
         ((FnMouseMoved)g_moved->m_original)(self, e);
     }
 
-    // In 3D the pointer manager keeps the app's cursor image (the plugin draws it on the panel), with the hardware
-    // cursor off: Hyprland's own software cursor isn't drawn on any monitor, but a cursor surface still gets its frames.
-    // (With the mouse away on another monitor, Hyprland draws its cursor as ever)
+    // in 3D the plugin draws the app's cursor on its panel: skip Hyprland's software cursor, but keep sending the
+    // cursor surface its frame callbacks
     template <typename... Flags>
     void hkSoftCursors(void* self, PHLMONITOR mon, const Time::steady_tp& now, CRegion& damage, std::optional<Vector2D> at, Flags... flags) {
         if (g_p3D && g_p3D->holdsPointer()) {
@@ -1112,8 +1047,7 @@ namespace {
         ((FnSoftCursor<Flags...>)g_softCursor->m_original)(self, mon, now, damage, at, flags...);
     }
 
-    // a surface the 3D view covers is "discarded" by Hyprland's render pass (a frame callback and discarded
-    // presentation feedback); one the plugin draws gets presented feedback from it instead, after the frame
+    // surfaces we draw get presented feedback after the frame, not Hyprland's "discarded"
     void hkDiscard(CSurfacePassElement* self) {
         if (g_p3D && self && g_p3D->drawsSurface(self->m_data.surface.get()))
             return;
@@ -1138,12 +1072,11 @@ namespace {
             g_p3D->onPointerFrame();
     }
 
-    // in 3D Hyprland's reasons to hide the cursor (a timeout, a key press) don't count: nothing shows it on a monitor
-    // (hkSoftCursors), and the plugin draws the app's own on the panel it's over. cursor:invisible still hides it
+    // in 3D only cursor:invisible hides the cursor; Hyprland's timeout / key press hiding doesn't apply
     void hkEnsureCursor(void* self) {
         if (g_p3D && g_p3D->holdsPointer()) {
             static auto PINVISIBLE = CConfigValue<Config::INTEGER>("cursor:invisible");
-            // (without the hook that keeps it off the monitors it stays hidden, and so does the app's)
+            // without hkSoftCursors it stays hidden (the app's cursor too)
             g_pHyprRenderer->setCursorHidden(*PINVISIBLE != 0 || !g_softCursor);
             return;
         }
@@ -1194,15 +1127,13 @@ void CDesktop3D::init() {
         }
         g_pHyprRenderer->m_directScanoutBlocked = true;
         g_pHyprRenderer->ensureCursorRenderingMode(); // (hkEnsureCursor)
-        // redraw everything, without damageMonitor(): that would also schedule
-        // an extra frame outside of the display's pacing
+        // redraw everything without damageMonitor(), which would schedule an unpaced extra frame
         mon->m_damage.damageEntire();
     }));
 
     m_listeners.emplace_back(ev.render.stage.listen([this](eRenderStage stage) {
         if (stage == RENDER_POST) {
-            // what was drawn in 3D was presented: its frame callbacks and presentation feedback, as Hyprland gives
-            // them for what it draws (hkDiscard kept its "discarded" ones back), at the monitor's own pace
+            // presented feedback for what we drew, at the monitor's pace (hkDiscard held back "discarded")
             const auto mon = g_pHyprRenderer->m_renderData.pMonitor.lock();
             if (m_mode == MODE_OFF || !mon || mon != m_monitor.lock())
                 return;
@@ -1227,18 +1158,16 @@ void CDesktop3D::init() {
         update();
         m_updateMs = m_updateMs * 0.95f + 0.05f * std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - t0).count();
         if (m_mode == MODE_OFF)
-            return; // the exit animation just ended, show the real desktop this frame
+            return; // exit done: show the real desktop
 
         g_pHyprRenderer->m_renderPass.add(makeUnique<C3DElement>());
-        // a layer surface that has the keyboard (a launcher), over the view
         drawShell(mon);
-        // Hyprland's notifications (ours too) and its config error bar went into this frame before the 3D view, which
-        // covers the monitor: again, over it (on the focused monitor, as Hyprland draws them)
+        // notifications and the error bar went under the 3D view: draw them again on top
         if (mon == Desktop::focusState()->monitor()) {
             Notification::overlay()->draw(mon);
             ErrorOverlay::overlay()->draw();
         }
-        // the cursor of the layer that's over the view, where its pointer is
+        // the cursor of the layer over the view
         static auto PINVISIBLE = CConfigValue<Config::INTEGER>("cursor:invisible");
         if (m_shell.input && !*PINVISIBLE && g_pSeatManager->m_state.pointerFocus)
             if (const auto tex = hypr::pointer()->getCurrentCursorTexture(); tex) {
@@ -1249,8 +1178,7 @@ void CDesktop3D::init() {
                 cursor.a   = 1.f;
                 g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(std::move(cursor)));
             }
-        // keep frames coming: Hyprland schedules the next one right after this one is committed,
-        // paced by the display (calling scheduleFrameForMonitor here would also queue an unpaced one)
+        // keep frames coming at the display's pace (scheduleFrameForMonitor would add an unpaced one)
         mon->m_pendingFrame = true;
     }));
 
@@ -1267,10 +1195,8 @@ void CDesktop3D::init() {
 
     m_listeners.emplace_back(ev.input.keyboard.key.listen([this](const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info) { onKey(e, info); }));
 
-    // apps launched from 3D open in front of you (or where their class was put before); a fullscreen request plays
     m_listeners.emplace_back(ev.window.open.listen([this](const PHLWINDOW& w) { onWindowOpen(w); }));
     m_listeners.emplace_back(ev.window.fullscreen.listen([this](const PHLWINDOW& w) { onFullscreen(w); }));
-    // every window that closes in 3D, in the log; the one played closing ends play mode at once
     m_listeners.emplace_back(ev.window.close.listen([this](const PHLWINDOW& w) { onWindowClose(w); }));
 
     m_listeners.emplace_back(ev.input.mouse.button.listen([this](const IPointer::SButtonEvent& e, Event::SCallbackInfo& info) {
@@ -1279,17 +1205,12 @@ void CDesktop3D::init() {
 
     m_listeners.emplace_back(ev.input.mouse.axis.listen([this](const IPointer::SAxisEvent& e, Event::SCallbackInfo& info) { onAxis(e, info); }));
 
-    // no pointer refocusing, focus-follows-mouse or cursor warps while in 3D; the cursor put on another monitor (a
-    // keybind's focus) goes away to it, and while away, the cursor coming onto the 3D monitor comes back
     m_listeners.emplace_back(ev.input.mouse.move.listen([this](const Vector2D& pos, Event::SCallbackInfo& info) {
         if (onMouseMove(pos))
             info.cancelled = true;
     }));
 
-    // the pointer's focus on an X11 window in 3D (the plugin's, or Hyprland's own: a window it focuses gets the pointer
-    // where its cursor is): a frame with a relative motion of nothing at once. The one Hyprland ends the focus with gave X
-    // clients what XWayland still had of a frame from before (a move of Hyprland's that no frame followed) from its
-    // absolute pointer device; the next is the relative one's before a game can read the pointer's axes (pointerFrame)
+    // X11 pointer focus in 3D: a zero relative motion frame at once, before a game reads the axes (pointerFrame)
     m_listeners.emplace_back(g_pSeatManager->m_events.pointerFocusChange.listen([this] {
         if (m_mode != MODE_OFF && !m_away && fromXWayland(g_pSeatManager->m_state.pointerFocus.lock()))
             pointerFrame();
@@ -1332,8 +1253,7 @@ void CDesktop3D::init() {
         checkTilingConfig();
         checkPlayConfig();
     }));
-    // a value set at run time comes with no reload (hyprctl keyword, hl.config() through hyprctl eval): look again
-    // every second
+    // run-time values (hyprctl keyword, hl.config()) come without a reload: poll every second
     m_configTimer = wl_event_loop_add_timer(
         g_pCompositor->m_wlEventLoop,
         [](void* data) {
@@ -1360,28 +1280,25 @@ void CDesktop3D::init() {
         return SDispatchResult{};
     });
 
-    // hypr3d:play plays the window under the crosshair, or stops (as P and Super+Esc do); hypr3d:play here or fill plays
-    // it in that view, or switches to it while playing, and on, off or toggle say which
+    // hypr3d:play [on|off|toggle] [here|fill]
     HyprlandAPI::addDispatcherV2(PHANDLE, "hypr3d:play", [this](std::string arg) {
         const std::string r = playDispatch(arg);
         return r.starts_with("error: ") ? SDispatchResult{.success = false, .error = r.substr(7)} : SDispatchResult{};
     });
 
-    // hypr3d:menu toggles the Action Menu, hypr3d:menu <page> opens that page, or a hyprctl hypr3d menu command
+    // hypr3d:menu [page|command]
     HyprlandAPI::addDispatcherV2(PHANDLE, "hypr3d:menu", [this](std::string arg) {
         const std::string r = menuDispatch(arg);
         return r.starts_with("error: ") ? SDispatchResult{.success = false, .error = r.substr(7)} : SDispatchResult{};
     });
 
-    // hypr3d:away sends the mouse and keyboard to the desktop on another monitor, the 3D view staying up, or brings
-    // them back (as Super+Esc does)
+    // hypr3d:away toggles away (Super+Esc)
     HyprlandAPI::addDispatcherV2(PHANDLE, "hypr3d:away", [this](std::string) {
         const std::string r = setAway(!m_away);
         return r.starts_with("error: ") ? SDispatchResult{.success = false, .error = r.substr(7)} : SDispatchResult{};
     });
 
-    // hypr3d:tile turns tiling mode on or off (as T does); hypr3d:tile here brings the ring round you, its middle where
-    // you look (Shift+T), and hypr3d:tile follow has it go with you or stay where it is (Y)
+    // hypr3d:tile [here|follow]: T, Shift+T, Y
     HyprlandAPI::addDispatcherV2(PHANDLE, "hypr3d:tile", [this](std::string arg) {
         const std::string r = tileDispatch(arg);
         return r.starts_with("error: ") ? SDispatchResult{.success = false, .error = r.substr(7)} : SDispatchResult{};
@@ -1406,9 +1323,7 @@ void CDesktop3D::checkAppRules() {
 }
 
 void CDesktop3D::shutdown() {
-    // Hyprland only clears the render pass when the next frame begins; an
-    // element left over from the last frame would then run our destructor
-    // after this library is gone
+    // Hyprland clears the render pass only at the next frame; a leftover element's destructor would run after unload
     g_pHyprRenderer->m_renderPass.removeAllOfType(C3D_PASS_NAME);
 
     m_followLater.reset();
@@ -1429,7 +1344,7 @@ void CDesktop3D::shutdown() {
     g_wheelPointer.reset();
 
     m_listeners.clear();
-    // (their idle events are this plugin's code: out of aquamarine's queue before it goes)
+    // their idle events run plugin code: dequeue them before unloading
     if (const auto backend = g_pCompositor->m_aqBackend)
         for (const auto& h : m_outputHolds)
             backend->removeIdleEvent(h);
@@ -1472,7 +1387,7 @@ void CDesktop3D::buildWorldFor(const Vector2D& logical) {
         return;
 
     if (m_world.model) {
-        // a loaded map doesn't depend on the monitor, only the desktop's width does
+        // a loaded map depends only on the desktop's width, not the monitor
         m_worldFor = logical;
         dropPlacements();
         m_screen.logicalSize = logical;
@@ -1518,7 +1433,7 @@ void CDesktop3D::checkMapConfig() {
     const bool first = m_mapConfigured.empty();
     m_mapConfigured  = key;
     if (first && map.empty())
-        return; // nothing configured, the courtyard is already there
+        return; // nothing set: the courtyard is there
     const std::string r = requestMap(map, scale);
     if (r.starts_with("error: "))
         notify(r.substr(7), true);
@@ -1570,7 +1485,7 @@ void CDesktop3D::applyMap(SMapResult&& res) {
     for (const auto& l : res.log)
         log(l);
     if (res.req.path != m_mapPath)
-        return; // something else was asked for since
+        return; // superseded
 
     const std::string file = std::filesystem::path(res.req.path).filename().string();
     if (!res.world || !res.error.empty()) {
@@ -1589,7 +1504,7 @@ void CDesktop3D::applyMap(SMapResult&& res) {
     if (!mon)
         mon = Desktop::focusState()->monitor();
     if (mon)
-        buildWorldFor(mon->m_size); // only sets up where the desktop hangs
+        buildWorldFor(mon->m_size); // only anchors the desktop
     if (m_mode != MODE_OFF)
         resetPlayer();
 
@@ -1613,7 +1528,7 @@ void CDesktop3D::checkAvatarConfig() {
         if (!first || lip)
             setLipSync(lip);
     }
-    // (like the others: hyprctl's until the config's changes)
+    // hyprctl's value holds until the config's changes
     if (const std::string gain = g_cfgLipSyncGain ? g_cfgLipSyncGain->value() : "auto"; gain != m_lipsyncGainConfigured) {
         m_lipsyncGainConfigured = gain;
         if (const std::string r = setLipSyncGain(gain); r.starts_with("error"))
@@ -1624,7 +1539,7 @@ void CDesktop3D::checkAvatarConfig() {
         setLipSyncSource(source);
     }
 
-    // other emotes: the avatar that's there again with them
+    // changed emotes reload the avatar
     std::string emotes;
     for (const auto& f : configuredEmotes())
         emotes += f + "\n";
@@ -1649,7 +1564,7 @@ void CDesktop3D::checkAvatarConfig() {
 }
 
 std::string CDesktop3D::requestAvatar(const std::string& path, float height) {
-    // what's being made is for the one there now; the next is made with them
+    // emotes in progress were for the old avatar; the new one loads them
     m_emoteLoader.cancel();
     m_emoteLoading.clear();
     m_emotePlay.clear();
@@ -1689,7 +1604,7 @@ void CDesktop3D::applyAvatar(SAvatarResult&& res) {
     for (const auto& l : res.log)
         log(l);
     if (res.req.path != m_avatarPath)
-        return; // something else was asked for since
+        return; // superseded
 
     const std::string file = std::filesystem::path(res.req.path).filename().string();
     if (!res.model || !res.error.empty()) {
@@ -1703,19 +1618,18 @@ void CDesktop3D::applyAvatar(SAvatarResult&& res) {
     m_avatarHeight   = res.req.height;
     m_anim.reset(m_avatar);
     m_ctl.avatar = m_avatar;
-    m_ctl.loaded(); // what was set by hand, again
+    m_ctl.loaded(); // reapply hand-set state
     m_bodyYaw          = m_yaw;
     m_lookYaw          = m_lookPitch = 0;
     m_avatarLight.full = false;
     m_fpEye.reset();
     if (first) {
-        // that's what it's for
         m_thirdPerson = true;
         m_camBoom     = m_camDist;
     }
     notify(std::format("avatar {} loaded ({} triangles, {:.2f} m{}), V switches the view", m_avatar->name, m_avatar->triangles, m_avatar->height,
                        m_avatar->humanoid ? "" : ", not a humanoid"));
-    // emote files that came since it was asked for
+    // emote files added since the request
     std::vector<std::string> later;
     for (const auto& f : emoteFiles())
         if (std::ranges::find(res.req.emotes, f) == res.req.emotes.end())
@@ -1737,7 +1651,7 @@ std::vector<std::string> CDesktop3D::emoteFiles() const {
     return out;
 }
 
-// made on the side for the avatar there; with what was being made (a new load drops that)
+// builds emotes in the background, with those in progress
 void CDesktop3D::loadEmoteFiles(std::vector<std::string> files) {
     if (!m_avatar)
         return;
@@ -1757,11 +1671,11 @@ void CDesktop3D::applyEmotes(SEmoteResult&& res) {
     for (const auto& l : res.log)
         log(l);
     if (!m_avatar || res.req.model != m_avatar)
-        return; // for one that's gone
+        return; // avatar changed
     m_emoteLoading.clear();
     const bool play = !m_emotePlay.empty() && std::ranges::find(res.req.files, m_emotePlay) != res.req.files.end();
     if (res.emotes.empty()) {
-        // not again with the next avatar
+        // don't retry with the next avatar
         std::erase_if(m_emoteFiles, [&](const std::string& f) { return std::ranges::find(res.req.files, f) != res.req.files.end(); });
         if (play)
             m_emotePlay.clear();
@@ -1779,7 +1693,7 @@ void CDesktop3D::applyEmotes(SEmoteResult&& res) {
         names += (names.empty() ? "" : ", ") + e->name;
     }
     if (play) {
-        // a folder's: the first of it
+        // a folder: its first emote
         if (first < 0)
             first = m_anim.findEmote(res.emotes.front()->name);
         m_anim.playEmote(first, m_emotePlayLoop);
@@ -1788,8 +1702,7 @@ void CDesktop3D::applyEmotes(SEmoteResult&& res) {
     notify(std::format("emotes: {}{}", names, res.error.empty() ? "" : " (" + res.error + ")"));
 }
 
-// first person with the body: what the hands do, how much of the arms is that (else the animation's), and where each wrist
-// is in the view (left, right: 0..1 across and down from its top left; null behind the eye)
+// first person: hand mode, arm weight and wrists in the view (0..1 from the top left, null behind)
 std::string CDesktop3D::handsStatus() const {
     if (!fpBody() || !m_avatar)
         return "null";
@@ -1811,8 +1724,7 @@ std::string CDesktop3D::handsStatus() const {
     return std::format(R"({{"mode": "{}", "arms": {:.2f}, "at": [{}]}})", MODES[m_fpHands], m_anim.firstPersonArms(), at);
 }
 
-// where each wrist is (left, right), from the feet in the avatar's own frame: x to its right, y up, -z ahead (meters);
-// null: not a humanoid
+// wrists from the feet in the avatar's frame (x right, y up, -z ahead, m); null if not humanoid
 std::string CDesktop3D::wristsStatus() const {
     const auto& g = m_anim.globals();
     std::string at;
@@ -1842,7 +1754,7 @@ std::string CDesktop3D::avatarStatus() const {
                        emote >= 0 ? jsonEscape(m_anim.emotes()[emote]->name) : "", m_anim.emotes().size(), m_anim.attackStatus(), m_anim.gaitStatus());
 }
 
-// hyprctl hypr3d avatar emote FILE|FOLDER: made for the avatar there, then its first emote plays
+// hyprctl hypr3d avatar emote FILE|FOLDER: build, then play the first emote
 std::string CDesktop3D::loadEmoteFile(const std::string& file, int loop) {
     if (std::ranges::find(m_emoteFiles, file) == m_emoteFiles.end())
         m_emoteFiles.push_back(file);
@@ -1858,12 +1770,11 @@ std::string CDesktop3D::setView(bool third) {
     if (third && !m_thirdPerson)
         m_camBoom = 0.3f; // pull out from the head
     m_thirdPerson = third;
-    m_play.centre = m_play.on && !m_play.fill; // (played here in the ring: turned to where you look from the new view)
+    m_play.centre = m_play.on && !m_play.fill; // re-centre a ring-played window
     return third ? "third" : "first";
 }
 
-// first person with the avatar's body: the camera in its eyes, its head not drawn, its hands in view (a humanoid with a head
-// and arms; plugin:hypr3d:first_person_body)
+// first_person_body, for an avatar with eyes
 bool CDesktop3D::fpBody() const {
     return m_fpBodyOn && m_avatar && m_avatar->eyeHeight > 0.f && !m_thirdPerson;
 }
@@ -1872,8 +1783,7 @@ M4 CDesktop3D::avatarTransform() const {
     return M4::trs(m_body.seen() + V3{0, m_anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -m_bodyYaw), {1, 1, 1});
 }
 
-// how much sky and how much sunlight bounced off the surroundings the avatar
-// gets, like the map's baked values: a few rays a frame from its chest
+// sky and bounce light on the avatar like the map's baked values, a few rays a frame
 void CDesktop3D::measureAvatarLight() {
     static const auto DIRS = [] {
         std::array<V3, 32> d;
@@ -1920,9 +1830,7 @@ void CDesktop3D::measureAvatarLight() {
     L.bounceAvg = std::min(bounce / DIRS.size(), 1.f);
 }
 
-// the body turns to where it walks (third person, where the keys take it: CAvatarAnimator::wayToFace; as fast as a few
-// steps turn it), the head to where the camera looks (or at the camera). In first person it faces the camera's way, but
-// for turning its hips some toward a side it walks to
+// the body turns to where it walks (CAvatarAnimator::wayToFace), the head to where the camera looks
 void CDesktop3D::animateAvatar(float dt) {
     if (!m_avatar)
         return;
@@ -1944,7 +1852,7 @@ void CDesktop3D::animateAvatar(float dt) {
     mo.run      = m_running && m_mode == MODE_ACTIVE;
 
     float want = m_bodyYaw;
-    // (third person, toward where the keys take it as soon as they're down: turning back walking, it turns as it slows)
+    // third person: face where the keys go; reversing, it turns as it slows
     if (const auto way = m_anim.wayToFace(mo, m_thirdPerson, m_bodyYaw, m_yaw)) {
         want          = *way;
         m_bodyTurning = false;
@@ -1972,32 +1880,26 @@ void CDesktop3D::animateAvatar(float dt) {
         lookYaw    = wrapAngle(std::atan2(d.x, -d.z) - m_bodyYaw);
         lookPitch  = std::atan2(d.y, std::hypot(d.x, d.z));
     }
-    // (turning far, it looks where the body turns to, as the walking has it: not back where the camera looks, then
-    // round at the camera once it's turned half way)
+    // turning far: look where the body turns
     if (m_thirdPerson) {
         const float turning = smoothstep01((std::abs(m_anim.turnLeft()) - 0.3f) / 0.6f);
         lookYaw *= 1.f - turning, lookPitch *= 1.f - turning;
     }
-    // (first person with the body the head is where the camera looks at once: it's in its eyes)
+    // first person body: the head follows the camera at once
     const float k = fpBody() ? 1.f : 1.f - std::exp(-dt * 6.f);
     m_lookYaw += (std::clamp(lookYaw, -1.4f, 1.4f) - m_lookYaw) * k;
     m_lookPitch += (std::clamp(lookPitch, -1.1f, 1.1f) - m_lookPitch) * k;
 
     mo.lookYaw   = m_lookYaw;
     mo.lookPitch = m_lookPitch;
-    // first person with the body: its hands in view doing what you do (let down while a game in a window is played; out
-    // to a window carried; typing, tapping the keys; a finger to the crosshair while a window's pressed), as far ahead as
-    // there's room before a wall or the window the crosshair is on
-    // (the eyes' camera, not the one drawn: an emote's out behind the avatar, a window's played filling the view, or the
-    // 2D desktop's going into 3D and out; every frame, the arms going back from it when it's off)
+    // first person hands do what you do, within reach of walls and the aimed window (eyes' camera, not the drawn one)
     const SCamera eyes = playerCamera();
     mo.fp.on    = fpBody();
     mo.fp.eye   = eyes.eye;
     mo.fp.yaw   = eyes.yaw;
     mo.fp.pitch = eyes.pitch;
     if (mo.fp.on) {
-        // (the camera out behind it for an emote: let down, as the emote has them and after it, till it's back in the
-        // eyes and they come up into the view)
+        // hands down while playing, or while an emote's camera is out
         mo.fp.hands = m_play.on || m_play.t > 0.f || m_emoteView > 0.f ? FPH_DOWN
             : m_hold.key                                             ? FPH_HOLD
             : m_typing                            ? FPH_TYPE
@@ -2011,14 +1913,14 @@ void CDesktop3D::animateAvatar(float dt) {
             mo.fp.room = hit.t;
         if (m_aimed >= 0 && m_aimed < (int)m_panels.size() && !m_panels[m_aimed].front)
             mo.fp.room = std::min(mo.fp.room, m_aimDist);
-        if (m_hold.key) // (the window carried, from the eye)
+        if (m_hold.key) // carried window, from the eye
             mo.fp.room = std::min(mo.fp.room, m_hold.dist);
     }
     m_fpTouch = m_fpPress ? 0.25f : std::max(0.f, m_fpTouch - dt);
     m_fpPress = false;
     m_fpTap   = -1;
     mo.world     = M4::trs(m_body.seen(), Quat::axisAngle({0, 1, 0}, -m_bodyYaw), {1, 1, 1}); // (up stairs smoothly)
-    // where a foot can stand: the ground a little above or below the body's feet (a stair, a slope)
+    // ground a little above or below the feet (stairs, slopes)
     mo.ground = [this](float x, float z, float y) { return groundUnder(m_world.collision, x, z, y); };
     emoteSound();
     m_anim.update(mo);
@@ -2026,10 +1928,7 @@ void CDesktop3D::animateAvatar(float dt) {
     measureAvatarLight();
 }
 
-// an emote's sound (its "sound", a dance's song) plays while the emote does, in 3D: from where the dance is (its start,
-// or where it is when 3D comes back, or the volume up from 0, in the middle of one), round as it loops, fading out as it
-// does; the dance keeps time with what's heard of it (a slow or dropped frame would put it behind). Out of 3D it stops
-// at once (update() no longer runs to close it after a fade)
+// plays an emote's sound in 3D, the dance following the audio clock; out of 3D it stops at once
 void CDesktop3D::emoteSound() {
     const auto&   all    = m_anim.emotes();
     const int     e      = m_mode != MODE_OFF ? m_anim.emote() : -1;
@@ -2052,7 +1951,7 @@ void CDesktop3D::emoteSound() {
     }
     m_speaker.update();
     if (!sound || !m_speaker.on()) {
-        // (its stream's error took it down: said once)
+        // report a stream error once
         if (const SSpeakerStatus st = sound ? m_speaker.status() : SSpeakerStatus{}; !st.error.empty() && st.error != m_soundError) {
             notify(std::format("{}'s sound: {}", em->name, st.error), true);
             m_soundError = st.error;
@@ -2090,7 +1989,7 @@ std::string CDesktop3D::placeDesktop(float height) {
 
     SDesktopAnchor d;
     d.height = height > 0.1f ? height : m_world.desktop.height;
-    d.center = eye + dir * hit.t + n * 0.01f; // centered where the crosshair is
+    d.center = eye + dir * hit.t + n * 0.01f;
     d.normal = n;
 
     m_world.desktop = d;
@@ -2114,7 +2013,6 @@ bool CDesktop3D::enter(PHLMONITOR mon) {
         return false;
     }
 
-    // the monitor asked for, else plugin:hypr3d:monitor's, else the focused one
     if (const std::string want = configuredMonitor(); !mon && !want.empty()) {
         mon = monitorNamed(want);
         if (!mon)
@@ -2130,7 +2028,7 @@ bool CDesktop3D::enter(PHLMONITOR mon) {
     buildWorldFor(mon->m_size);
 
     if (m_restoreLater)
-        m_restoreLater.reset(); // still in the "leaving 3D" state, nothing to save again
+        m_restoreLater.reset(); // still leaving 3D: state saved already
     else
         m_prevDSBlocked = g_pHyprRenderer->m_directScanoutBlocked;
 
@@ -2147,15 +2045,14 @@ bool CDesktop3D::enter(PHLMONITOR mon) {
     m_awayTold = false;
     m_desktopAt.reset();
     m_followLater.reset();
-    // a window fullscreen already isn't played by itself (one going fullscreen in 3D is)
+    // windows already fullscreen aren't autoplayed
     m_fullscreen.declined.clear();
     m_fullscreen.fresh.clear();
     for (const auto& w : hypr::windows())
         if (w && w->m_isMapped && hypr::fullscreen(w))
             m_fullscreen.declined.emplace_back(w);
 
-    // the mouse and keyboard come to the 3D monitor: the cursor, when it's on another one (Super+Esc takes it back
-    // there), and the focus, so that what opens goes there
+    // bring the cursor and focus to the 3D monitor, so new windows open there
     if (const Vector2D cursor = hypr::pointer()->position(); hypr::monitorAt(cursor) != mon) {
         m_desktopAt = cursor;
         hypr::warpCursor(mon->middle(), true);
@@ -2165,19 +2062,18 @@ bool CDesktop3D::enter(PHLMONITOR mon) {
 
     g_pHyprRenderer->m_directScanoutBlocked = true;
     lockCursors(true);
-    g_pHyprRenderer->ensureCursorRenderingMode(); // (hkEnsureCursor: the app's cursor, drawn on the panels)
+    g_pHyprRenderer->ensureCursorRenderingMode(); // hkEnsureCursor
     g_pHyprRenderer->damageMonitor(mon);
     hypr::scheduleFrame(mon);
-    restoreSpots(); // (they fly there from the wall as 3D comes in)
+    restoreSpots(); // they fly from the wall
     if (m_tiling.on)
-        m_tiling.anchorLater = true; // (the row round you where you come in, those too)
+        m_tiling.anchorLater = true; // ring round where you enter
 
     log("entering 3D on " + mon->m_name);
     return true;
 }
 
-// the hardware cursor off on every monitor while in 3D (the pointer manager keeps the app's cursor image for the
-// panels; hkSoftCursors keeps the software one off the monitors)
+// hardware cursor off on every monitor in 3D (hkSoftCursors keeps the software one off)
 void CDesktop3D::lockCursors(bool lock) {
     if (!lock) {
         for (const auto& m : m_cursorLocks)
@@ -2192,18 +2088,13 @@ void CDesktop3D::lockCursors(bool lock) {
         hypr::pointer()->lockSoftwareForMonitor(mon);
         m_cursorLocks.emplace_back(mon);
     }
-    // the resize arrow Hyprland puts on the cursor at a window's edge (general:hover_icon_on_border), off: in 3D its
-    // mouse handling doesn't run to take it off again, and while it's on, every app's own cursor is refused (the
-    // arrow was drawn on the panels, a game's own cursor never)
+    // clear the edge resize arrow (general:hover_icon_on_border): 3D never removes it, and it blocks apps' cursors
     hypr::Cursor::overrideController->unsetOverride(hypr::Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
 }
 
 // ------------------------------------------------------------ other monitors
 
-// Hyprland's pointer move (the mouse's, or a warp's that simulates one); true keeps it from Hyprland. In 3D the cursor
-// stays where it is and focuses nothing, unless a keybind put it and the focus on another monitor (movefocus,
-// focusmonitor): then the mouse and keyboard go away to that one. Away, the other monitors are the desktop's as ever,
-// and the cursor coming onto the 3D monitor brings them back into 3D
+// true keeps the move from Hyprland; a keybind moving the focus to another monitor goes away
 bool CDesktop3D::onMouseMove(const Vector2D& pos) {
     if (m_mode == MODE_OFF || m_ownMove)
         return false;
@@ -2215,20 +2106,19 @@ bool CDesktop3D::onMouseMove(const Vector2D& pos) {
             return false;
         }
         if (m_mode != MODE_ACTIVE)
-            return false; // (leaving 3D: it's the desktop's there in a moment)
+            return false; // leaving 3D anyway
         comeBack();
         return true;
     }
     if (mon && at && at != mon && m_mode == MODE_ACTIVE && !m_play.on && at == Desktop::focusState()->monitor()) {
-        goAway(false); // (this move goes on: what's under the cursor there gets the pointer)
+        goAway(false); // the move goes on, focusing what's under it
         m_desktopAt = pos;
         return false;
     }
     return true;
 }
 
-// should the mouse and keyboard be away, going by the cursor: while it's on another monitor, once that one has the
-// focus too (in play mode only the game moves it, by a warp to itself: not away then); back on the 3D monitor
+// on another monitor: stay away, or go once it has the focus (not in play mode)
 bool CDesktop3D::cursorAway() const {
     const auto mon = m_monitor.lock();
     const auto at  = hypr::monitorAtCursor();
@@ -2237,8 +2127,7 @@ bool CDesktop3D::cursorAway() const {
     return m_away || (!m_play.on && at == Desktop::focusState()->monitor());
 }
 
-// away or back as the cursor says, for what moves it without a move Hyprland tells of (a keybind's focus warping it to
-// a monitor with no window, Hyprland's own clamping when a monitor goes)
+// for cursor moves Hyprland doesn't report (a focus keybind warping, a monitor removed)
 void CDesktop3D::followCursor() {
     if (m_mode != MODE_ACTIVE)
         return;
@@ -2253,7 +2142,7 @@ void CDesktop3D::goAway(bool refocus) {
     if (m_mode != MODE_ACTIVE || m_away || !mon)
         return;
     m_away = true;
-    // what 3D had of the mouse and keyboard, let go: a window's buttons released to it before the pointer leaves it
+    // release buttons on their window before the pointer leaves it
     if (!m_sentButtons.empty()) {
         const uint32_t t = nowMs();
         for (uint32_t b : m_sentButtons)
@@ -2276,14 +2165,13 @@ void CDesktop3D::goAway(bool refocus) {
     m_pointerAt     = {};
     m_cursorShown   = false;
     m_lastSentLocal = {-1, -1};
-    // (a game's pointer lock would hold the cursor where the game is, as Hyprland's keybinds let go of it too)
+    // release a game's pointer lock, as Hyprland's keybinds do
     g_pInputManager->unconstrainMouse();
-    // Hyprland's cursor as ever, off the 3D monitor (it's never on it, away)
     lockCursors(false);
     g_pHyprRenderer->ensureCursorRenderingMode();
     if (refocus) {
-        g_pInputManager->simulateMouseMovement(); // what's under the cursor gets the pointer (and the keyboard, as input:follow_mouse says)
-        pointerFrame(); // (its move, which Hyprland ends with no frame: an X11 window's, held by XWayland, see there)
+        g_pInputManager->simulateMouseMovement(); // focus what's under the cursor
+        pointerFrame(); // Hyprland's move has no frame
     }
     const auto at = hypr::monitorAtCursor();
     log(std::format("the mouse and keyboard went to {}, 3D stays on {}", at ? at->m_name : "?", mon->m_name));
@@ -2293,7 +2181,7 @@ void CDesktop3D::goAway(bool refocus) {
     }
 }
 
-// the cursor came onto the 3D monitor: the mouse and keyboard are 3D's again (the cursor stays where it came in)
+// the cursor came back onto the 3D monitor
 void CDesktop3D::comeBack() {
     const auto mon = m_monitor.lock();
     if (!m_away || !mon)
@@ -2306,12 +2194,11 @@ void CDesktop3D::comeBack() {
     g_pHyprRenderer->ensureCursorRenderingMode();
     Desktop::focusState()->rawMonitorFocus(mon);
     if (unfocusOthers(mon))
-        m_fullscreen.fresh.clear(); // (3D took the keyboard, not Hyprland from a window under one going fullscreen: autoPlay gives it to none)
+        m_fullscreen.fresh.clear(); // 3D took the keyboard: autoPlay focuses none
     log("the mouse and keyboard came back into 3D on " + mon->m_name);
 }
 
-// where Super+Esc puts the cursor: where it was last on another monitor, if that one is still there, else the middle
-// of the monitor nearest to the 3D one; none when there's no other
+// Super+Esc spot: the last one on another monitor, else the nearest monitor's middle
 std::optional<Vector2D> CDesktop3D::desktopSpot() const {
     const auto mon = m_monitor.lock();
     if (!mon)
@@ -2330,8 +2217,7 @@ std::optional<Vector2D> CDesktop3D::desktopSpot() const {
     return nearest->middle();
 }
 
-// Super+Esc, hyprctl hypr3d away, hypr3d:away: the mouse and keyboard to the desktop on another monitor, the 3D view
-// staying up; or back into 3D, the cursor onto the 3D monitor
+// Super+Esc, hyprctl hypr3d away, hypr3d:away
 std::string CDesktop3D::setAway(bool away) {
     const auto mon = m_monitor.lock();
     if (m_mode != MODE_ACTIVE || !mon)
@@ -2375,7 +2261,7 @@ void CDesktop3D::exit(bool immediate) {
     m_menu.hide();
     m_drag   = {};
     if (m_hold.key)
-        place(); // whatever is being carried stays where it is
+        place(); // what's carried stays where it is
 
     if (const auto mon = m_monitor.lock())
         hypr::scheduleFrame(mon);
@@ -2400,8 +2286,8 @@ void CDesktop3D::exitNow() {
     m_shell  = {};
     m_drawnSurfaces.clear();
     m_followLater.reset();
-    lipSync();    // out of 3D: the microphone closes (update() no longer runs)
-    emoteSound(); // (and an emote's sound stops)
+    lipSync();    // closes the mic (no update() out of 3D)
+    emoteSound(); // stops an emote's sound
     if (!m_restoreLater)
         m_restoreLater = g_pEventLoopManager->doLaterLock([this] {
             m_restoreLater.reset(); // safe: the queue already moved this callback out
@@ -2411,19 +2297,15 @@ void CDesktop3D::exitNow() {
         g_pHyprRenderer->damageMonitor(mon);
 }
 
-// aquamarine before 0.12.1 queues a headless output's late frame as an idle event that points at the output itself
-// (CHeadlessOutput::framecb captures `this`; fixed upstream by 1699271 and 6ecde03), so when the output goes before the
-// event runs, it runs on freed memory: Hyprland crashes in CBackend::dispatchIdle, or its heap is corrupted and malloc
-// aborts later. In 3D the plugin asks for each frame as soon as the last one is out, so when its monitor is a headless
-// one being removed, a slow frame is nearly always queued so (and one can be just after 3D, or on any headless monitor
-// that draws). An idle event of ours, queued after that one, holds a removed headless output until then
+// aquamarine < 0.12.1 runs a headless output's late frame as an idle event holding `this` (fixed in 1699271, 6ecde03):
+// a use-after-free in CBackend::dispatchIdle if the output goes first. Our idle event, queued after, keeps it alive
 void CDesktop3D::holdOutput(const PHLMONITOR& mon) {
     const auto backend = g_pCompositor->m_aqBackend;
     if (!mon || !mon->m_output || !backend)
         return;
     if (const auto impl = mon->m_output->getBackend(); !impl || impl->type() != Aquamarine::AQ_BACKEND_HEADLESS)
         return;
-    // (the ones whose event has run are held only here)
+    // drop holds whose event has run (only we still hold them)
     std::erase_if(m_outputHolds, [](const auto& h) { return h.strongRef() <= 1; });
     auto hold = makeShared<std::function<void()>>([out = mon->m_output]() mutable { out.reset(); });
     m_outputHolds.emplace_back(hold);
@@ -2446,7 +2328,7 @@ void CDesktop3D::restore() {
     m_keys.fill(false);
     if (m_hold.key)
         place();
-    // placed windows were kept awake on hidden workspaces, let Hyprland suspend them again
+    // let Hyprland suspend placed windows on hidden workspaces again
     if (!m_placements.empty())
         hypr::updateSuspendedStates();
     m_aimed = -1;
@@ -2469,10 +2351,7 @@ void CDesktop3D::restore() {
     log("left 3D");
 }
 
-// E: every key to the window under the crosshair (none aimed at: the one that has the keyboard, when it's out in the
-// 3D view), till Super+Esc, or till it goes from the view or another window or a layer surface takes the keyboard
-// (updateTyping). Nothing to type into, it's walking still: keys typed into a window you can't see (a closed one's
-// neighbour, one on another monitor) left you standing there with no way to tell why
+// E: keys to the aimed (else focused) window till Super+Esc, or it leaves the view or loses the keyboard
 std::string CDesktop3D::setTyping(bool on) {
     if (m_mode != MODE_ACTIVE)
         return on ? "error: not in 3D" : "walking";
@@ -2480,7 +2359,7 @@ std::string CDesktop3D::setTyping(bool on) {
         return on ? "error: the mouse and keyboard are on another monitor" : "walking";
     if (!on) {
         if (m_play.on || m_held.on)
-            return setPlay(false); // Super+Esc ends play mode too (and a game's keys held back after it)
+            return setPlay(false); // also ends play and held keys
         if (m_typing)
             log("typing off");
         m_typing = false;
@@ -2497,7 +2376,7 @@ std::string CDesktop3D::setTyping(bool on) {
         w = focus;
     if (!w)
         return "error: point the crosshair at a window to type into it";
-    auto into = w; // (a dialog's window, as play mode has it: the dialog closed, it's typing into that)
+    auto into = w; // the dialog's top window
     for (auto up = parentOf(w); up && windowPanel(up) >= 0; up = parentOf(up))
         into = up;
     m_typing          = true;
@@ -2531,12 +2410,7 @@ void CDesktop3D::resetPlayer() {
     m_fpEye.reset();
 }
 
-// Roughly how bright the surroundings look, from rays in every direction:
-// what the sun lights directly, plus some ambient, or the sky. The exposure
-// follows, the way eyes adapt: within the map's own range when it has one (a
-// CS2 map's post processing volume: hardly at all), else dark places get
-// somewhat brighter. Only the world is brightened, never the windows. The
-// test harness's --autoexp does the same through the same functions (map.cpp).
+// auto exposure adapting like eyes, within the map's range if set (CS2 post processing volume); never windows
 void CDesktop3D::adaptExposure(float dt) {
     if (!m_world.model) {
         m_exposure = 1;
@@ -2564,12 +2438,12 @@ SCamera CDesktop3D::flatCamera() const {
 }
 
 SCamera CDesktop3D::playerCamera() const {
-    if (fpBody() && m_fpEye.live) // (in the avatar's eyes, as viewCamera() last had them)
+    if (fpBody() && m_fpEye.live) // avatar's eyes, as last drawn
         return {m_fpEye.at(m_body.seen(), m_yaw), m_yaw, m_pitch};
-    return {m_body.seen() + V3{0, m_eyeHeight, 0}, m_yaw, m_pitch}; // (up and down stairs smoothly, not a step at a time)
+    return {m_body.seen() + V3{0, m_eyeHeight, 0}, m_yaw, m_pitch}; // smooth on stairs
 }
 
-// what the third-person camera's boom hangs from: the avatar's head, over its shoulder unless that's inside a wall
+// boom pivot: the avatar's head, over its shoulder unless in a wall (camPivot)
 V3 CDesktop3D::avatarHead() const {
     const float crouch = m_eyeHeight / EYE;
     return m_body.seen() + V3{0, std::max(0.5f, m_avatar->height * 0.95f * crouch + 0.15f), 0};
@@ -2585,13 +2459,9 @@ V3 CDesktop3D::camPivot() const {
     return head + right * side;
 }
 
-// in third person the camera looks the same way, from behind the avatar's
-// shoulder; walls pull it in so it never sees through them
+// third person: behind the avatar's shoulder, pulled in by walls
 SCamera CDesktop3D::viewCamera(float dt) {
-    // first person with the body: in its eyes as they were drawn last (still through breathing and a step's bob), no
-    // further from the body's middle than its box goes less a little
-    // (and under what's over its eyes: an avatar taller than the body's box, or one that doesn't crouch, under a low
-    // ceiling would see through it; the camera held under it is in its body then, which isn't drawn meanwhile)
+    // first person body: camera at the eyes, held through breathing and bob, in the body's box and under the ceiling
     m_fpCramped = false;
     if (const auto eyes = fpBody() ? m_anim.eyes() : std::nullopt) {
         const V3 feet = m_body.seen(), at = avatarTransform().point(*eyes);
@@ -2604,7 +2474,7 @@ SCamera CDesktop3D::viewCamera(float dt) {
     } else
         m_fpEye.reset();
     SCamera c = playerCamera();
-    // (first person with the body, an emote playing: out behind it from its head, gently, and back)
+    // first person emote: ease out behind the head and back
     const bool  emote = fpBody() && m_mode == MODE_ACTIVE && m_anim.emote() >= 0;
     const float was   = m_emoteView;
     m_emoteView       = std::clamp(m_emoteView + (emote ? dt : -dt) / 0.45f, 0.f, 1.f);
@@ -2690,7 +2560,7 @@ void CDesktop3D::update() {
     if (m_mode == MODE_ACTIVE) {
         m_camera = view;
         fwd      = forwardFrom(m_camera.yaw, m_camera.pitch);
-        // play mode filling the view: the camera goes to face the window played, turned as it is (played here, it stays)
+        // fill play: the camera moves to face the played window
         if (m_play.t > 0.f && m_play.framed) {
             const float k = smoothstep01(m_play.t);
             const V3    right{std::cos(m_camera.yaw), 0, std::sin(m_camera.yaw)};
@@ -2713,7 +2583,7 @@ void CDesktop3D::update() {
     adaptExposure(dt);
     lipSync();
     animateAvatar(dt);
-    // the apps' icons the menu's Apps and Windows pages show, a few a frame (finding one and drawing it takes a moment)
+    // Apps and Windows page icons, a few a frame
     if (m_menu.open() && (m_menu.path().find("apps") != std::string::npos || m_menu.path().find("windows") != std::string::npos)) {
         if (m_iconNext > m_apps.size())
             m_iconNext = 0;
@@ -2733,8 +2603,7 @@ void CDesktop3D::update() {
     for (const auto& [key, pl] : m_placements)
         placed.insert(key);
     m_panels = collectPanels(mon, layerSpacing(), placed, e);
-    // windows drawn here that Hyprland doesn't render (on the wall under a fullscreen window that's out in the world)
-    // get no frame callbacks from it, which would freeze them (placed ones get theirs in updatePlacements)
+    // drawn windows Hyprland doesn't render (under a fullscreen one) get no frame callbacks and would freeze
     for (const auto& p : m_panels)
         if (const auto w = p.kind == PANEL_WINDOW && !m_placements.contains(p.key) ? p.window.lock() : nullptr;
             w && w->m_isMapped && !g_pHyprRenderer->shouldRenderWindow(w, mon) && w->wlSurface() && w->wlSurface()->resource())
@@ -2742,7 +2611,7 @@ void CDesktop3D::update() {
     updateShell(dt);
     updatePlacements(dt);
     layoutPanels(e);
-    autoPlay(); // (after the panels' poses: played in place, you're turned to where it is)
+    autoPlay(); // after poses: here play turns you to it
     if (m_play.on || m_play.t > 0.f)
         updatePlay(dt);
     if (m_typing && !m_play.on)
@@ -2783,8 +2652,7 @@ void CDesktop3D::update() {
         m_cursorShown = false;
     }
 
-    // the mouse went to another monitor or came back without a move Hyprland tells of (a keybind's focus warping the
-    // cursor to a monitor with no window on it): followed after this frame
+    // cursor changed monitors without a reported move: follow after this frame
     if (m_mode == MODE_ACTIVE && !m_followLater && cursorAway() != m_away)
         m_followLater = g_pEventLoopManager->doLaterLock([this] {
             m_followLater.reset(); // safe: the queue already moved this callback out
@@ -2851,16 +2719,14 @@ void CDesktop3D::updatePlacements(float dt) {
     if (m_hold.key && !m_placements.contains(m_hold.key))
         m_hold = {};
     updateTiling(dt);
-    // tiling mode's row going with you: its windows go along at once (a dialog with its window), so they stay where they
-    // are round you walking, running or flying; only changes in the row ease
+    // a following ring moves its windows and dialogs at once; only row changes ease
     if (const V3 d = m_tiling.moved; length(d) > 0.f)
         for (auto& [key, pl] : m_placements) {
             const auto up = pl.follows ? m_placements.find(pl.follows) : m_placements.end();
             if (pl.tiled || (up != m_placements.end() && up->second.tiled && !pl.returning && !pl.pinned && key != m_hold.key))
                 pl.center += d;
         }
-    // a dialog on the wall whose window is out in the world goes along with it, in front of it (as one opening then does).
-    // (The panels were just collected: where the wall has them is layoutPlacement's, their poses come later)
+    // a wall dialog whose window is in the world follows it, in front; layoutPlacement as panel poses come later
     for (const auto& p : m_panels) {
         if (p.kind != PANEL_WINDOW || m_placements.contains(p.key))
             continue;
@@ -2883,8 +2749,7 @@ void CDesktop3D::updatePlacements(float dt) {
     const V3   eye = m_camera.eye;
     const V3   dir = forwardFrom(m_camera.yaw, m_camera.pitch);
 
-    // windows pinned to the view: down its right side, in the order they were pinned, pin_size of its height each,
-    // 0.8 m in front of the eye (drawn over the world)
+    // pinned windows stack down the view's right side, pin_size of its height each, 0.8 m ahead
     const float aspect  = mon && mon->m_size.y > 0 ? (float)(mon->m_size.x / mon->m_size.y) : 16.f / 9.f;
     const float pinD    = 0.8f, pinHalfH = pinD * std::tan(FOV_Y * 0.5f), pinHalfW = pinHalfH * aspect, pinMargin = 0.05f * pinHalfH;
     const float pinSize = g_cfgPinSize ? g_cfgPinSize->value() : 0.3f;
@@ -2920,8 +2785,7 @@ void CDesktop3D::updatePlacements(float dt) {
             pl.targetRot          = home.rot;
             pl.targetScale        = home.scale;
         } else if (pl.pinned) {
-            // with the view at once, turned with it; the one played filling the view with your own view, the camera
-            // going to face it there and back (with the camera it'd go on ahead of it)
+            // move with the view at once; fill-played: with your own view, not the moving camera
             const bool  own   = m_play.t > 0.f && m_play.framed && p.key == m_play.framedKey;
             const V3    oFwd  = forwardFrom(m_ownCamera.yaw, m_ownCamera.pitch);
             const V3    vEye  = own ? m_ownCamera.eye : eye;
@@ -2939,7 +2803,7 @@ void CDesktop3D::updatePlacements(float dt) {
             const float scale = m_screen.scale() * m_hold.scaleMul;
             const V3    camRight{std::cos(m_camera.yaw), 0, std::sin(m_camera.yaw)};
             const V3    camUp = cross(camRight, dir);
-            // (in third person the avatar carries it: out past the avatar, the camera being behind it)
+            // third person: carried past the avatar
             const float from  = carryFrom();
             const V3    start = eye + dir * from;
 
@@ -2948,8 +2812,7 @@ void CDesktop3D::updatePlacements(float dt) {
             SRayHit hit;
             m_hold.onWall = m_world.collision.raycast(start, dir, m_hold.dist, hit);
             if (m_hold.onWall) {
-                // flat against whatever it touches: upright on walls, on floors and
-                // ceilings turned so it reads the right way from where you stand
+                // flat on what it touches; on floors and ceilings turned to read from where you stand
                 n = hit.normal;
                 const V3 upHint = std::abs(n.y) > 0.85f ? camUp : V3{0, 1, 0};
                 u               = normalize(upHint - n * dot(upHint, n));
@@ -2975,8 +2838,7 @@ void CDesktop3D::updatePlacements(float dt) {
                 r = camRight;
                 c = start + dir * m_hold.dist;
 
-                // pull it towards you (same size on screen) instead of letting it sink into things; in third person
-                // not in front of the avatar, though (it sinks into them there instead)
+                // pull it in (same size on screen) so it doesn't sink into things; at least 0.4 m past the avatar
                 pull = clearance(eye, c, r, u, n, (float)p.box.w * 0.5f * scale, (float)p.box.h * 0.5f * scale);
                 if (from > 0.f)
                     pull = std::max(pull, std::min(1.f, (from + 0.4f) / (from + m_hold.dist)));
@@ -2987,8 +2849,7 @@ void CDesktop3D::updatePlacements(float dt) {
             pl.targetScale  = scale * pull;
         }
 
-        // windows on workspaces that aren't shown are suspended and get no frame
-        // callbacks from Hyprland, which would freeze them
+        // hidden-workspace windows are suspended without frame callbacks and would freeze
         if (mon) {
             const auto w = pl.window.lock();
             if (w && !g_pHyprRenderer->shouldRenderWindow(w, mon)) {
@@ -2999,8 +2860,7 @@ void CDesktop3D::updatePlacements(float dt) {
         }
     }
 
-    // dialogs: in front of their window, where they are over it on the 2D desktop, wherever it goes (back to the wall
-    // with it; one pinned to the view leaves its dialogs where they are)
+    // dialogs stay in front of their window as on the 2D desktop (not a pinned one's)
     for (auto& [key, pl] : m_placements) {
         if (!pl.follows || pl.returning || pl.pinned || key == m_hold.key)
             continue;
@@ -3031,7 +2891,7 @@ void CDesktop3D::updatePlacements(float dt) {
         auto& pl = it->second;
         if (!seen.contains(it->first) && pl.returning) {
             release(pl);
-            it = m_placements.erase(it); // not on screen to fly back to, it's home anyway
+            it = m_placements.erase(it); // off screen: it's home anyway
             continue;
         }
         pl.center  = lerp(pl.center, pl.targetCenter, k);
@@ -3050,7 +2910,7 @@ void CDesktop3D::updatePlacements(float dt) {
 // poses for everything, and the drawing order
 void CDesktop3D::layoutPanels(float e) {
     const bool wallpaper = g_cfgWallpaper && g_cfgWallpaper->value();
-    // close to the flat desktop everything is stacked like in 2D, placed windows included
+    // near the flat desktop everything stacks as in 2D, placed windows too
     const bool inWorld = e >= 0.2f;
     const CBox monitor{{0, 0}, m_screen.logicalSize};
     const V3   eye     = m_camera.eye;
@@ -3099,7 +2959,7 @@ void CDesktop3D::layoutPanels(float e) {
         p.depthWrite = inWorld;
         p.held       = owner == m_hold.key && p.kind == PANEL_WINDOW;
         p.group      = owner;
-        p.front      = pl.pinned != 0 && inWorld; // (pinned to the view: over the world, as the HUD is)
+        p.front      = pl.pinned != 0 && inWorld; // pinned: over the world, like the HUD
         p.sortDist   = panelDistance(eye, ownerPose, o.box);
     }
 
@@ -3143,14 +3003,14 @@ void CDesktop3D::grab() {
     m_hold.hadBefore = it != m_placements.end() && !it->second.returning;
     if (m_hold.hadBefore)
         m_hold.before = it->second;
-    // (out of tiling mode's row while it's carried, room left for it where it would go; escape puts it back where it was)
+    // out of the tiling row while carried (escape restores it)
     m_hold.tileAt = -1;
     if (const auto o = std::ranges::find(m_tiling.order, key); o != m_tiling.order.end()) {
         m_hold.tileAt = (int)(o - m_tiling.order.begin());
         m_tiling.order.erase(o);
     }
 
-    // pick it up from wherever it is drawn right now (pinned: not any more; a dialog: not going along with its window)
+    // pick it up where it's drawn now, unpinned and unparented
     SPlacement& pl = m_placements[key];
     pl.window      = w;
     pl.pinned      = 0;
@@ -3165,13 +3025,12 @@ void CDesktop3D::grab() {
     pl.follows      = 0;
 
     m_hold.key      = key;
-    m_hold.dist     = std::clamp(t - carryFrom(), 0.8f, 6.f); // (in third person: out past the avatar, if it wasn't)
+    m_hold.dist     = std::clamp(t - carryFrom(), 0.8f, 6.f); // third person: past the avatar
     m_hold.scaleMul = pl.scale / m_screen.scale();
     releaseButtons();
 }
 
-// Out of the view's corner into your hands: carried where you point, as big and as far from your eye as it was before
-// it was pinned (else as big as on your screen, 2 m out); Esc or a right click pins it back
+// a pinned window back into your hands at its size and distance before pinning; Esc or a right click re-pins
 void CDesktop3D::takePinned(uintptr_t key) {
     const auto it = m_placements.find(key);
     const auto w  = it != m_placements.end() ? it->second.window.lock() : nullptr;
@@ -3181,7 +3040,7 @@ void CDesktop3D::takePinned(uintptr_t key) {
     m_hold.hadBefore = true;
     m_hold.before    = pl;
     m_hold.tileAt    = -1;
-    pl.pinned        = 0; // (it flies from the corner to where you point)
+    pl.pinned        = 0; // flies from the corner to where you point
     m_hold.key       = key;
     m_hold.dist      = std::clamp(pl.pinnedFromDist > 0 ? pl.pinnedFromDist : 2.f, 0.8f, 6.f);
     const float scale = pl.pinnedFromScale > 0 ? pl.pinnedFromScale : frontScale(hypr::realSize(w)->goal(), carryFrom() + m_hold.dist, 0, carryFrom() > 0 ? THIRD_FIT : FRONT_FIT);
@@ -3202,9 +3061,7 @@ void CDesktop3D::releaseButtons() {
 }
 
 void CDesktop3D::place() {
-    // it keeps sliding into the spot it was last aimed at, which its class remembers. In tiling mode, put down in the air
-    // it goes into the row where it was carried to (the room left for it there); on a wall it stays there, out of the row,
-    // and so does one put down in the air away from a ring that stays where it is (Y)
+    // slides into the spot last aimed at (remembered per class); in tiling mode, put down in the air it joins the row
     const uintptr_t key    = m_hold.key;
     const bool      onWall = m_hold.onWall;
     const int       slot   = m_tiling.holdSlot;
@@ -3214,7 +3071,7 @@ void CDesktop3D::place() {
         const auto it = m_placements.find(key);
         const auto w  = it != m_placements.end() ? it->second.window.lock() : nullptr;
         if (w && !onWall && tileable(w) && atRing()) {
-            // (picked up and put down before a frame worked out where it goes: where it is round the ring)
+            // no slot yet: by its place round the ring
             const auto& r  = m_tiling.ring;
             const int   at = slot >= 0 ? slot : ringSlot(r, layoutRing(r, tileSizes(m_tiling.order)), ringYaw(r, it->second.center));
             it->second.tiled = true;
@@ -3223,7 +3080,7 @@ void CDesktop3D::place() {
             m_tiling.walled.erase(key);
             return;
         }
-        if (w) // (where you put it: tiling ending leaves it there)
+        if (w) // stays when tiling ends
             keepFromRow(key);
     }
     rememberSpot(key);
@@ -3244,9 +3101,9 @@ void CDesktop3D::cancelHold() {
         it->second.targetCenter = before.targetCenter;
         it->second.targetRot    = before.targetRot;
         it->second.targetScale  = before.targetScale;
-        it->second.pinned       = before.pinned;  // (taken out of the view's corner: back in it)
-        it->second.follows      = before.follows; // (a dialog: with its window again)
-        if (tileAt >= 0 && m_tiling.on) {         // (out of tiling mode's row: back where it was in it)
+        it->second.pinned       = before.pinned;  // re-pinned
+        it->second.follows      = before.follows; // follows its window again
+        if (tileAt >= 0 && m_tiling.on) {         // back into its row slot
             it->second.tiled = true;
             m_tiling.order.insert(m_tiling.order.begin() + std::min<size_t>(tileAt, m_tiling.order.size()), key);
         }
@@ -3258,7 +3115,7 @@ void CDesktop3D::returnToWall(uintptr_t key) {
         m_hold = {};
     if (auto it = m_placements.find(key); it != m_placements.end())
         it->second.returning = true;
-    if (m_tiling.on) // (and tiling mode's row, which takes the wall's windows, leaves it there)
+    if (m_tiling.on) // kept out of the tiling row
         m_tiling.walled.insert(key);
 }
 
@@ -3368,8 +3225,7 @@ void CDesktop3D::aim() {
         const CBox& c = p.clip;
         if (local.x < c.x || local.y < c.y || local.x > c.x + c.w || local.y > c.y + c.h)
             continue;
-        // where it takes no input, through it to what's behind, as on the 2D desktop (a shell's overlay over the whole
-        // screen, which takes input only at its edges)
+        // aim through where it takes no input, as on the 2D desktop (full-screen shell overlays)
         if (p.hitRoot && !p.hitRoot->at(local * p.hitScale - p.hitOffset, true).first)
             continue;
         // later panels are on top when at the same depth
@@ -3382,7 +3238,7 @@ void CDesktop3D::aim() {
     if (m_aimed < 0)
         return;
 
-    // (hidden by the world, unless it's drawn over it: pinned to the view)
+    // hidden by the world unless pinned
     if (SRayHit hit; !m_panels[m_aimed].front && m_world.collision.raycast(eye, dir, best - 1e-3f, hit)) {
         m_aimed = -1;
         return;
@@ -3400,27 +3256,23 @@ void CDesktop3D::aim() {
     }
 }
 
-// XWayland gives X clients what it has of a pointer frame (a move: this frame's, or one left from before, a move of
-// Hyprland's own on the 2D desktop that no frame followed) from its absolute pointer device when no relative motion came
-// in the frame, else from its relative one. SDL3 takes the pointer's axes to be what they are at the first move it sees,
-// for good: from the absolute device, a game's mouse-look (XInput2's raw motion, the relative device's) came out as how
-// much each move differed from the last, nothing for a steady turn. So every frame to XWayland comes with a relative
-// motion, of nothing unless the mouse's own went with it (`relative`), as Hyprland sends one with a confined pointer's
+// XWayland gives X clients a frame's move (maybe a stale one from 2D) from its absolute device unless the frame has
+// relative motion; SDL3 keeps the axes of the first move it sees, so mouse-look then got only the change between moves,
+// nothing for a steady turn. Every frame to XWayland thus carries a relative motion, zero unless `relative`
 void CDesktop3D::pointerFrame(bool relative) {
     if (!relative && fromXWayland(g_pSeatManager->m_state.pointerFocus.lock()))
         PROTO::relativePointer->sendRelativeMotion((uint64_t)nowMs() * 1000, {}, {});
     g_pSeatManager->sendPointerFrame();
 }
 
-// `relative`: the mouse's own relative motion went to the surface with pointer focus in this frame already (play mode)
+// `relative`: the mouse's own relative motion already went out this frame (play mode)
 void CDesktop3D::updatePointer(uint32_t timeMs, bool frame, bool relative) {
     SP<CWLSurfaceResource> surf;
     Vector2D               local;
     m_pointerAt = {};
 
     if (m_drag.surface && !(PROTO::data && PROTO::data->dndActive())) {
-        // implicit grab: keep sending to the pressed surface, relative to its panel plane (in play mode: where the
-        // pointer is over the window played). Not while something's dragged out of it: that goes where you point
+        // implicit grab: keep sending to the pressed surface, relative to its panel plane
         surf = m_drag.surface.lock();
         local = m_lastSentLocal;
         if (surf) {
@@ -3451,9 +3303,7 @@ void CDesktop3D::updatePointer(uint32_t timeMs, bool frame, bool relative) {
         m_pointerAt = {m_panels[m_aimed].key, m_aimPanelLocal};
     }
 
-    // a drag (wl_data_device) goes where the crosshair is: over the surface it points at (Hyprland takes that as the
-    // drag's, and gives no pointer focus while it lasts), moved there as Hyprland moves one, by its pointer move event
-    // (which 3D keeps back otherwise)
+    // a drag and drop follows the crosshair: pointer focus and Hyprland's move event (otherwise held back)
     if (PROTO::data && PROTO::data->dndActive()) {
         g_pSeatManager->setPointerFocus(surf, local);
         if (surf && (surf != m_dndAt.lock() || local != m_dndLocal)) {
@@ -3462,7 +3312,7 @@ void CDesktop3D::updatePointer(uint32_t timeMs, bool frame, bool relative) {
             const auto hl = Desktop::View::CWLSurface::fromResource(surf);
             if (const auto box = hl ? hl->getSurfaceBoxGlobal() : std::nullopt) {
                 Event::SCallbackInfo info;
-                m_ownMove = true; // (a window on another monitor's workspace: the mouse doesn't go away there)
+                m_ownMove = true; // don't go away to another monitor
                 Event::bus()->m_events.input.mouse.move.emit(box->pos() + local, info);
                 m_ownMove = false;
             }
@@ -3472,15 +3322,12 @@ void CDesktop3D::updatePointer(uint32_t timeMs, bool frame, bool relative) {
 
     const auto current = g_pSeatManager->m_state.pointerFocus.lock();
     if (surf != current) {
-        // (off an X11 window, as 3D comes in or comes back to the one Hyprland gave the pointer: first a frame, for a move
-        // of Hyprland's that XWayland may still hold. Given now, it goes to X clients from the relative device; held, the
-        // next enter on one of its windows would give it from the absolute one, to a game in mouse-look a jump: pointerFrame)
+        // leaving an X11 window: a frame first, so XWayland's held move goes out relative (pointerFrame)
         if (fromXWayland(current))
-            pointerFrame(relative); // (play mode's: the mouse's own relative motion is in it, not one of nothing over it)
+            pointerFrame(relative); // play: carries the mouse's own motion
         g_pSeatManager->setPointerFocus(surf, local);
         m_lastSentLocal = local;
-        // (XWayland's: where the pointer is, as a move in the frame too, so that a move it has from before isn't what
-        // the frame gives its X clients, from where Hyprland's cursor was then: pointerFrame)
+        // XWayland: the position as a move in this frame too, replacing a stale one (pointerFrame)
         if (fromXWayland(surf)) {
             const uint32_t t = timeMs ? timeMs : nowMs();
             PROTO::relativePointer->sendRelativeMotion((uint64_t)t * 1000, {}, {});
@@ -3493,8 +3340,7 @@ void CDesktop3D::updatePointer(uint32_t timeMs, bool frame, bool relative) {
 
     if (surf && local != m_lastSentLocal) {
         const uint32_t t = timeMs ? timeMs : nowMs();
-        // (XWayland's, a move that no relative motion of the mouse's came with, walking with the crosshair going over it
-        // or play mode's pointer put somewhere: with one of nothing, as pointerFrame has it)
+        // XWayland: a move without the mouse's motion gets a zero relative one (pointerFrame)
         if (!relative && fromXWayland(surf))
             PROTO::relativePointer->sendRelativeMotion((uint64_t)t * 1000, {}, {});
         g_pSeatManager->sendPointerMotion(t, local);
@@ -3519,9 +3365,7 @@ namespace {
         return std::ranges::any_of(windows, [&](const PHLWINDOWREF& r) { return r.lock() == w; });
     }
 
-    // a window's size as the app draws it, in its panel's px: a Wayland window's buffer, drawn as it is (it comes a
-    // frame or more before or after the size Hyprland gives the window and animates its box to), an X11 window's box
-    // (stretched to it); what the pointer is over or not
+    // drawn size in panel px: a Wayland window's buffer (frames off its animated box), an X11 window's box
     Vector2D drawnSize(const SPanel& p) {
         const Vector2D s = p.hitRoot ? p.hitRoot->m_current.size / p.hitScale : Vector2D{};
         return s.x >= 1 && s.y >= 1 ? s : p.box.size();
@@ -3530,9 +3374,9 @@ namespace {
 
 std::string CDesktop3D::setPlay(bool on, std::optional<bool> fill) {
     if (!on) {
-        if (m_held.on) { // (a game's keys held back after play mode ended by itself: walking again)
+        if (m_held.on) { // stop holding back a game's keys
             m_held.on = false;
-            declineFullscreen(m_held.window.lock()); // (you ended it: a game still fullscreen isn't played by itself again)
+            declineFullscreen(m_held.window.lock()); // ended by you: no autoplay
             notify("walking again");
         }
         if (!m_play.on)
@@ -3544,13 +3388,12 @@ std::string CDesktop3D::setPlay(bool on, std::optional<bool> fill) {
         log("play mode off");
         return "walking";
     }
-    checkPlayConfig(); // (play_size set at run time a moment ago, hyprctl eval or keyword: the config timer's a second apart)
+    checkPlayConfig(); // catch a just-set play_size
     if (m_play.on) {
-        // the other view asked for: the game played on, the camera going to face it or back to the player (turned to
-        // face it, when it's out of your view)
+        // view switch while playing: the camera goes to it or back to you, turned to it if out of view
         if (fill && *fill != m_play.fill) {
             m_play.fill     = *fill;
-            m_play.centre   = !m_play.fill; // (here, in tiling mode's ring: the row turned so it's where you look)
+            m_play.centre   = !m_play.fill; // here: turn the row to the view
             const auto w    = m_play.window.lock();
             const int  i    = w ? windowPanel(w) : -1;
             const V3   mid  = i >= 0 ? m_panels[i].pose.at(m_panels[i].box.size() * 0.5) : V3{};
@@ -3564,13 +3407,12 @@ std::string CDesktop3D::setPlay(bool on, std::optional<bool> fill) {
     if (m_mode != MODE_ACTIVE)
         return "error: not in 3D";
     if (m_away)
-        setAway(false); // (played from a keybind or a script with the mouse on another monitor: back into 3D)
+        setAway(false); // played while away: back to 3D
     if (m_aimed < 0 || m_aimed >= (int)m_panels.size() || m_panels[m_aimed].kind == PANEL_LAYER)
         return "error: point the crosshair at a window to play it";
     const SPanel& p = m_panels[m_aimed];
     auto          w = p.window.lock();
-    // a dialog's window is played, the dialog with it (as it's over it on the 2D desktop); a fullscreen dialog itself
-    // (it's the screen there, and its window taking the keyboard would take it out of fullscreen)
+    // play a dialog's window with it; a fullscreen dialog itself (focusing its window would end fullscreen)
     for (auto up = w ? parentOf(w) : nullptr; up && windowPanel(up) >= 0 && !hypr::fullscreen(w); up = parentOf(up))
         w = up;
     const int own = w ? windowPanel(w) : -1;
@@ -3583,35 +3425,30 @@ std::string CDesktop3D::setPlay(bool on, std::optional<bool> fill) {
     m_play.on         = true;
     m_play.fill       = fill.value_or(configuredPlayFill());
     m_play.window     = w;
-    m_play.framed     = m_play.framed && m_play.t > 0.f; // (the camera coming back from facing a window goes on from there)
+    m_play.framed     = m_play.framed && m_play.t > 0.f; // continue a camera coming back
     m_play.unfocused  = 0;
     m_play.pointer    = p.box.pos() - m_panels[own].box.pos() + m_aimPanelLocal; // where the crosshair was
     m_play.box        = drawnSize(m_panels[own]);
     m_play.lastGlobal = hypr::pointer()->position();
-    // played here in tiling mode's ring: play_size of the view (or what Super+wheel made it), the row turned so it's where
-    // you look (updateTiling)
     m_play.centre     = !m_play.fill;
     m_play.wheel      = 0;
     m_play.sizeTell.clear();
     m_play.wallTold   = false;
     m_shortcutHold.on = false; // (a window chosen)
-    // the game played now, to play again after play mode ends by itself
+    // the game, to resume after play ends by itself
     m_held = {.window = w, .pid = w->getPID(), .cls = classOf(w), .title = w->m_title};
-    // its keys, every one of them, as when typing into it (Super+Esc ends it), and the keyboard focus that games
-    // want (SDL reads a controller only with it; a pointer lock is only active with it)
+    // all keys go to it, and the keyboard focus: SDL reads controllers, and pointer locks work, only with it
     m_typing = true;
     m_keys.fill(false);
-    if (!keyboardWith(w)) // (a dialog or an X11 menu of its own that has it keeps it)
+    if (!keyboardWith(w)) // its dialog or X11 menu keeps it
         Desktop::focusState()->fullWindowFocus(w, Desktop::FOCUS_REASON_CLICK);
     clampPlayPointer();
-    // played here, one you can't see (Play on the Windows page, a window going fullscreen: behind you, off to the side):
-    // you turn to face it, as if you'd turned to it and pressed P (where the crosshair is, P's, is in your view)
+    // played here out of view (Windows page Play, going fullscreen): turn to face it
     if (const V3 at = p.pose.at(m_aimPanelLocal); !m_play.fill && !inOwnView(at)) {
         turnTo(at);
         logf("turned to face {} (it wasn't in the view)", w->m_class);
     }
-    // (and the key for the other view next time: Shift+P, or P when this was it; played here off the desktop wall, that
-    // Super+wheel sizes it)
+    // tell the other view's key, and Super+wheel sizing when placed
     const auto  name   = w->m_title.empty() ? w->m_class : w->m_title;
     const char* other  = m_play.fill == configuredPlayFill() ? "Shift+P" : "P";
     const auto  placed = m_placements.find(reinterpret_cast<uintptr_t>(w.get()));
@@ -3622,15 +3459,13 @@ std::string CDesktop3D::setPlay(bool on, std::optional<bool> fill) {
     return "playing";
 }
 
-// the hypr3d:play dispatcher's and hl.plugin.hypr3d.play()'s, and hyprctl hypr3d play's words: on, off or toggle (none:
-// toggle), and here or fill, the view (none: plugin:hypr3d:play_view's); a view alone plays in it, or switches to it
-// while playing. With a game's keys held back, playing is P's: the game again
+// hypr3d:play, hl.plugin.hypr3d.play(), hyprctl hypr3d play: [on|off|toggle] [here|fill]; a view alone means on
 std::string CDesktop3D::playDispatch(const std::string& arg) {
     std::istringstream in(unquote(arg));
     std::string        v, view;
     for (std::string word; in >> word;) {
         const bool isView = word == "here" || word == "fill", isOn = word == "on" || word == "off" || word == "toggle";
-        if ((!isView && !isOn) || !(isView ? view : v).empty()) // (one of each at most)
+        if ((!isView && !isOn) || !(isView ? view : v).empty()) // at most one of each
             return "error: play [on|off|toggle] [here|fill]";
         (isView ? view : v) = word;
     }
@@ -3638,14 +3473,12 @@ std::string CDesktop3D::playDispatch(const std::string& arg) {
         v = view.empty() ? "toggle" : "on";
     const bool                on   = v == "on" || (v == "toggle" && !m_play.on);
     const std::optional<bool> fill = view.empty() ? std::nullopt : std::optional<bool>(view == "fill");
-    // (with a game's keys held back, as P: the game again, in the view asked for, else play_view's)
     if (on && !m_play.on && m_held.on && m_mode == MODE_ACTIVE && !m_away)
         return playHeldGame(fill.value_or(configuredPlayFill()));
     return setPlay(on, fill);
 }
 
-// a point in your own view as it was last drawn (not play mode's camera facing a window): ahead, within the field of
-// view
+// within the player's last drawn view (not play mode's camera)
 bool CDesktop3D::inOwnView(const V3& at) const {
     const auto  mon    = m_monitor.lock();
     const float aspect = mon && mon->m_size.y > 0 ? (float)(mon->m_size.x / mon->m_size.y) : 16.f / 9.f;
@@ -3656,8 +3489,7 @@ bool CDesktop3D::inOwnView(const V3& at) const {
     return z > 0 && std::abs(dot(d, cross(right, fwd))) <= z * tanY && std::abs(dot(d, right)) <= z * tanY * aspect;
 }
 
-// you turn to face a point, at once: it's in the middle of your view (in third person on the line the camera looks
-// along past the avatar's shoulder, which turns with you: aimed again from there)
+// faces a point at once; iterated since the third-person pivot turns with you
 void CDesktop3D::turnTo(const V3& at) {
     for (int n = 0; n < 3; ++n) {
         const V3 to = at - (m_thirdPerson && m_avatar ? camPivot() : playerCamera().eye);
@@ -3666,10 +3498,7 @@ void CDesktop3D::turnTo(const V3& at) {
     }
 }
 
-// plugin:hypr3d:play_view: a value that's neither here nor fill is said once (P plays here then). plugin:hypr3d:play_size:
-// when it changes, the size a window played here in tiling mode's ring takes is its again (whatever Super+wheel made it;
-// one playing now changes size, the row turned so it's still where you look), one out of 0.25..0.94 said once and taken
-// as the nearest that is (not a number: 0.5). Looked at every second, and as P plays (set a moment before, it's used)
+// rereads play_size and play_view; a changed play_size replaces Super+wheel's size
 void CDesktop3D::checkPlayConfig() {
     if (const float size = g_cfgPlaySize ? g_cfgPlaySize->value() : PLAY_SIZE; m_play.sizeConfigured != std::bit_cast<uint32_t>(size)) {
         m_play.sizeConfigured = std::bit_cast<uint32_t>(size);
@@ -3692,11 +3521,7 @@ void CDesktop3D::endPlay() {
     m_play.sizeTell.clear();
 }
 
-// Play mode ending by itself (the window played closed or left the 3D view, another window or a layer surface took the
-// keyboard), not as Super+Esc ends it: a game's next keys would be walking commands else (B, 2, 8, 5 closing a window
-// from the Windows page, Tab and a click picking from the Action Menu, X, T, Esc leaving 3D), so they're held back, and
-// it's said so, till Super+Esc, P, the game's window with the keyboard again, or a moment without one (updateHolds).
-// Walking and looking still work
+// play ended on its own: hold the game's keys back from hypr3d (updateHolds)
 void CDesktop3D::playEnded(const char* why) {
     if (!m_play.on)
         return;
@@ -3714,8 +3539,7 @@ void CDesktop3D::playEnded(const char* why) {
            true);
 }
 
-// play mode you ended (Super+Esc, play off): a window fullscreen that was played, itself or along with the window
-// played (a dialog of its own), isn't played by itself again till it leaves fullscreen (autoPlay)
+// windows you stopped playing aren't auto-played again while fullscreen
 void CDesktop3D::declineFullscreen(const PHLWINDOW& played) {
     if (!played)
         return;
@@ -3730,8 +3554,7 @@ void CDesktop3D::declineFullscreen(const PHLWINDOW& played) {
     }
 }
 
-// a panel that's played along with the window: its popups, its dialogs (a file chooser, the portal's or its own:
-// in the world in front of it, where they are on the 2D desktop) and theirs
+// w's own panels, its popups and dialogs, transitively
 bool CDesktop3D::playedWith(const SPanel& q, const PHLWINDOW& w) const {
     auto o = q.window.lock();
     for (int hops = 0; o && hops < 8; ++hops, o = parentOf(o))
@@ -3740,7 +3563,7 @@ bool CDesktop3D::playedWith(const SPanel& q, const PHLWINDOW& w) const {
     return false;
 }
 
-// (a dialog of its own can take the keyboard, and an X11 menu for a while)
+// w has the keyboard, or its dialog or X11 menu does
 bool CDesktop3D::keyboardWith(const PHLWINDOW& w) const {
     auto focus = Desktop::focusState()->window();
     if (focus && focus->isX11OverrideRedirect())
@@ -3750,9 +3573,7 @@ bool CDesktop3D::keyboardWith(const PHLWINDOW& w) const {
     return w && focus == w;
 }
 
-// Every frame while typing (E): as play mode, it ends when the window goes from the 3D view (closed, or its workspace
-// hidden) or something else takes the keyboard, and it's walking again. Else the keys went on to whatever Hyprland
-// focused next, out of sight maybe, and W, P and Esc typed there
+// typing (E) ends like play mode, else keys go to whatever Hyprland focuses next
 void CDesktop3D::updateTyping(float dt) {
     const auto w = m_typingInto.lock();
     m_typingUnfocused = Desktop::focusState()->window() ? 0.f : m_typingUnfocused + dt;
@@ -3769,10 +3590,7 @@ void CDesktop3D::updateTyping(float dt) {
     }
 }
 
-// Every frame: play mode ends when the window goes from the 3D view (closed, or its workspace hidden) or something
-// else takes the keyboard (a game's keys held back after that: playEnded). Played filling the view, the camera eases
-// to where the window fills most of the view, facing it and turned with it, and follows it, and after, back to the
-// player; played here, it stays with the player
+// ends play mode when the window leaves the view or loses the keyboard
 void CDesktop3D::updatePlay(float dt) {
     const auto w = m_play.window.lock();
     const int  i = w ? windowPanel(w) : -1;
@@ -3786,19 +3604,17 @@ void CDesktop3D::updatePlay(float dt) {
                                           nullptr;
         if (why)
             playEnded(why);
-        // what Super+wheel did, said once the wheel has been still a moment (a notification a turn of it, not a notch)
+        // report Super+wheel's size once the wheel is still
         if (m_play.on && !m_play.sizeTell.empty() && std::chrono::steady_clock::now() - m_play.sizeAt >= std::chrono::duration<float>(PLAY_SIZE_TELL))
             notify(std::exchange(m_play.sizeTell, {}));
     }
-    // (only filling the view: played here, the camera stays with the player, and a switch to here eases it back)
     m_play.t = std::clamp(m_play.t + (m_play.on && m_play.fill ? dt : -dt) / PLAY_TIME, 0.f, 1.f);
     if (m_play.t <= 0.f)
-        m_play.framed = false; // (all the way back: the next window faced is faced from the start)
+        m_play.framed = false;
     if (i < 0)
         return;
 
     const SPanel& p = m_panels[i];
-    // (facing it only filling the view: played here, what's left of the camera facing a window before just fades out)
     if (m_play.fill) {
         const auto  mon    = m_monitor.lock();
         const float aspect = mon && mon->m_size.y > 0 ? (float)(mon->m_size.x / mon->m_size.y) : 16.f / 9.f;
@@ -3815,22 +3631,18 @@ void CDesktop3D::updatePlay(float dt) {
     if (!m_play.on)
         return;
 
-    // over everything else while it's played: nothing in the world gets in front of it
+    // drawn over the world while played
     for (auto& q : m_panels)
         if (playedWith(q, w))
             q.front = true;
 
-    // grown or shrunk (out of fullscreen, a game's display mode, a browser or a terminal resizing itself): the pointer
-    // stays where it is over it as the app has it (apps lay out from their top left: what it's over stays under it,
-    // where scaling it with the size would move it off a button or a tooltip's element), only kept on it (left off what
-    // the app draws now, it would be a pointer leave, which a monitor never gives a game)
+    // on resize keep the pointer's offset from the top left (apps lay out from there)
     if (const Vector2D size = drawnSize(p); size != m_play.box) {
         m_play.box = size;
         clampPlayPointer();
     }
 
-    // a warp (wp_pointer_warp_v1, or one of Hyprland's) is the only thing that moves Hyprland's cursor in 3D: the
-    // pointer goes there
+    // in 3D only warps move Hyprland's cursor: follow them
     if (const Vector2D g = hypr::pointer()->position(); g != m_play.lastGlobal) {
         m_play.lastGlobal = g;
         const auto hl     = p.hitRoot ? Desktop::View::CWLSurface::fromResource(p.hitRoot) : nullptr;
@@ -3841,11 +3653,7 @@ void CDesktop3D::updatePlay(float dt) {
     }
 }
 
-// Super+wheel while playing here (onAxis), `notches` whole ones (up < 0): in tiling mode's row the window played takes
-// 5% of the view more a notch up, less down (from play_size, 25% up to 94%), the row laid out again round it and turned
-// so it's still where you look; out in the world it's made bigger or smaller where it hangs, as the carry wheel does; on
-// the desktop wall (as on your screen there) or pinned to the view (pin_size), nothing. Each change logged, and said a
-// moment after the wheel stops
+// Super+wheel while playing here (up: notches < 0); not on the wall or pinned
 void CDesktop3D::sizePlayed(int notches) {
     const auto w = m_play.window.lock();
     if (!w || notches == 0)
@@ -3854,17 +3662,16 @@ void CDesktop3D::sizePlayed(int notches) {
     const std::string name = clipped(w->m_title.empty() ? w->m_class : w->m_title, 40);
     std::string       told;
     if (m_tiling.on && std::ranges::contains(m_tiling.order, key) && !atRing()) {
-        // (away from a ring that stays, Y: it's as the ring has it, played or not)
         if (!std::exchange(m_play.wallTold, true))
             logf("Super+wheel: {} is in tiling mode's row, away from you (the ring stays: Y), as big as the ring has it: nothing to make bigger or smaller", name);
         return;
     }
     if (m_tiling.on && std::ranges::contains(m_tiling.order, key)) {
-        // (rounded: 0.5 less five notches is 0.25, not a hair over or under it)
+        // rounded so five notches from 0.5 give exactly 0.25
         const float was = m_play.size;
         m_play.size     = std::clamp(std::round((was - (float)notches * PLAY_SIZE_STEP) * 1e4f) / 1e4f, PLAY_SIZE_MIN, PLAY_SIZE_MAX);
         m_play.centre   = true;
-        // (what it takes as it's laid out: that, unless the row has no room left for it even with the others at nothing)
+        // less than the size only when the row is out of room
         const float share = playedShare();
         const char* end   = notches < 0 && m_play.size >= PLAY_SIZE_MAX ? " (the most)" : notches > 0 && m_play.size <= PLAY_SIZE_MIN ? " (the least)" : "";
         told              = std::format("{} takes {:.0f}% of the view{}", name, share * 100.f, end);
@@ -3874,7 +3681,7 @@ void CDesktop3D::sizePlayed(int notches) {
     } else if (const auto it = m_placements.find(key); it != m_placements.end() && !it->second.pinned && !it->second.returning && !it->second.follows) {
         SPlacement& pl   = it->second;
         const float wall = m_screen.scale(), was = pl.targetScale / wall;
-        pl.targetScale   = wall * std::clamp(was * std::pow(WHEEL_SIZE, (float)notches), std::min(was, 0.2f), std::max(was, 5.f)); // (the carry wheel's bounds)
+        pl.targetScale   = wall * std::clamp(was * std::pow(WHEEL_SIZE, (float)notches), std::min(was, 0.2f), std::max(was, 5.f)); // carry wheel's bounds
         told             = std::format("{} made {} where it is: it looks {:.2f} times as big as on your screen", name, notches < 0 ? "bigger" : "smaller",
                                        apparentSize(pl.targetCenter, pl.targetScale));
         logf("Super+wheel: {}", told);
@@ -3887,9 +3694,7 @@ void CDesktop3D::sizePlayed(int notches) {
     m_play.sizeAt   = std::chrono::steady_clock::now();
 }
 
-// how much of the view the window played here takes in tiling mode's row, as it's laid out (its height's or its width's
-// share, the more, as your view sees it: from where the view is, looking at it): its size (m_play.size), less only when
-// the row has no room left for it even with the others at nothing. 0 = it isn't in the row, or you aren't at the ring
+// view share of the window played here in the row (0 = none); below m_play.size if out of room
 float CDesktop3D::playedShare() const {
     const auto w  = m_play.on ? playedInRow() : nullptr;
     const auto at = std::ranges::find(m_tiling.order, reinterpret_cast<uintptr_t>(w.get()));
@@ -3902,8 +3707,7 @@ float CDesktop3D::playedShare() const {
     return viewShare(r, in[i], laid[i].scale);
 }
 
-// the pointer in play mode: in the confinement the window asked for (zwp_confined_pointer_v1, as Hyprland keeps it
-// there on the 2D desktop), else over the window and its popups, as if they were a monitor
+// pointer kept in the zwp_confined_pointer_v1 region, else on the window and its popups
 void CDesktop3D::clampPlayPointer() {
     const auto w   = m_play.window.lock();
     const int  own = w ? windowPanel(w) : -1;
@@ -3919,7 +3723,7 @@ void CDesktop3D::clampPlayPointer() {
             return;
         }
     }
-    // (the window where it's both drawn and has its box: not off what the app has drawn yet, nor off what's shown)
+    // within both the drawn buffer and the window box
     const Vector2D drawn = drawnSize(o);
     Vector2D       lo{0, 0}, hi{std::min(o.box.w, drawn.x), std::min(o.box.h, drawn.y)};
     for (const auto& p : m_panels) {
@@ -3932,8 +3736,7 @@ void CDesktop3D::clampPlayPointer() {
     m_play.pointer = {std::clamp(m_play.pointer.x, lo.x, hi.x - 0.01), std::clamp(m_play.pointer.y, lo.y, hi.y - 0.01)};
 }
 
-// what the pointer is over in play mode: a popup of the window played or of a dialog of it (the last drawn on top),
-// else a dialog of it, else the window
+// hit test: topmost popup of the window or its dialogs, else a dialog, else the window
 void CDesktop3D::aimPlay() {
     m_aimed = -1;
     m_aimSurface.reset();
@@ -3968,8 +3771,7 @@ void CDesktop3D::aimPlay() {
     }
 }
 
-// the mouse in play mode, as Hyprland's CInputManager::onMouseMoved gives it on the 2D desktop: relative motion
-// always (what a game uses under a pointer lock), and the pointer moves unless it's locked
+// play-mode motion as CInputManager::onMouseMoved: relative motion always, the pointer unless locked
 void CDesktop3D::playMotion(const IPointer::SMotionEvent& e) {
     static auto PNOACCEL = CConfigValue<Config::INTEGER>("input:force_no_accel");
     Vector2D    delta = e.delta, unaccel = e.unaccel;
@@ -3998,15 +3800,13 @@ std::string CDesktop3D::playStatus() const {
     if (!m_play.on || !w)
         return "null";
     const bool locked = g_pInputManager->isLocked();
-    // (size: how much of the view it takes played here in tiling mode's ring, play_size's or Super+wheel's; the pointer to
-    // a hundredth, so one kept on the window's right or bottom edge, 0.01 inside, doesn't read as off it)
+    // pointer to 0.01, so one clamped 0.01 inside the edge doesn't read as outside
     return std::format(R"({{"class": "{}", "title": "{}", "pointer": [{:.2f}, {:.2f}], "locked": {}, "confined": {}, "view": {:.2f}, "fill": {}, "size": {:.4f}}})",
                        jsonEscape(w->m_class), jsonEscape(w->m_title), m_play.pointer.x, m_play.pointer.y, locked, !locked && g_pInputManager->isConstrained(), m_play.t,
                        m_play.fill, m_play.size);
 }
 
-// the app's own cursor where the pointer is on a panel: the shape it asked for (wp_cursor_shape_v1, from Hyprland's
-// cursor theme) or its own cursor surface, as Hyprland's pointer manager has it; nothing while it hides it (a game)
+// the app's cursor on the panel under the pointer
 void CDesktop3D::addAppCursor() {
     static auto PINVISIBLE = CConfigValue<Config::INTEGER>("cursor:invisible");
     m_cursorShown          = false;
@@ -4030,8 +3830,7 @@ void CDesktop3D::addAppCursor() {
 
 // ------------------------------------------------------- layers over the view
 
-// the layer surface on the 3D monitor that has the keyboard (its own surface, a subsurface or a popup of it): one a
-// keybind opened (Super+D's launcher), or one that asked for it (a clipboard picker, a power menu)
+// the 3D monitor's layer surface with keyboard focus (on it, a subsurface or popup)
 PHLLS CDesktop3D::keyboardLayer() const {
     const auto mon   = m_monitor.lock();
     const auto focus = g_pSeatManager->m_state.keyboardFocus.lock();
@@ -4053,19 +3852,16 @@ PHLLS CDesktop3D::keyboardLayer() const {
     return nullptr;
 }
 
-// Every frame, after the panels are collected: a layer surface taking the keyboard comes over the 3D view, with the
-// keys and a pointer that starts where the crosshair is; letting go of it, it's walking again (the layer is drawn a
-// moment more as it closes). While it's over the view it's off the desktop wall
+// a layer surface taking the keyboard goes over the 3D view with its own pointer
 void CDesktop3D::updateShell(float dt) {
     const PHLLS wants = m_mode == MODE_ACTIVE && !m_away ? keyboardLayer() : nullptr;
     if (wants) {
         if (!m_shell.input) {
-            // the keys and the mouse are its now: what 3D had of them, let go
             releaseButtons();
             m_keys.fill(false);
             m_typing = false;
             m_menu.hide();
-            playEnded("a layer surface took the keyboard"); // (a game's keys held back once it lets go, or it played again)
+            playEnded("a layer surface took the keyboard");
             if (m_hold.key)
                 place();
             if (const auto mon = m_monitor.lock())
@@ -4080,7 +3876,6 @@ void CDesktop3D::updateShell(float dt) {
         m_shell.input   = true;
         m_shell.closing = 0;
     } else if (m_shell.input) {
-        // it let go: walking again, the pointer back on the crosshair's panels
         m_shell.input = false;
         releaseButtons();
         g_pSeatManager->setPointerFocus(nullptr, {});
@@ -4094,7 +3889,7 @@ void CDesktop3D::updateShell(float dt) {
             m_shell.layer.reset();
     }
 
-    // off the desktop wall: its panel and its popups'
+    // not on the desktop wall meanwhile
     const auto ls = m_shell.layer.lock();
     if (!ls)
         return;
@@ -4104,8 +3899,7 @@ void CDesktop3D::updateShell(float dt) {
     std::erase_if(m_panels, [&](const SPanel& p) { return (p.kind == PANEL_LAYER || p.kind == PANEL_POPUP) && keys.contains(p.key); });
 }
 
-// the pointer over the layer as over the monitor: what's under it (a popup of the layer's, else the layer where it
-// takes input), or the surface a button was pressed on while one's held
+// pointer focus: the layer's popup or the layer under the pointer, or the held button's surface
 void CDesktop3D::shellPointer(uint32_t timeMs) {
     const auto ls  = m_shell.layer.lock();
     const auto mon = m_monitor.lock();
@@ -4144,7 +3938,7 @@ void CDesktop3D::shellPointer(uint32_t timeMs) {
     }
 }
 
-// the mouse over a layer that's over the view: as Hyprland moves its cursor on the 2D desktop, kept on the monitor
+// moves like Hyprland's cursor, clamped to the monitor
 void CDesktop3D::shellMotion(const IPointer::SMotionEvent& e) {
     static auto PNOACCEL = CConfigValue<Config::INTEGER>("input:force_no_accel");
     const auto  mon      = m_monitor.lock();
@@ -4156,8 +3950,7 @@ void CDesktop3D::shellMotion(const IPointer::SMotionEvent& e) {
     shellPointer(e.timeMs);
 }
 
-// the layer over the 3D view, as Hyprland draws it on the 2D desktop (its fade, its rules; a blur of what's under it
-// being the 3D view's), its popups over it, and the pointer's cursor over them
+// the layer drawn as Hyprland draws it on the 2D desktop, then its popups
 void CDesktop3D::drawShell(const PHLMONITOR& mon) {
     const auto ls = m_shell.layer.lock();
     if (!ls || !ls->m_mapped || !ls->wlSurface() || !ls->wlSurface()->resource())
@@ -4247,7 +4040,7 @@ bool CDesktop3D::onRelativeMotion(const IPointer::SMotionEvent& e) {
 bool CDesktop3D::onAbsoluteMotion(const Vector2D& abs) {
     if (m_mode == MODE_OFF || m_away)
         return false;
-    // a layer that's over the view: a tablet covers the monitor, as on the 2D desktop
+    // a layer over the view: a tablet covers the monitor
     if (m_mode == MODE_ACTIVE && m_shell.input) {
         if (const auto mon = m_monitor.lock()) {
             m_shell.pointer = abs * mon->m_size;
@@ -4256,7 +4049,7 @@ bool CDesktop3D::onAbsoluteMotion(const Vector2D& abs) {
         m_lastAbs = abs;
         return true;
     }
-    // play mode: a tablet (or a nested session's pointer) covers the window played, as it would a monitor
+    // play mode: a tablet (or a nested session) covers the played window
     if (m_mode == MODE_ACTIVE && m_play.on) {
         const auto w   = m_play.window.lock();
         const int  own = w ? windowPanel(w) : -1;
@@ -4269,7 +4062,7 @@ bool CDesktop3D::onAbsoluteMotion(const Vector2D& abs) {
         m_lastAbs = abs;
         return true;
     }
-    // absolute devices (tablets, nested sessions): turn by how far it moved
+    // absolute devices (tablets, nested sessions) turn the view
     if (m_mode == MODE_ACTIVE && m_lastAbs.x >= 0) {
         const auto mon = m_monitor.lock();
         const Vector2D size = mon ? mon->m_size : Vector2D{1920, 1080};
@@ -4306,15 +4099,14 @@ void CDesktop3D::onKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info
 
     const uint32_t mods = g_pInputManager->getModsFromAllKBs();
     const bool     meta = mods & HL_MODIFIER_META;
-    // a shortcut's key that reaches Hyprland (Super or Ctrl+Alt with a key, Alt+F4) is for the window with the keyboard
-    // as it runs: that one closing, shortcuts are held back (onWindowClose)
+    // shortcuts act on the focused window: noted for the shortcut hold (onWindowClose)
     const bool shortcut = !modifierKey(k) && (meta || ((mods & HL_MODIFIER_CTRL) && (mods & HL_MODIFIER_ALT)) || ((mods & HL_MODIFIER_ALT) && k == K_F4));
     const auto sentTo   = [this] {
         m_shortcutFor = Desktop::focusState()->window();
         m_shortcutAt  = std::chrono::steady_clock::now();
     };
 
-    // away on another monitor the keys are the desktop's there; Super+Esc comes back into 3D
+    // away: keys go to the other monitor's desktop; Super+Esc comes back into 3D
     if (m_away) {
         if (k == K_ESC && meta && m_mode == MODE_ACTIVE) {
             setAway(false);
@@ -4324,7 +4116,7 @@ void CDesktop3D::onKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info
         return;
     }
 
-    // a layer surface that has the keyboard (a launcher) has every key, as on the 2D desktop (Esc closes it)
+    // a layer surface with the keyboard gets every key, as on the 2D desktop
     if (m_shell.input && m_mode == MODE_ACTIVE) {
         if (shortcut)
             sentTo();
@@ -4338,20 +4130,19 @@ void CDesktop3D::onKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info
             m_consumed.insert(k);
         } else if (shortcut)
             sentTo();
-        else if (k == K_SPACE) // (first person with the body, the hand that taps it: a thumb, one then the other)
+        else if (k == K_SPACE)
             m_fpTap = (m_fpTapRight = !m_fpTapRight) ? 1 : 0;
         else
             m_fpTap = keyHand(k);
         return;
     }
 
-    // Super+Esc: a game's keys held back after play mode ended by itself, walking again; walking, the mouse and
-    // keyboard to the desktop on another monitor, the 3D view staying up (with no other monitor, it's Hyprland's)
+    // Super+Esc: release a game's held keys, else go away to another monitor
     if (k == K_ESC && meta && m_mode == MODE_ACTIVE && (m_held.on || desktopSpot())) {
         info.cancelled = true;
         m_consumed.insert(k);
         if (m_held.on)
-            setPlay(false); // (walking again, said so)
+            setPlay(false);
         else
             setAway(true);
         return;
@@ -4374,8 +4165,7 @@ void CDesktop3D::onKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info
     if (m_mode != MODE_ACTIVE)
         return;
 
-    // play mode ended by itself: a game's keys held back, not hypr3d's (the Action Menu, windows sent away or closed,
-    // tiling, leaving 3D); walking and looking still work, and P plays the game again
+    // a game's keys held back: only walking and P work
     if (m_held.on) {
         if (walkKey(k)) {
             m_keys[k] = true;
@@ -4388,7 +4178,7 @@ void CDesktop3D::onKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info
         return;
     }
 
-    // VRChat's gestures: left shift and F1-F8 for the left hand, right shift for the right one (neither: both)
+    // VRChat gestures: F1-F8, shift picks the hand (neither: both)
     if (k >= K_F1 && k <= K_F8) {
         if (m_avatar) {
             const bool l = m_keys[K_LSHIFT], r = m_keys[K_RSHIFT];
@@ -4407,7 +4197,7 @@ void CDesktop3D::onKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info
         return;
     }
     if (menuKey(m_menu, k, [this](const std::optional<SMenuItem>& it) { menuPick(it); }))
-        return; // (else walking still works)
+        return;
 
     switch (k) {
         case K_ESC:
@@ -4417,11 +4207,11 @@ void CDesktop3D::onKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info
                 exit();
             return;
         case K_G:
-        case K_H: // (H as G: pick up, put down where you point; Shift+H pins to the view, and takes a pinned one back)
+        case K_H: // Shift+H pins or unpins
             if (const std::string r = k == K_H && (mods & HL_MODIFIER_SHIFT) ? togglePin() : carry(); r.starts_with("error: "))
                 notify(r.substr(7), true);
             return;
-        case K_X: // (and its class opens on the wall again)
+        case K_X: // back to the wall; its class opens there again
             if (m_hold.key) {
                 const uintptr_t key = m_hold.key;
                 if (const auto it = m_placements.find(key); it != m_placements.end())
@@ -4444,22 +4234,22 @@ void CDesktop3D::onKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info
             if (const std::string r = setTyping(true); r.starts_with("error: "))
                 notify(r.substr(7), true);
             return;
-        case K_P: // (in plugin:hypr3d:play_view's view, here or filling it; Shift+P in the other)
+        case K_P: // Shift+P: the other view
             if (const std::string r = setPlay(true, configuredPlayFill() != bool(mods & HL_MODIFIER_SHIFT)); r.starts_with("error: "))
                 notify(r.substr(7), true);
             return;
-        case K_T: // tiling mode: the windows side by side round you, or back where they were; Shift+T: the ring round you, the row to where you look
+        case K_T: // Shift+T: the ring round you here
             if (const std::string r = (mods & HL_MODIFIER_SHIFT) ? tileHere() : setTiling(!m_tiling.on); r.starts_with("error: "))
                 notify(r.substr(7), true);
             return;
-        case K_Y: // tiling mode's row: going with you, or staying where it is (you walk up to it)
+        case K_Y: // the ring follows or stays
             if (const std::string r = setTileFollow(!m_tiling.follow); r.starts_with("error: "))
                 notify(r.substr(7), true);
             return;
-        case K_Q: m_menu.show("apps"); return;    // (WaylandCraft's launcher is V, the view here)
-        case K_B: m_menu.show("windows"); return; // (WaylandCraft's window manager is B too)
+        case K_Q: m_menu.show("apps"); return;
+        case K_B: m_menu.show("windows"); return;
         case K_R: resetPlayer(); return;
-        case K_F: // (going on as it was going: taking to the air, or falling out of it, not stopping dead)
+        case K_F: // keeps momentum
             m_fly = !m_fly;
             return;
         case K_V:
@@ -4491,8 +4281,7 @@ void CDesktop3D::onButton(uint32_t timeMs, uint32_t button, bool pressed, Event:
     if (info)
         info->cancelled = true;
 
-    // a layer that's over the view: to what's under its pointer (a click where it takes no input goes nowhere, and one
-    // outside a menu it opened closes the menu, as on the 2D desktop)
+    // clicks go to what's under the layer's pointer; one outside a menu's grab closes it
     if (m_mode == MODE_ACTIVE && m_shell.input) {
         if (!pressed)
             return;
@@ -4515,8 +4304,7 @@ void CDesktop3D::onButton(uint32_t timeMs, uint32_t button, bool pressed, Event:
         return;
     }
 
-    // play mode ended by itself: a game's clicks held back, as its keys, not clicking round the world; a left click on
-    // a window of the game plays it again
+    // a game's clicks are held back too; clicking its window plays it again
     if (m_mode == MODE_ACTIVE && m_held.on) {
         if (!pressed)
             return;
@@ -4547,9 +4335,7 @@ void CDesktop3D::onButton(uint32_t timeMs, uint32_t button, bool pressed, Event:
         return;
     }
 
-    // the crosshair on no window: a left click attacks, the avatar's arm swung at what's ahead (not typing into a window:
-    // what the mouse does then is that window's). With a window's menu open, the click closes it, as one beside it on
-    // the 2D desktop does
+    // crosshair on no window: a left click attacks, or closes an open menu
     if (pressed && m_mode == MODE_ACTIVE && m_aimed < 0 && !m_play.on) {
         if (g_pSeatManager->m_seatGrab)
             g_pSeatManager->setGrab(nullptr);
@@ -4571,7 +4357,7 @@ void CDesktop3D::onButton(uint32_t timeMs, uint32_t button, bool pressed, Event:
     }
 
     if (p.kind != PANEL_LAYER)
-        m_shortcutHold.on = false; // (a window clicked: shortcuts are for what the crosshair is on again)
+        m_shortcutHold.on = false; // shortcuts follow the crosshair again
     if (p.kind == PANEL_WINDOW) {
         const auto w = p.window.lock();
         if (w && w != Desktop::focusState()->window())
@@ -4581,11 +4367,11 @@ void CDesktop3D::onButton(uint32_t timeMs, uint32_t button, bool pressed, Event:
     if (!surf)
         return;
 
-    updatePointer(); // focus may have moved, make sure the client knows where we are
+    updatePointer(); // focus may have moved: resend the position
     g_pSeatManager->sendPointerButton(timeMs, button, WL_POINTER_BUTTON_STATE_PRESSED);
     pointerFrame();
     m_sentButtons.insert(button);
-    m_fpPress = true; // (first person with the body: the finger pokes it)
+    m_fpPress = true; // first-person finger poke
 
     if (!m_drag.surface) {
         m_drag.panel   = p.key;
@@ -4598,17 +4384,15 @@ void CDesktop3D::onAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& inf
     if (m_mode == MODE_OFF || m_away)
         return;
     info.cancelled = true;
-    const bool shell = m_mode == MODE_ACTIVE && m_shell.input; // (a layer over the view: to what its pointer is over)
+    const bool shell = m_mode == MODE_ACTIVE && m_shell.input;
 
-    // play mode ended by itself: a game's wheel held back, as its keys
+    // a game's wheel is held back too
     if (m_mode == MODE_ACTIVE && m_held.on && !shell) {
         m_held.at = std::chrono::steady_clock::now();
         return;
     }
 
-    // play mode: Super+wheel makes the window played here bigger (up) or smaller, a notch at a time (a high-resolution
-    // wheel's or a touchpad's made up into whole ones); filling the view, nothing. Never the game's wheel (nor Hyprland's
-    // binds: nothing in 3D is)
+    // Super+wheel resizes the window played here, in whole notches
     if (m_mode == MODE_ACTIVE && m_play.on && !shell && (g_pInputManager->getModsFromAllKBs() & HL_MODIFIER_META)) {
         if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL && !m_play.fill) {
             const float notches = e.deltaDiscrete != 0 ? e.deltaDiscrete / 120.f : (float)e.delta / 15.f;
@@ -4629,14 +4413,13 @@ void CDesktop3D::onAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& inf
         return;
     }
 
-    // carrying a window: the wheel makes it bigger (up) or smaller where it is, and it stays that big wherever it's put;
-    // with ctrl it pushes it away / pulls it closer (down)
+    // carrying: the wheel scales (up: bigger), Ctrl+wheel moves it away (up) or closer
     if (m_mode == MODE_ACTIVE && m_hold.key && !shell && e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL) {
         const float    notches = e.deltaDiscrete != 0 ? e.deltaDiscrete / 120.f : (float)e.delta / 15.f;
         const uint32_t mods    = g_pInputManager->getModsFromAllKBs();
         if (mods & HL_MODIFIER_CTRL)
             m_hold.dist = std::clamp(m_hold.dist * std::pow(0.9f, notches), CARRY_NEAREST, 12.f);
-        else if (mods & HL_MODIFIER_SHIFT) { // its real size: the app draws itself anew (text as big as it was)
+        else if (mods & HL_MODIFIER_SHIFT) { // resizes the app itself (text keeps its size)
             if (const auto it = m_placements.find(m_hold.key); it != m_placements.end())
                 if (const auto w = it->second.window.lock())
                     resizeReal(w, hypr::realSize(w)->goal() * std::pow((double)WHEEL_SIZE, notches));
@@ -4655,10 +4438,7 @@ void CDesktop3D::onAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& inf
     if (m_mode != MODE_ACTIVE || (shell ? !g_pSeatManager->m_state.pointerFocus : m_aimSurface.expired()))
         return;
 
-    // to the window as Hyprland sends it on the 2D desktop (CInputManager::onMouseWheel): the scroll factor (a window
-    // rule's first, then the device's own, then input's or input:touchpad's), and for clients without high-resolution
-    // scrolling whole notches made up from a high-resolution wheel's (input:emulate_discrete_scroll: the first at
-    // once, then one per notch's worth, afresh after half a second or a change of direction)
+    // as CInputManager::onMouseWheel: rule/device/input scroll factor, input:emulate_discrete_scroll
     static auto PSCROLL   = CConfigValue<Config::FLOAT>("input:scroll_factor");
     static auto PTPSCROLL = CConfigValue<Config::FLOAT>("input:touchpad:scroll_factor");
     static auto PEMULATE  = CConfigValue<Config::INTEGER>("input:emulate_discrete_scroll");
@@ -4697,7 +4477,7 @@ void CDesktop3D::onAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& inf
     const int32_t steps    = std::abs(discrete) != 0 && std::abs(discrete) < 1 ? std::copysign(1, discrete) : std::round(discrete);
 
     g_pSeatManager->sendPointerAxis(e.timeMs, e.axis, delta, steps, value120, e.source, WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
-    // a touchpad's frame waits for the device's, as in Hyprland: both axes of a two-finger scroll go in one
+    // touchpads: wait for the device's frame so both scroll axes share one, as Hyprland does
     m_axisFramePending = (e.source == WL_POINTER_AXIS_SOURCE_FINGER || e.source == WL_POINTER_AXIS_SOURCE_CONTINUOUS) && m_hookFrame;
     if (!m_axisFramePending)
         pointerFrame();
@@ -4718,13 +4498,12 @@ namespace {
         return s;
     }
 
-    // a file's path to compare with another: absolute, without . and .. ("" stays "")
+    // absolute path without . and .. ("" stays "")
     std::string normalPath(const std::string& p) {
         std::error_code ec;
         return p.empty() ? p : std::filesystem::absolute(p, ec).lexically_normal().string();
     }
 
-    // "1.2 GB", "34 MB", "56 KB": a file's size, as the Maps and Avatars pages give it
     std::string fileSize(uintmax_t bytes) {
         return bytes >= (1ull << 30) ? std::format("{:.1f} GB", bytes / double(1ull << 30))
             : bytes >= (1ull << 20)  ? std::format("{:.0f} MB", bytes / double(1ull << 20))
@@ -4735,8 +4514,7 @@ namespace {
         return w->m_class.empty() ? w->m_initialClass : w->m_class;
     }
 
-    // the hand that types a key touch typing on a QWERTY keyboard (evdev codes): the left the keys left of 6 Y H N, and Esc,
-    // Tab, Caps Lock, the left Shift, Ctrl and Alt; the right the rest
+    // touch-typing hand for an evdev key on QWERTY: 0 left, 1 right
     int keyHand(uint32_t k) {
         if (k == K_ESC || k == 41 || k == K_TAB || k == 58 || k == K_LSHIFT || k == K_LCTRL || k == K_LALT || k == 86)
             return 0;
@@ -4745,8 +4523,7 @@ namespace {
         return 1;
     }
 
-    // the window a dialog belongs to. (For X11 windows Hyprland 0.55.2's CWindow::x11TransientFor() walks
-    // WM_TRANSIENT_FOR past the top and then finds a window with no X11 surface: a Wayland one)
+    // a dialog's parent; for X11 walks WM_TRANSIENT_FOR itself (Hyprland 0.55.2's x11TransientFor() overshoots)
     PHLWINDOW parentOf(const PHLWINDOW& w) {
         if (!w->m_isX11)
             return w->parent();
@@ -4766,15 +4543,14 @@ namespace {
         return w && w->m_isMapped && !w->isHidden() && !w->isX11OverrideRedirect() && !parentOf(w);
     }
 
-    // a process and its parents up to init, from /proc/PID/stat: anyone can read that, where a process's environment
-    // can be closed (Chromium's, Electron's)
+    // pid and ancestors from /proc/PID/stat (readable where environ isn't, e.g. Chromium)
     std::vector<int64_t> ancestry(int64_t pid) {
         std::vector<int64_t> out;
         while (pid > 1 && out.size() < 64) {
             out.push_back(pid);
             std::ifstream in(std::format("/proc/{}/stat", pid));
             std::string   s;
-            const size_t  name = std::getline(in, s) ? s.rfind(')') : std::string::npos; // (past its name: anything)
+            const size_t  name = std::getline(in, s) ? s.rfind(')') : std::string::npos; // comm can hold anything
             if (name == std::string::npos)
                 break;
             std::istringstream rest(s.substr(name + 1));
@@ -4802,18 +4578,8 @@ namespace {
 
 // ------------------------------------------------------------- shortcuts, closes, and a game's keys held back
 
-// A shortcut pressed walking (Super+Q bound to hl.dsp.window.close(): "the focused window"; Super+F and the like) is
-// for what the crosshair is on, as on the 2D desktop it's for the window under the mouse (or for the window you carry):
-// Hyprland's keyboard focus goes there before Hyprland runs the bind (the key's listeners come first), or to no window
-// when the crosshair is on none. The focus was the window clicked or opened last, or after a close whichever Hyprland
-// picked next, round you out of sight in tiling mode, so Super+Q closed windows you didn't see. Right after the window
-// a shortcut went to closed, with the keyboard, it's none till you turn or move (m_shortcutHold): Super+Q pressed again,
-// for a window slow to close or a game, doesn't close the next one, which in tiling mode slides under the crosshair as
-// the row closes up, or is in front of you as the camera comes back from the game played (a game given the keyboard as
-// a popup over it closed gets it back as the hold ends: m_giveBack). None too for a window from a workspace that
-// isn't shown (focusing it would switch the monitor to that workspace) or that a special workspace is open over (a
-// scratchpad: focusing it would close that first, so the scratchpad's own toggle opened it again), and one that won't
-// take the keyboard (a no_focus rule, a modal dialog of its open): the focus would stay where it was, out of sight maybe
+// shortcuts act on the crosshair's or carried window, focused before Hyprland runs the bind; on none when nothing's
+// aimed at, during m_shortcutHold, or if focusing would switch workspaces
 void CDesktop3D::focusForShortcut() {
     static auto PFALLTHROUGH = CConfigValue<Config::INTEGER>("input:special_fallthrough");
     if (m_mode != MODE_ACTIVE || m_away || m_typing || m_play.on || m_shell.input)
@@ -4823,8 +4589,7 @@ void CDesktop3D::focusForShortcut() {
     std::string why   = "the crosshair on no window";
     if (m_shortcutHold.on) {
         why = "a window with the keyboard closed: not turned or moved since";
-        // (the game's window has it, given it as a popup over the game closed: the game whose keys are held back, or
-        // the one fullscreen here that autoPlay plays; back to it as the hold ends, updateHolds)
+        // a game window given the keyboard as its popup closed gets it back after the hold (m_giveBack)
         auto f = Desktop::focusState()->window();
         if (f && f->isX11OverrideRedirect())
             f = x11Owner(f);
@@ -4837,9 +4602,7 @@ void CDesktop3D::focusForShortcut() {
         whose = "the one you carry";
     } else if (m_aimed >= 0 && m_aimed < (int)m_panels.size() && m_panels[m_aimed].kind != PANEL_LAYER)
         w = m_panels[m_aimed].window.lock();
-    // an X11 menu or tooltip (override-redirect, or a menu that's a window of its own, which Hyprland never gives the
-    // keyboard): the window it belongs to, else none (the menu focused, a close would go to it, and one that can't be
-    // asked to close has its whole app killed)
+    // an X11 menu or tooltip: its owner, else none (closing a menu can kill its whole app)
     if (w && w->m_isX11 && (w->isX11OverrideRedirect() || w->m_X11ShouldntFocus)) {
         const auto menu = w;
         for (int hops = 0; w && (w->isX11OverrideRedirect() || w->m_X11ShouldntFocus) && hops < 8; ++hops)
@@ -4853,8 +4616,7 @@ void CDesktop3D::focusForShortcut() {
         why = std::format("{} is on a workspace not shown", classOf(w));
         w   = nullptr;
     }
-    // (a workspace under a special workspace open on its monitor is still "visible" to Hyprland, but its windows aren't
-    // shown: one pinned is, and with input:special_fallthrough Hyprland's own focus goes there too, leaving it open)
+    // hidden under an open special workspace though "visible" (unless pinned or with input:special_fallthrough)
     if (const auto mon = w ? w->m_monitor.lock() : nullptr;
         w && !w->m_pinned && !*PFALLTHROUGH && mon && mon->m_activeSpecialWorkspace && mon->m_activeSpecialWorkspace != w->m_workspace) {
         why = std::format("{} is under a special workspace", classOf(w));
@@ -4864,8 +4626,7 @@ void CDesktop3D::focusForShortcut() {
     if (w == focus)
         return;
     if (w) {
-        // under a window fullscreen or maximized on its workspace: not as a click focuses it, which takes that one out
-        // of fullscreen (or brings a floating one over it)
+        // under a fullscreen window: raw focus, as a full focus would end its fullscreen
         if (const auto fs = hypr::fullscreenWindow(w->m_workspace); fs && fs != w)
             Desktop::focusState()->rawWindowFocus(w, Desktop::FOCUS_REASON_CLICK);
         else
@@ -4881,17 +4642,11 @@ void CDesktop3D::focusForShortcut() {
         logf("a shortcut: the keyboard to {} ({}), was {}", classOf(w), whose, was);
     else if (!now)
         logf("a shortcut: the keyboard to none ({}), was {}", why, was);
-    else // (a layer surface that takes the keyboard from every window, on another monitor)
+    else // a layer surface on another monitor holds it
         logf("a shortcut: the keyboard stays on {} ({}; a layer surface keeps it there)", classOf(now), why);
 }
 
-// Every window that closes in 3D, in the log (by Super+Q, the Action Menu or the app itself): what it was, where, and
-// whether it had the keyboard, the crosshair was on it or it was played. The one that had the keyboard closing after a
-// shortcut went to it (Super+Q, Alt+F4; however slow it is to close) keeps shortcuts from the window Hyprland focuses
-// next (focusForShortcut; one that closed by itself, a popup over a game going, doesn't: the game's played again at
-// once), and if it was the game's, that window isn't played again for having the keyboard (updateHolds); the one played
-// closing ends play mode at once, a game's keys held back (playEnded) rather than going to whatever has the keyboard
-// next
+// a focused window closed by a shortcut starts the shortcut hold; the played window closing ends play mode
 void CDesktop3D::onWindowClose(const PHLWINDOW& w) {
     if (m_mode == MODE_OFF || !w || w->isX11OverrideRedirect())
         return;
@@ -4909,11 +4664,10 @@ void CDesktop3D::onWindowClose(const PHLWINDOW& w) {
     if (had && m_mode == MODE_ACTIVE && !m_away) {
         if (const auto now = std::chrono::steady_clock::now(); w == m_shortcutFor.lock() && now - m_shortcutAt < std::chrono::duration<float>(SHORTCUT_CLOSE_TIME))
             m_shortcutHold = {.on = true, .yaw = m_yaw, .pitch = m_pitch, .feet = m_body.feet, .at = now};
-        // (one under a window fullscreen on its workspace, given the keyboard by a shortcut: Hyprland would give it to
-        // the next window as this returns, taking that one out of fullscreen; none has it instead)
+        // under a fullscreen window: Hyprland would focus the next one on return, ending its fullscreen
         if (under)
             Desktop::focusState()->rawWindowFocus(nullptr, Desktop::FOCUS_REASON_OTHER);
-        // (Hyprland gives the keyboard to another window as this returns: the game's other windows now, m_held.others)
+        // Hyprland focuses another window on return: note the game's others
         if ((played || m_held.on) && sameGame(w)) {
             m_held.others.clear();
             for (const auto& o : hypr::windows())
@@ -4934,8 +4688,7 @@ bool CDesktop3D::sameGame(const PHLWINDOW& w) const {
     return !m_held.cls.empty() && classOf(w) == m_held.cls;
 }
 
-// a window of its own that can be played again: drawn in 3D, not tiny (a helper window, a splash's leftover) and not
-// under a fullscreen window (Hyprland keeps the keys from one there)
+// a toplevel in the 3D view, not tiny nor under a fullscreen window
 bool CDesktop3D::playable(const PHLWINDOW& w) const {
     if (!toplevel(w) || windowPanel(w) < 0 || hypr::blockedBelowFullscreen(w))
         return false;
@@ -4952,8 +4705,7 @@ std::string CDesktop3D::playAgain(const PHLWINDOW& w, bool fill) {
     return setPlay(true, fill);
 }
 
-// P with a game's keys held back: the game again. The window the crosshair is on if it's the game's, else the one
-// played last, else another of the game's; with none, whatever the crosshair is on
+// P with a game's keys held back: its aimed window, else the last played, else another
 std::string CDesktop3D::playHeldGame(bool fill) {
     PHLWINDOW aimed;
     if (m_aimed >= 0 && m_aimed < (int)m_panels.size() && m_panels[m_aimed].kind != PANEL_LAYER)
@@ -4974,22 +4726,15 @@ std::string CDesktop3D::playHeldGame(bool fill) {
     return setPlay(true, fill);
 }
 
-// Every frame: the hold on shortcuts ends once you turn or move, or after a moment. A game's keys held back after play
-// mode ended by itself go back to walking after PLAY_PAUSE_IDLE seconds without one, or, as soon as a window of the
-// game has the keyboard again (its real window after a splash, the focus back after a popup or a launcher closed), it's
-// played again: not one Hyprland gave the keyboard to as another of the game's windows closed (m_held.others), and not
-// while shortcuts are held back (once that hold ends: given the keyboard back then, when a shortcut took it from it
-// meanwhile). A Steam game's window that opened a moment ago and isn't played says how to play it
+// ends the shortcut hold once you turn or move; held game keys return to walking after PLAY_PAUSE_IDLE, or the game
+// plays again once its window has the keyboard
 void CDesktop3D::updateHolds() {
     const auto now = std::chrono::steady_clock::now();
     if (auto& h = m_shortcutHold; h.on &&
         (m_mode != MODE_ACTIVE || m_away || std::abs(wrapAngle(m_yaw - h.yaw)) > SHORTCUT_HOLD_TURN || std::abs(m_pitch - h.pitch) > SHORTCUT_HOLD_TURN ||
          length(m_body.feet - h.feet) > SHORTCUT_HOLD_MOVE || now - h.at > std::chrono::duration<float>(SHORTCUT_HOLD_TIME)))
         h.on = false;
-    // the game's window a shortcut took the keyboard from while shortcuts were held (Super+Q pressed twice for a popup
-    // over the game): back to it once that's over, played again below (or by autoPlay) as after one press. Not while a
-    // layer surface has the keyboard (a launcher: once it lets go), nor when a window has it by then, nor to one whose
-    // workspace isn't shown or that a special workspace is open over (focusing it would switch or close that)
+    // return the keyboard to the game window a shortcut took it from, once the hold ends
     if (const auto g = m_giveBack.lock(); !g || m_mode != MODE_ACTIVE || m_away || Desktop::focusState()->window() || !g->m_isMapped ||
         !((m_held.on && sameGame(topParent(g))) || fullscreenHere(topParent(g))))
         m_giveBack.reset();
@@ -5013,8 +4758,8 @@ void CDesktop3D::updateHolds() {
         const auto played = m_play.window.lock();
         if (m_mode != MODE_ACTIVE || m_away || now - h.at > std::chrono::seconds(5) || (played && classOf(played) == h.cls) || (m_held.on && m_held.cls == h.cls) ||
             (told != m_playHinted.end() && now - told->second < std::chrono::seconds(60)))
-            continue; // (older: it opened before 3D was left)
-        // the window that opened first, else one of its class's that's drawn (a helper or the real window after it)
+            continue; // opened before leaving 3D
+        // the first window opened, else a drawn one of its class
         PHLWINDOW w = h.window.lock();
         if (!w || !w->m_isMapped || windowPanel(w) < 0) {
             w = nullptr;
@@ -5034,8 +4779,7 @@ void CDesktop3D::updateHolds() {
         m_held.on = false;
         return;
     }
-    // (not while a layer surface has the keyboard: over the view, or one that takes it from every window, which would
-    // end play mode again at once; the moment without a key starts once it lets go)
+    // not under a layer surface (it would end play again); idle time starts once it lets go
     if (m_shell.input || !g_pInputManager->m_exclusiveLSes.empty()) {
         m_held.at = now;
         return;
@@ -5044,24 +4788,22 @@ void CDesktop3D::updateHolds() {
     if (f && f->isX11OverrideRedirect())
         f = x11Owner(f);
     f = topParent(f);
-    // (the one Hyprland gave the keyboard to as another of the game's windows closed: not till it's been elsewhere)
+    // a window focused as another game window closed counts only once focus was elsewhere
     std::erase_if(m_held.others, [&](const PHLWINDOWREF& o) { return o.expired() || o.lock() != f; });
     if (f && m_held.others.empty() && sameGame(f) && playable(f)) {
-        // (not while shortcuts are held back after the window with the keyboard closed, a popup over the game Super+Q
-        // closed: played, Super+Q pressed again would close the game. Once you turn or move, or a moment goes by; the
-        // keys held back till then)
+        // not during the shortcut hold: a second Super+Q would close the game
         if (m_shortcutHold.on) {
             m_held.at = now;
             return;
         }
         logf("play mode: {} has the keyboard again", classOf(f));
-        if (const std::string r = playAgain(f, m_play.fill); r.starts_with("error: ")) { // (in the view it was played in)
-            m_held.on = false; // (not tried again every frame)
+        if (const std::string r = playAgain(f, m_play.fill); r.starts_with("error: ")) { // in its previous view
+            m_held.on = false; // don't retry every frame
             log("play mode: " + r.substr(7));
         }
         return;
     }
-    // (the game's window a shortcut took the keyboard from: its keys held back till it gets it back, above)
+    // held until m_giveBack returns the keyboard
     if (!m_giveBack.expired()) {
         m_held.at = now;
         return;
@@ -5081,10 +4823,7 @@ const std::vector<SAppEntry>& CDesktop3D::apps() {
     return m_apps;
 }
 
-// The files the Maps and Avatars pages list, by name, into `out`: those with one of the extensions `exts` in
-// $XDG_DATA_HOME/hypr3d/FOLDER and in its folders (a glTF with its .bin and textures beside it, an avatar with its
-// settings file and emotes: the folder's name, or folder/file when it has more), then `also` (the configured one, the
-// one shown or on its way) wherever they are
+// files with `exts` in $XDG_DATA_HOME/hypr3d/FOLDER and its subfolders, then `also`
 void CDesktop3D::listModelFiles(std::vector<SModelFile>& out, const char* folder, std::initializer_list<std::string_view> exts, std::initializer_list<std::string> also) {
     namespace fs = std::filesystem;
     out.clear();
@@ -5126,8 +4865,6 @@ void CDesktop3D::listModelFiles(std::vector<SModelFile>& out, const char* folder
             add(p, fs::path(p).stem().string());
 }
 
-// The maps the Action Menu's Maps page lists: the .glb and .gltf files in $XDG_DATA_HOME/hypr3d/maps and its folders,
-// then the configured map and the one shown or on its way
 const std::vector<CDesktop3D::SModelFile>& CDesktop3D::mapFiles() {
     const auto now = std::chrono::steady_clock::now();
     if (m_mapFilesRead != std::chrono::steady_clock::time_point{} && now - m_mapFilesRead < std::chrono::seconds(2))
@@ -5137,8 +4874,7 @@ const std::vector<CDesktop3D::SModelFile>& CDesktop3D::mapFiles() {
     return m_mapFiles;
 }
 
-// the Maps page's pick: that map, "" the courtyard (the configured map at map_scale, another at the scale it was last
-// used at, or guessed). The one shown, picked while another is on its way, stays: the other one isn't loaded
+// the Maps page's pick ("" = courtyard); picking the shown map cancels a pending load
 std::string CDesktop3D::pickMap(const std::string& path) {
     const std::string shown = m_world.model ? m_world.model->path : "", want = normalPath(path);
     if (want == normalPath(shown) && normalPath(m_mapPath) != want) {
@@ -5153,8 +4889,7 @@ std::string CDesktop3D::pickMap(const std::string& path) {
     return requestMap(want, isDefault && g_cfgMapScale ? g_cfgMapScale->value() : 0.f);
 }
 
-// The avatars the Action Menu's Avatars page lists: the .glb, .gltf and .vrm files in $XDG_DATA_HOME/hypr3d/avatars
-// and its folders (not .vrma: those are emotes), then the configured avatar and the one shown or on its way
+// the Avatars page's list (not .vrma: those are emotes)
 const std::vector<CDesktop3D::SModelFile>& CDesktop3D::avatarFiles() {
     const auto now = std::chrono::steady_clock::now();
     if (m_avatarFilesRead != std::chrono::steady_clock::time_point{} && now - m_avatarFilesRead < std::chrono::seconds(2))
@@ -5164,9 +4899,7 @@ const std::vector<CDesktop3D::SModelFile>& CDesktop3D::avatarFiles() {
     return m_avatarFiles;
 }
 
-// the Avatars page's pick: that avatar, at avatar_height, as hyprctl hypr3d avatar loads one (till the plugin loads
-// again, or plugin:hypr3d:avatar or avatar_height changes). The one shown stays as it is; picked while another is on
-// its way, it stays and the other one isn't loaded
+// the Avatars page's pick, at avatar_height; picking the shown one cancels a pending load
 std::string CDesktop3D::pickAvatar(const std::string& path) {
     const std::string shown = m_avatar ? normalPath(m_avatar->path) : "", want = normalPath(path);
     if (want.empty())
@@ -5182,9 +4915,7 @@ std::string CDesktop3D::pickAvatar(const std::string& path) {
     return requestAvatar(want, g_cfgAvatarHeight ? g_cfgAvatarHeight->value() : 0.f);
 }
 
-// Starts an app, a desktop entry's (by its id or name) or a command, as Hyprland's exec does, with a token in its
-// environment: the window that has it goes in front of you. One that opens nothing of its own (a running app showing
-// a window of its first instance's) is known by its class instead, for a minute
+// starts an app like exec, with HYPR3D_LAUNCH so its window opens in front of you
 std::string CDesktop3D::launch(const std::string& what) {
     std::string cmd = what, cls, name = what;
     if (const SAppEntry* e = findApp(apps(), what)) {
@@ -5192,13 +4923,12 @@ std::string CDesktop3D::launch(const std::string& what) {
         cls  = e->wmClass.empty() ? e->id : e->wmClass;
         name = e->name;
     } else {
-        // a command: the class its window likely has, for a window whose process can't be read (Chromium's) or isn't
-        // this one's. A desktop entry that runs the same program says, else the program's own name
+        // a command: class from a desktop entry running the same program, else its name
         std::string        prog;
         std::istringstream in(what);
         for (std::string word; in >> word;) {
             if (word.find('=') != std::string::npos && word.find('/') == std::string::npos)
-                continue; // (VAR=value)
+                continue; // VAR=value
             prog = std::filesystem::path(word).filename().string();
             break;
         }
@@ -5215,10 +4945,7 @@ std::string CDesktop3D::launch(const std::string& what) {
     }
     if (cmd.empty())
         return "error: nothing to launch";
-    // Steam starts a game from its own running process, not as this one's child (or, starting itself, opens windows of
-    // its own first): the game's window is the one with SteamAppId=ID in its environment, as Steam starts every game,
-    // or, when that can't be read, class steam_app_ID, as Proton's are. (In the command run: Steam's own shortcuts are
-    // desktop entries, picked by name, that run "steam steam://rungameid/ID")
+    // Steam starts games itself: match SteamAppId=ID in the window's environment, else class steam_app_ID (Proton)
     SLaunch l;
     if (const size_t at = cmd.find("steam://rungameid/"); at != std::string::npos) {
         l.steam = cmd.substr(at + 18, cmd.find_first_not_of("0123456789", at + 18) - (at + 18));
@@ -5239,16 +4966,11 @@ std::string CDesktop3D::launch(const std::string& what) {
     return std::format("launched {} (pid {})", name, *pid);
 }
 
-// A window that opens: launched from 3D (its process is one we started or a child of it, its environment has our
-// token, or, neither known, its class is the one a launch waits for) it goes where its class was put before, else in
-// front of you as the app rules have it; any other that opens in 3D goes where its class was put before, when it's
-// the only one of its class, else in front of you too (on the 3D monitor). Where its class was put counts only when
-// you'd see it open there (inSight). Dialogs stay by their parents
+// places a new window at its class's spot if in sight, else in front of you (launched from 3D, or on the 3D monitor)
 void CDesktop3D::onWindowOpen(const PHLWINDOW& w) {
     if (!w || w->isX11OverrideRedirect())
         return;
-    // (a window closed while out of 3D can leave its placement behind, and a new one can come at its address; what tiling
-    // mode kept of the old one too)
+    // a window closed outside 3D can leave state for a new one at its address
     std::erase_if(m_placements, [](const auto& kv) { return kv.second.window.expired(); });
     if (const uintptr_t key = reinterpret_cast<uintptr_t>(w.get()); !m_placements.contains(key)) {
         std::erase(m_tiling.order, key);
@@ -5266,13 +4988,12 @@ void CDesktop3D::onWindowOpen(const PHLWINDOW& w) {
     const auto        token    = env.find("HYPR3D_LAUNCH");
     const auto        steamId  = env.contains("SteamAppId") ? env.at("SteamAppId") : env.contains("SteamGameId") ? env.at("SteamGameId") : "";
     const auto        parents  = m_launches.empty() ? std::vector<int64_t>{} : ancestry(w->getPID());
-    // a Steam game's window: how to play it is said in a moment, unless it's played by then (updateHolds; the first
-    // window of its class that opens, not a helper right after it)
+    // a Steam game's first window: hint how to play it (updateHolds)
     if ((!steamId.empty() || lowered(cls).starts_with("steam_app_")) && m_mode == MODE_ACTIVE && toplevel(w) &&
         std::ranges::none_of(m_playHints, [&](const SPlayHint& h) { return h.cls == cls; }))
         m_playHints.push_back({.cls = cls, .window = w, .at = now});
     for (auto it = m_launches.begin(); it != m_launches.end(); ++it) {
-        bool ours = false, surely = false; // (surely: by its process, so every window it opens comes here)
+        bool ours = false, surely = false; // surely: by process, all its windows
         if (!it->steam.empty())
             ours = steamId == it->steam || (steamId.empty() && lowered(cls) == lowered(it->cls));
         else if ((token != env.end() && token->second == it->token) || std::ranges::contains(parents, it->pid))
@@ -5288,14 +5009,13 @@ void CDesktop3D::onWindowOpen(const PHLWINDOW& w) {
         }
     }
     if ((m_mode != MODE_ACTIVE && m_mode != MODE_ENTERING) || m_placements.contains(reinterpret_cast<uintptr_t>(w.get())))
-        return; // (in 2D Hyprland lays it out, as always)
-    // a dialog of a window out in the world (settings, a file chooser through the portal): in front of it, a little
-    // towards you, where it opens over its parent on the 2D desktop
+        return;
+    // a dialog of a window in the world: just in front of its parent
     if (const auto parent = parentOf(w); parent && w->m_isMapped) {
         const auto pp = m_placements.find(reinterpret_cast<uintptr_t>(parent.get()));
         if (pp == m_placements.end() || pp->second.returning)
             return;
-        if (pp->second.pinned) { // (it follows the view: not there, in front of you)
+        if (pp->second.pinned) { // parent pinned to the view
             placeInFront(w, {});
             return;
         }
@@ -5303,7 +5023,7 @@ void CDesktop3D::onWindowOpen(const PHLWINDOW& w) {
         const Vector2D    at = (hypr::realPosition(w)->goal() + hypr::realSize(w)->goal() * 0.5) - (hypr::realPosition(parent)->goal() + hypr::realSize(parent)->goal() * 0.5);
         SPlacement        pl;
         pl.window  = w;
-        pl.follows = pp->first; // (and it goes along with it)
+        pl.follows = pp->first; // moves with its parent
         pl.center = pl.targetCenter = o.targetCenter + o.targetRot.rotate({(float)at.x * o.targetScale, -(float)at.y * o.targetScale, 0.06f});
         pl.rot = pl.targetRot = o.targetRot;
         pl.scale = pl.targetScale = o.targetScale;
@@ -5312,9 +5032,7 @@ void CDesktop3D::onWindowOpen(const PHLWINDOW& w) {
     }
     if (!toplevel(w))
         return;
-    // tiling mode: one that would come in front of you (launched from 3D, or opening on the 3D monitor) goes into the row
-    // where you look instead, not to its class's place either; away from a ring that stays where it is (Y), not into a
-    // row streets away: as without tiling, below
+    // tiling mode: windows that would open in front of you join the row where you look
     const bool intoRow = m_tiling.on && m_mode == MODE_ACTIVE && tileable(w) &&
         (launched || (w->m_monitor.lock() == m_monitor.lock() && w->m_workspace && w->m_workspace->isVisible()));
     if (intoRow && atRing()) {
@@ -5324,15 +5042,14 @@ void CDesktop3D::onWindowOpen(const PHLWINDOW& w) {
         return;
     }
     if (intoRow) {
-        // (carried into the row later, tiling ending leaves it where it is, as one that opened into the row)
+        // stays put when tiling ends, even if carried into the row
         m_tiling.stay.insert(reinterpret_cast<uintptr_t>(w.get()));
         logf("{}: away from the row, not into it", cls);
     }
     loadSpots();
     const auto spot = m_spots.find(cls);
     const bool alone = std::ranges::count_if(hypr::windows(), [&](const PHLWINDOW& o) { return toplevel(o) && classOf(o) == cls; }) == 1;
-    // (its place only where you'd see it open: one out of sight, behind you or streets away, looked like it never
-    // opened, and opening it again made a second window)
+    // its spot only if you'd see it open there (else it looks like it never opened)
     const bool there = spot != m_spots.end() && (launched || alone);
     if (there && (m_mode != MODE_ACTIVE || inSight(spot->second))) {
         placeAt(w, spot->second);
@@ -5344,24 +5061,15 @@ void CDesktop3D::onWindowOpen(const PHLWINDOW& w) {
     if (launched)
         placeInFront(w, appRule(m_rules, cls));
     else if (m_mode == MODE_ACTIVE && w->m_monitor.lock() == m_monitor.lock() && w->m_workspace && w->m_workspace->isVisible() && hypr::realSize(w)->goal().y >= 1) {
-        // any other of its own that opens while you're in 3D, on the 3D monitor (a terminal from a keybind, the
-        // screen-share portal's picker, a splash): in front of you rather than out of sight on the wall; a floating
-        // one a little nearer, as big as on your screen (the app rules are for the size a tiled one happens to have)
+        // other windows on the 3D monitor: in front of you; floating ones nearer at screen size
         placeInFront(w, w->m_isFloating ? SAppRule{.distance = 1.3f} : appRule(m_rules, cls));
     }
-    // (away from a ring that stays, one left on the wall, having no size yet to be put in front of you, stays there as
-    // without tiling: else the row would take it from the wall, as it takes the wall's windows, and it'd fly off into the
-    // row streets away)
+    // away from a staying ring, a window left on the wall stays rather than flying off to the row
     if (intoRow && !m_placements.contains(reinterpret_cast<uintptr_t>(w.get())))
         m_tiling.walled.insert(reinterpret_cast<uintptr_t>(w.get()));
 }
 
-// a window going fullscreen in 3D (a video, a game) is played by itself once it has the keyboard (autoPlay), in the
-// view plugin:hypr3d:play_view says (where it is by default, turned to if it's out of your view), and gets the mouse
-// and keys. Leaving fullscreen doesn't end that (the app keeps the keys, as on the 2D desktop: Esc in a video, a game's
-// display mode, typed on; Super+Esc walks), and the next time it's fullscreen it's played by itself again. (Maximized
-// is one of Hyprland's fullscreen modes too, not played: like fullscreen it hides the rest of its workspace, and in 3D
-// only on the desktop wall, while it's there itself: collectPanels)
+// fullscreen in 3D means auto-play (autoPlay); leaving fullscreen clears a decline but doesn't end play
 void CDesktop3D::onFullscreen(const PHLWINDOW& w) {
     if (!w)
         return;
@@ -5374,16 +5082,14 @@ void CDesktop3D::onFullscreen(const PHLWINDOW& w) {
     std::erase_if(m_fullscreen.fresh, [&](const PHLWINDOWREF& r) { return r.lock() == w; });
 }
 
-// the window fullscreen on the 3D monitor's workspace, not one whose play you ended while it was (autoPlay plays it once
-// it has the keyboard)
+// the 3D monitor's fullscreen window, unless declined (autoPlay plays it)
 bool CDesktop3D::fullscreenHere(const PHLWINDOW& w) const {
     const auto mon = m_monitor.lock();
     const auto ws  = mon ? mon->m_activeWorkspace : nullptr;
     return w && ws && hypr::fullscreenWindow(ws) == w && hypr::fullscreen(w) && !listed(m_fullscreen.declined, w);
 }
 
-// a window that focusing switches nothing: its workspace shown, and no special workspace open over it (focusing it would
-// close that; one pinned is over it, and with input:special_fallthrough Hyprland focuses it so too)
+// focusing w switches nothing: workspace shown and no special workspace over it
 bool CDesktop3D::focusable(const PHLWINDOW& w) const {
     static auto PFALLTHROUGH = CConfigValue<Config::INTEGER>("input:special_fallthrough");
     if (!w || !w->m_isMapped || !w->m_workspace || !w->m_workspace->isVisible())
@@ -5392,16 +5098,8 @@ bool CDesktop3D::focusable(const PHLWINDOW& w) const {
     return w->m_pinned || *PFALLTHROUGH || !mon || !mon->m_activeSpecialWorkspace || mon->m_activeSpecialWorkspace == w->m_workspace;
 }
 
-// Every frame, after the panels are collected: the window fullscreen on the 3D monitor's workspace is played by itself
-// once it has the keyboard (or a dialog of its own has it, and keeps it), while you walk: not typing into another
-// window, the Action Menu closed, nothing carried, no layer surface over the view, not away on another monitor. When no
-// window has the keyboard the first time it's looked at after going fullscreen (Hyprland takes it from a window under
-// one going fullscreen: a game's own second window had it), it's given it; only then (not when 3D took it from a
-// window on another monitor, coming back). Not one whose play you ended while it was fullscreen, nor one fullscreen
-// already coming into 3D, till it leaves fullscreen; nor while Hyprland still animates it to its fullscreen size. Not
-// while shortcuts are held back after the window with the keyboard closed (played, Super+Q pressed again would close
-// it: once that hold ends), nor one Hyprland gave the keyboard to as another of the game's windows closed (as
-// updateHolds has it). A game whose keys are held back is played in the view it was played in
+// auto-plays the 3D monitor's fullscreen window once it (or its dialog) has the keyboard while you just walk; a fresh
+// one with nothing focused gets focused
 void CDesktop3D::autoPlay() {
     const auto stale = [](const PHLWINDOWREF& r) {
         const auto w = r.lock();
@@ -5414,11 +5112,11 @@ void CDesktop3D::autoPlay() {
     const auto w   = ws ? hypr::fullscreenWindow(ws) : nullptr;
     if (m_mode != MODE_ACTIVE || !w || !hypr::fullscreen(w) || m_play.on || m_away || m_shell.input || m_menu.open() || m_hold.key ||
         (m_typing && m_typingInto.lock() != w) || !g_pInputManager->m_exclusiveLSes.empty() || windowPanel(w) < 0 || listed(m_fullscreen.declined, w))
-        return; // (a layer surface with the keyboard to itself, on another monitor too, would end it again at once)
+        return; // an exclusive layer surface would end it at once
     if (m_shortcutHold.on || (m_held.on && listed(m_held.others, w)))
         return;
     if (hypr::realSize(w)->isBeingAnimated() || hypr::realPosition(w)->isBeingAnimated())
-        return; // (Hyprland's growing it to the screen: played once it's there, so the turn to it faces its middle)
+        return; // turn to its middle once at full size
     const bool  fresh = std::erase_if(m_fullscreen.fresh, [&](const PHLWINDOWREF& r) { return r.lock() == w; }) > 0;
     const char* how   = nullptr;
     if (keyboardWith(w))
@@ -5429,21 +5127,15 @@ void CDesktop3D::autoPlay() {
             how = "fullscreen with no window focused: focused and played";
     }
     if (!how)
-        return; // (another window has the keyboard, one over it: once it's back, it's played)
+        return; // another window has the keyboard
     m_aimed         = windowPanel(w);
     m_aimPanelLocal = m_panels[m_aimed].box.size() * 0.5;
-    // (the game whose keys are held back, the keyboard back with it after a layer surface let go: in its view, as
-    // updateHolds plays it again, which sees the layer surface a frame longer)
+    // a held-back game regaining the keyboard: in its previous view
     if (setPlay(true, m_held.on && sameGame(w) ? std::optional<bool>(m_play.fill) : std::nullopt) == "playing")
         logf("{}: {}", classOf(w), how);
 }
 
-// out in the world in front of you, as the rule has it: its middle `distance` ahead of the eye (level with it), `side`
-// to the right, turned to face you, `height` tall; with no height as big as on your screen (made smaller to fit your
-// view, and nearer its middle when it's too wide to show whole at the side). Something in the way brings it nearer and
-// smaller, so it looks the same. In third person it's `distance` past the avatar and all that is from the camera: a
-// window with no height is as big as fits THIRD_FIT of the view above the ground (much bigger than from your eye),
-// standing on it
+// places w in front of you per the rule (no height: as on your screen), pulled nearer and smaller past obstacles
 bool CDesktop3D::placeInFront(const PHLWINDOW& w, const SAppRule& rule) {
     const Vector2D size = hypr::realSize(w)->goal();
     if (size.x < 1 || size.y < 1)
@@ -5456,7 +5148,7 @@ bool CDesktop3D::placeInFront(const PHLWINDOW& w, const SAppRule& rule) {
         eye  = from - forwardFrom(m_yaw, m_pitch) * m_camBoom;
         back = std::max(0.f, dot(from - eye, fwd));
     }
-    const float ahead = back + rule.distance; // (how far out the view sees it)
+    const float ahead = back + rule.distance; // distance from the view
     const float fit   = back > 0.f ? THIRD_FIT : FRONT_FIT;
     float       scale = frontScale(size, ahead, rule.height, fit);
     V3          c     = from + fwd * rule.distance;
@@ -5467,7 +5159,7 @@ bool CDesktop3D::placeInFront(const PHLWINDOW& w, const SAppRule& rule) {
         const float half = (float)size.y * scale * 0.5f;
         c.y              = std::max(std::min(c.y, eye.y + reach - half), ground + half);
     }
-    float side = rule.side * (ahead / rule.distance); // (as far round to the side as from your eye)
+    float side = rule.side * (ahead / rule.distance); // same angle as from the eye
     if (rule.height <= 0) {
         const float halfView = fit * ahead * std::tan(FOV_Y * 0.5f) * (float)(m_screen.logicalSize.x / m_screen.logicalSize.y);
         side                 = std::copysign(std::min(std::abs(side), std::max(0.f, halfView - (float)size.x * scale * 0.5f)), side);
@@ -5476,11 +5168,11 @@ bool CDesktop3D::placeInFront(const PHLWINDOW& w, const SAppRule& rule) {
     const V3 n = normalize(V3{eye.x - c.x, 0, eye.z - c.z});
     const V3 r = normalize(cross(V3{0, 1, 0}, n));
     const V3 u = cross(n, r);
-    // (not nearer than 0.4 m past your eye or the avatar, whatever's in the way)
+    // at least 0.4 m past the eye or the avatar
     const float     nearest = back + 0.4f;
     float           pull    = std::max(clearance(eye, c, r, u, n, (float)size.x * 0.5f * scale, (float)size.y * 0.5f * scale), std::min(1.f, nearest / length(c - eye)));
     const uintptr_t key     = reinterpret_cast<uintptr_t>(w.get());
-    // where another window already is (two opened one after the other): 10 cm in front of it
+    // two opened in a row: 10 cm in front of the other
     for (int i = 0; i < 8; ++i) {
         const V3    at    = eye + (c - eye) * pull;
         const float depth = length(at - eye);
@@ -5504,13 +5196,13 @@ bool CDesktop3D::placeInFront(const PHLWINDOW& w, const SAppRule& rule) {
 float CDesktop3D::frontScale(const Vector2D& size, float dist, float height, float fit) const {
     if (height > 0)
         return height / (float)std::max(size.y, 1.0);
-    // the view is 2 tan(FOV_Y / 2) dist metres tall there, as the monitor's logical height is on your screen
+    // the view there is 2 tan(FOV_Y / 2) dist metres tall, the monitor's logical height on screen
     const float viewH = 2.f * dist * std::tan(FOV_Y * 0.5f), viewW = viewH * (float)(m_screen.logicalSize.x / m_screen.logicalSize.y);
     return std::min({viewH / (float)m_screen.logicalSize.y, fit * viewH / (float)std::max(size.y, 1.0), fit * viewW / (float)std::max(size.x, 1.0)});
 }
 
 float CDesktop3D::apparentSize(const V3& center, float scale) const {
-    const float depth = dot(center - m_camera.eye, m_camFwd); // (how far ahead: a flat picture shrinks with that)
+    const float depth = dot(center - m_camera.eye, m_camFwd); // a flat picture shrinks with depth
     return depth > 0.05f ? scale / (2.f * depth * std::tan(FOV_Y * 0.5f) / (float)m_screen.logicalSize.y) : 0.f;
 }
 
@@ -5530,7 +5222,7 @@ float CDesktop3D::clearance(const V3& eye, const V3& c, const V3& r, const V3& u
     return std::max(pull, 0.1f);
 }
 
-// the camera's boom in third person: the crosshair's ray passes the avatar's head that far ahead (viewCamera())
+// third-person camera boom: the crosshair's ray passes the avatar's head that far ahead
 float CDesktop3D::carryFrom() const {
     return m_thirdPerson && m_avatar ? m_camBoom : 0.f;
 }
@@ -5544,8 +5236,7 @@ void CDesktop3D::placeAt(const PHLWINDOW& w, const SWindowSpot& spot) {
     m_placements[reinterpret_cast<uintptr_t>(w.get())] = pl;
 }
 
-// where you'd see a window open: its middle in the view, facing you, big enough to notice (a quarter of its size on
-// your screen), with nothing between your eye and it
+// would you see a window open there: in view, facing you, big enough, unobstructed
 bool CDesktop3D::inSight(const SWindowSpot& spot) const {
     const V3    eye = m_camera.eye, d = spot.center - eye;
     const float depth = dot(d, m_camFwd), len = length(d);
@@ -5566,7 +5257,7 @@ void CDesktop3D::loadSpots() {
     m_spotsFor = m_mapPath;
 }
 
-// where a window was put, kept for its class (in this world): its windows open there again
+// remembers where a window was put, per class and map
 void CDesktop3D::rememberSpot(uintptr_t key) {
     const auto it = m_placements.find(key);
     const auto w  = it != m_placements.end() ? it->second.window.lock() : nullptr;
@@ -5587,7 +5278,7 @@ void CDesktop3D::forgetSpot(uintptr_t key) {
         saveWindowSpots(m_mapPath, m_spots);
 }
 
-// entering 3D: the windows whose class was put somewhere go there again (when there's one of the class)
+// entering 3D: windows go to their class's spot if alone in their class
 void CDesktop3D::restoreSpots() {
     std::erase_if(m_placements, [](const auto& kv) { return kv.second.window.expired(); });
     loadSpots();
@@ -5611,17 +5302,13 @@ void CDesktop3D::restoreSpots() {
 
 // ------------------------------------------------------------ tiling mode
 
-// T: every window in the world and every one on the desktop wall side by side in a row round you (the ring, tiling.cpp),
-// in the order they were round you, going with you wherever you go, or with Y staying where it is; while it's on, one
-// that opens goes in where you look, the wall's come in where they are, and one carried goes where it's put down in the
-// air (on a wall it stays there, out of the row; away from a ring that stays, the same). Off, each goes back where it
-// was before; those that came in meanwhile stay where they are
+// T: the windows side by side in a ring round you (tiling.cpp); off, each goes back where it was
 std::string CDesktop3D::setTiling(bool on) {
     if (on == m_tiling.on)
         return on ? "tiling" : "not tiling";
     if (on) {
         m_tiling.on = true;
-        forgetTiles(); // (round where you are, when you're in 3D)
+        forgetTiles(); // ring round you once in 3D
         if (m_mode == MODE_ACTIVE) {
             anchorRing();
             gatherTiles();
@@ -5644,7 +5331,7 @@ std::string CDesktop3D::setTiling(bool on) {
             pl.targetRot    = b->second.targetRot;
             pl.targetScale  = b->second.targetScale;
         } else if (!m_tiling.stay.contains(key))
-            pl.returning = true; // (it was on the wall)
+            pl.returning = true; // was on the wall
     }
     // the one carried out of the row: escape puts it where it was before, not in the row
     if (m_hold.key && m_hold.tileAt >= 0) {
@@ -5652,7 +5339,7 @@ std::string CDesktop3D::setTiling(bool on) {
         if (const auto b = m_tiling.before.find(m_hold.key); b != m_tiling.before.end())
             m_hold.before = b->second;
         else if (!m_tiling.stay.contains(m_hold.key))
-            m_hold.hadBefore = false; // (the wall)
+            m_hold.hadBefore = false; // the wall
         m_hold.before.tiled = false;
     }
     m_tiling.on = false;
@@ -5663,8 +5350,7 @@ std::string CDesktop3D::setTiling(bool on) {
     return "not tiling";
 }
 
-// Shift+T: the ring round you here, the row's middle where you look now, the row as it is: going with you, that turns
-// the row; staying, that brings it to you (and it stays there). Not tiling: tiling on
+// Shift+T: the ring round you, its middle where you look; not tiling: turns it on
 std::string CDesktop3D::tileHere() {
     if (!m_tiling.on)
         return setTiling(true);
@@ -5674,10 +5360,7 @@ std::string CDesktop3D::tileHere() {
     return "tiling here";
 }
 
-// Y: tiling mode's ring goes with you, or stays where it is now: you walk up to your windows, round the ring and away
-// from it, and they stay where they are in the world. Going with you again, it comes round you where you are, the row
-// as it was round you (each window the same way round you, as walking with it keeps it), the windows easing over to it.
-// Not tiling: what T will do. (A preference: it stays so through T, leaving 3D, another map)
+// Y: the ring follows you or stays; not tiling, sets what T does
 std::string CDesktop3D::setTileFollow(bool on) {
     auto& t = m_tiling;
     if (on == t.follow)
@@ -5692,7 +5375,7 @@ std::string CDesktop3D::setTileFollow(bool on) {
     return on ? "following" : "staying";
 }
 
-// the hypr3d:tile dispatcher's and hl.plugin.hypr3d.tile()'s: nothing = T, here = Shift+T, follow = Y
+// hypr3d:tile dispatcher and hl.plugin.hypr3d.tile(): none = T, here = Shift+T, follow = Y
 std::string CDesktop3D::tileDispatch(const std::string& arg) {
     const std::string a = unquote(arg);
     if (a == "here")
@@ -5702,9 +5385,7 @@ std::string CDesktop3D::tileDispatch(const std::string& arg) {
     return setTiling(!m_tiling.on);
 }
 
-// plugin:hypr3d:tiling: on from the start, or turned on or off when it changes (a config reload, hyprctl keyword);
-// plugin:hypr3d:tiling_follow the same for the row going with you or staying (Y), looked at first (T from the start
-// says which)
+// plugin:hypr3d:tiling and tiling_follow: applied at start and when they change
 void CDesktop3D::checkTilingConfig() {
     if (const int f = !g_cfgTilingFollow || g_cfgTilingFollow->value(); f != m_tiling.configuredFollow) {
         const bool first          = m_tiling.configuredFollow < 0;
@@ -5734,7 +5415,7 @@ void CDesktop3D::forgetTiles() {
     m_tiling.anchorLater = m_tiling.on;
 }
 
-// a window of its own that isn't tiny (a status pill, a splash): the row takes it (one with no size yet too)
+// a toplevel not under TILE_MIN_PX (a status pill, a splash); one with no size yet counts
 bool CDesktop3D::tileable(const PHLWINDOW& w) const {
     if (!toplevel(w))
         return false;
@@ -5742,9 +5423,7 @@ bool CDesktop3D::tileable(const PHLWINDOW& w) const {
     return !((size.x >= 1 && size.x < TILE_MIN_PX) || (size.y >= 1 && size.y < TILE_MIN_PX));
 }
 
-// the window played here in tiling mode's row, you at the ring (away from a ring that stays it's as the ring has it,
-// played or not), or the one whose play here ended by itself, its keys held back (a popup or a launcher over it: it
-// keeps its size and its place till that ends); null: none
+// the window played here in the row while you're at the ring, or the held-back game's; null: none
 PHLWINDOW CDesktop3D::playedInRow() const {
     if (!m_tiling.on || m_play.fill || !atRing())
         return nullptr;
@@ -5752,8 +5431,7 @@ PHLWINDOW CDesktop3D::playedInRow() const {
     return w && std::ranges::contains(m_tiling.order, reinterpret_cast<uintptr_t>(w.get())) ? w : nullptr;
 }
 
-// each window's size, and the window played here: play_size of the view (or what Super+wheel made it; filling the
-// view, or not playing, as the ring has the others)
+// each window's size; the window played here takes m_play.size of the view
 std::vector<STileIn> CDesktop3D::tileSizes(const std::vector<uintptr_t>& keys) const {
     std::vector<STileIn> in;
     in.reserve(keys.size());
@@ -5767,10 +5445,7 @@ std::vector<STileIn> CDesktop3D::tileSizes(const std::vector<uintptr_t>& keys) c
     return in;
 }
 
-// the ring round where you are now: round your eye, or in third person round the avatar's head with the camera's boom
-// behind it and the ring past that (the camera inside the ring sees every window from the front, each as big as on your
-// screen from the camera, when you face it); the middle of the row where you look (not `look`: as it was, the row the
-// same way round you). From then on it goes with you, or stays there (Y); the windows ease over to it
+// centres the ring on you; `look` also turns the row's middle to where you look
 void CDesktop3D::anchorRing(bool look) {
     auto&    t = m_tiling;
     const V3 s = m_body.seen();
@@ -5785,9 +5460,7 @@ void CDesktop3D::anchorRing(bool look) {
     t.anchorLater = false;
 }
 
-// Every frame in tiling mode going with you (not Y's staying): the ring goes where you go (walking, running, flying over
-// the rooftops), and its windows with it, so they're round you wherever you are; its yaw stays, you turn to the one you
-// want. It stands where you stand (not up with a jump: STileFloor), fitted to the view as it is now (V, the camera's boom)
+// following: the ring moves with you, keeping its yaw, on the floor (STileFloor ignores jumps)
 void CDesktop3D::followRing(float dt) {
     auto&    t   = m_tiling;
     const V3 s   = m_body.seen();
@@ -5799,8 +5472,6 @@ void CDesktop3D::followRing(float dt) {
     t.moved       = t.ring.center - was;
 }
 
-// first person round your eye, TILE_RADIUS out, each window FRONT_FIT of the view at the most; third person round the
-// avatar's head, the camera's boom behind that and the ring TILE_PAST further, THIRD_FIT
 void CDesktop3D::fitRing() {
     auto&      r     = m_tiling.ring;
     const auto mon   = m_monitor.lock();
@@ -5813,14 +5484,12 @@ void CDesktop3D::fitRing() {
     r.fit            = third ? THIRD_FIT : FRONT_FIT;
 }
 
-// (standing: the ring doesn't go down when you crouch)
+// standing height: the ring doesn't drop when you crouch
 float CDesktop3D::ringHeight() const {
     return m_thirdPerson && m_avatar ? std::max(0.5f, m_avatar->height * 0.95f + 0.15f) : fpBody() ? m_avatar->eyeHeight : EYE;
 }
 
-// what you do that puts a window into the row (open one, bring one, put one down in the air) does so at the ring: going
-// with you that's anywhere (and it's round you coming into 3D, or another map, the next frame); staying (Y), in it, your
-// eye (the avatar's head) no further from its middle than its windows stand. Away from it, as without tiling
+// at the ring, windows join the row: always when following, else with your eye inside the ring
 bool CDesktop3D::atRing() const {
     if (!m_tiling.on)
         return false;
@@ -5830,9 +5499,7 @@ bool CDesktop3D::atRing() const {
     return insideRing(m_tiling.ring, {s.x, s.y + ringHeight(), s.z});
 }
 
-// out of the row, and kept out of it where it is (put down on a wall, or brought or put down away from a ring that
-// stays): tiling ending leaves it there, and so it does if it's carried into the row again (it's out in the world where
-// you put it, not where it was before tiling)
+// takes a window out of the row for good: tiling ending leaves it where it is
 void CDesktop3D::keepFromRow(uintptr_t key) {
     std::erase(m_tiling.order, key);
     m_tiling.laid.erase(key);
@@ -5844,19 +5511,17 @@ void CDesktop3D::keepFromRow(uintptr_t key) {
         it->second.tiled = false;
 }
 
-// into the row: every window out in the world that isn't pinned, carried, a dialog or kept out of it, and every one on
-// the desktop wall not sent back to it, in the order they're round you from where you looked; where each was is kept
-// for when tiling ends. (Into a row that's there, each goes in where it is round you)
+// adds world and desktop-wall windows to the row in their order round you
 void CDesktop3D::gatherTiles() {
     const auto&                              r = m_tiling.ring;
-    std::vector<std::pair<float, uintptr_t>> round; // (yaw from where you looked, window)
+    std::vector<std::pair<float, uintptr_t>> round; // yaw from where you look, key
     for (auto& [key, pl] : m_placements) {
         if (pl.tiled || pl.pinned || pl.returning || pl.follows || key == m_hold.key || m_tiling.kept.contains(key) || !tileable(pl.window.lock()))
             continue;
         m_tiling.before[key] = pl;
         round.emplace_back(wrapAngle(ringYaw(r, pl.center) - r.yaw), key);
     }
-    for (const auto& p : m_panels) { // (from where the wall has them: in a frame, the panels' poses come later)
+    for (const auto& p : m_panels) { // panel poses come later in the frame
         const auto w = p.kind == PANEL_WINDOW ? p.window.lock() : nullptr;
         if (!w || m_placements.contains(p.key) || m_tiling.walled.contains(p.key) || !tileable(w))
             continue;
@@ -5876,8 +5541,7 @@ void CDesktop3D::gatherTiles() {
     }
 }
 
-// where you look round the ring, as a yaw from its middle: where your view (level) crosses it going out, else (outside
-// it, looking away) the side of it you're on
+// where you look round the ring, as a yaw from its centre (outside, facing away: your side)
 float CDesktop3D::ringLookYaw() const {
     return ringLookYaw(m_camera.eye, m_camera.yaw);
 }
@@ -5891,8 +5555,7 @@ int CDesktop3D::lookSlot() const {
     return ringSlot(m_tiling.ring, layoutRing(m_tiling.ring, tileSizes(m_tiling.order)), ringLookYaw());
 }
 
-// into the row at `slot` (the others make room), from where it's drawn now (the wall, the world), else (not drawn yet,
-// just opened) from the ring where you look
+// puts w into the row at `slot`, from where it's drawn now, else from the ring where you look
 void CDesktop3D::tileWindow(const PHLWINDOW& w, int slot) {
     const uintptr_t key = reinterpret_cast<uintptr_t>(w.get());
     std::erase(m_tiling.order, key);
@@ -5902,7 +5565,7 @@ void CDesktop3D::tileWindow(const PHLWINDOW& w, int slot) {
     auto it = m_placements.find(key);
     if (it == m_placements.end()) {
         SPlacement pl;
-        if (const int i = windowPanel(w); i >= 0) // (on the wall)
+        if (const int i = windowPanel(w); i >= 0) // on the wall
             pl = layoutPlacement(m_panels[i]);
         else {
             const auto&    r    = m_tiling.ring;
@@ -5927,20 +5590,17 @@ void CDesktop3D::tileWindow(const PHLWINDOW& w, int slot) {
     it->second.tiled     = true;
 }
 
-// every frame in tiling mode: the ring where you are now (or where it stays: Y), who's in the row (the desktop wall's
-// windows join it where they are round you; gone, hidden, pinned, carried or sent back to the wall they leave it), and
-// where each goes: laid out round the ring, with room where the window carried would go (at the ring), and brought
-// nearer and smaller where something's between the view and it (so it looks the same)
+// tiling each frame: moves the ring, updates the row, lays it out and pulls windows in past obstacles
 void CDesktop3D::updateTiling(float dt) {
     m_tiling.holdSlot       = -1;
     m_tiling.moved          = {};
     m_tiling.ring.lookY     = NAN;
     m_tiling.ring.lookDist  = NAN;
     m_tiling.ring.lookPitch = 0.f;
-    const bool centre       = std::exchange(m_play.centre, false); // (asked for since the last frame: below)
+    const bool centre       = std::exchange(m_play.centre, false); // requested since the last frame
     if (!m_tiling.on || (m_mode != MODE_ACTIVE && m_mode != MODE_ENTERING))
         return;
-    bool snap = false; // (coming into 3D: they're there as it comes in, from the 2D desktop)
+    bool snap = false; // entering 3D: windows start in place
     if (m_tiling.anchorLater) {
         snap = m_mode == MODE_ENTERING;
         anchorRing();
@@ -5960,7 +5620,7 @@ void CDesktop3D::updateTiling(float dt) {
             return false;
         pl.tiled = false;
         if (w && w->m_isMapped && !own && !pl.pinned && key != m_hold.key)
-            pl.returning = true; // (hidden, a group's tab not shown: home till it shows again; one closing fades where it is)
+            pl.returning = true; // hidden (a group's tab): home until shown
         m_tiling.laid.erase(key);
         return true;
     });
@@ -5968,7 +5628,7 @@ void CDesktop3D::updateTiling(float dt) {
         const auto w = p.kind == PANEL_WINDOW ? p.window.lock() : nullptr;
         if (!w || m_placements.contains(p.key) || m_tiling.walled.contains(p.key) || !tileable(w))
             continue;
-        const SPlacement home = layoutPlacement(p); // (where the wall has it: the panels' poses come later in a frame)
+        const SPlacement home = layoutPlacement(p); // panel poses come later in the frame
         const int        slot = ringSlot(r, layoutRing(r, tileSizes(order)), ringYaw(r, home.center));
         SPlacement&      pl   = m_placements[p.key];
         pl                    = home;
@@ -5985,13 +5645,7 @@ void CDesktop3D::updateTiling(float dt) {
             in.insert(in.begin() + m_tiling.holdSlot, STileIn{(float)size.x, (float)size.y});
         }
     }
-    // a window played here, at the ring, where you look (your own view as it is now: turned to it maybe, as play started;
-    // in third person from the camera behind the avatar, where it is: in from its boom with a wall behind you), your view
-    // staying: its middle as high as your view's middle crosses the ring, every frame, sized for your view of it (how far
-    // out it is from the view, level, and the view's pitch to it), and the row turned so it's there left and right. That
-    // as play starts or switches to here, as Super+wheel sizes it and as V switches the view; a window opening or closing
-    // in the row meanwhile doesn't move it (the row turns round it). One whose play ended by itself, its keys held back,
-    // stays as it was played till that ends, the row turning round it too; it's left where it is when play ends
+    // the window played here stays where you look, sized for its distance and pitch; the row turns round it
     const auto shown  = playedInRow();
     const auto played = shown ? std::ranges::find(order, reinterpret_cast<uintptr_t>(shown.get())) : order.end();
     auto&      look   = m_tiling.look;
@@ -6000,12 +5654,12 @@ void CDesktop3D::updateTiling(float dt) {
     else {
         size_t i = played - order.begin();
         if (m_tiling.holdSlot >= 0 && (size_t)m_tiling.holdSlot <= i)
-            ++i; // (room for the window carried before it)
-        if (look.on) { // (as it was last laid out; its keys held back, as it was played)
+            ++i; // room for the carried window
+        if (look.on) { // as last laid out
             r.lookY     = r.center.y + look.dy;
             r.lookDist  = look.dist;
             r.lookPitch = look.pitch;
-            if (look.order != order && !centre) // (a window came into the row or left it: the row turned round it)
+            if (look.order != order && !centre) // row changed: turn round it
                 r.yaw = wrapAngle(r.yaw + wrapAngle(look.angle - layoutRing(r, in)[i].angle));
         }
         if (m_play.on) {
@@ -6015,12 +5669,11 @@ void CDesktop3D::updateTiling(float dt) {
             r.lookY            = crosses ? at.y : NAN;
             const float mid    = crosses ? at.y : r.center.y;
             if (centre && crosses) {
-                // (turned to where you look: it'll be there, as far out as that, the pitch your view's)
+                // centred: where you look, at that distance and pitch
                 const float d = std::hypot(at.x - eye.x, at.z - eye.z);
                 look          = {true, mid - r.center.y, d, std::atan2(mid - eye.y, std::max(d, 0.01f)), look.angle, look.order};
             } else if (look.on) {
-                // (as far out as it's laid, when that's changed more than a hair: not every frame as the camera's boom eases
-                // out, every window's place worked out again)
+                // update only past 2%, not every frame while the boom eases (that lays out every window again)
                 const STileOut o = layoutRing(r, in)[i];
                 const float    d = std::hypot(o.center.x - eye.x, o.center.z - eye.z), p = std::atan2(mid - eye.y, std::max(d, 0.01f));
                 if (std::abs(d - look.dist) > look.dist * 0.02f || std::abs(p - look.pitch) > 0.02f) {
@@ -6028,7 +5681,7 @@ void CDesktop3D::updateTiling(float dt) {
                     look.pitch = p;
                 }
                 look.dy = mid - r.center.y;
-            } else // (the ring turned on while playing: as the ring's view has it till it's turned to you)
+            } else // tiling turned on while playing
                 look = {true, mid - r.center.y, r.back + r.radius, std::atan2(mid - eye.y, r.back + r.radius), 0.f, order};
             r.lookDist  = look.dist;
             r.lookPitch = look.pitch;
@@ -6041,22 +5694,18 @@ void CDesktop3D::updateTiling(float dt) {
         }
     }
     const auto laid = layoutRing(r, in);
-    std::vector<std::pair<uintptr_t, size_t>> row; // (window, where it's laid)
+    std::vector<std::pair<uintptr_t, size_t>> row; // window, layout index
     for (size_t i = 0, k = 0; i < laid.size() && k < order.size(); ++i)
         if ((int)i != m_tiling.holdSlot)
             row.emplace_back(order[k++], i);
-    // (pulled in towards the ring's middle, not the third-person camera: the row's angles stay, none overlapping. What's
-    // in the way is 153 rays: worked out again at once when a window's place in the row changed, and as the ring goes with
-    // you when it went TILE_REPULL since, for the TILE_REPULLS that it went furthest from a frame, running or flying the
-    // others the next frames. The window played here isn't pulled in: it's drawn over the world while it's played, and
-    // pulled in it would take less of the view than it's given)
+    // pulled towards the ring's centre; clearance() is 153 rays: redone on slot changes, at most TILE_REPULLS a frame
     const auto pullFor = [&](size_t i) {
         if (in[i].fit > 0.f)
             return 1.f;
         const STileOut& o = laid[i];
         return std::max(clearance(r.center, o.center, o.right, o.up, o.normal, in[i].w * o.scale * 0.5f, in[i].h * o.scale * 0.5f), std::min(1.f, 0.4f / r.radius));
     };
-    std::vector<std::pair<float, size_t>> went; // (how far the ring went since, where in the row)
+    std::vector<std::pair<float, size_t>> went; // ring travel since, row index
     for (size_t j = 0; j < row.size(); ++j) {
         const auto [key, i] = row[j];
         const STileOut& o    = laid[i];
@@ -6089,10 +5738,7 @@ void CDesktop3D::updateTiling(float dt) {
     }
 }
 
-// tiling mode as it is: on, the ring going with you or staying (Y), you at it, the ring (its middle, the height it stands
-// on, where the row's middle is, how far out, the view's distance behind its middle, how much of the view a window
-// takes), the row left to right, where the window carried would go (-1: not), and the window played here in it (how much
-// of the view it's given, and what it takes as it's laid out; null: none)
+// tiling state; holdSlot -1 = none, played null = none
 std::string CDesktop3D::tilingStatus() const {
     const auto& r = m_tiling.ring;
     std::string row;
@@ -6137,7 +5783,7 @@ std::string CDesktop3D::windowAction(const PHLWINDOW& w, eWindowAction a) {
                 return "error: not in 3D";
             if (placed != m_placements.end() && placed->second.pinned)
                 placed->second.pinned = 0;
-            if (atRing() && tileable(w)) { // (into the row, where you look)
+            if (atRing() && tileable(w)) {
                 std::erase(m_tiling.order, key);
                 if (!m_tiling.before.contains(key))
                     m_tiling.stay.insert(key);
@@ -6146,7 +5792,7 @@ std::string CDesktop3D::windowAction(const PHLWINDOW& w, eWindowAction a) {
             }
             if (!placeInFront(w, appRule(m_rules, classOf(w))))
                 return "error: it has no size yet";
-            if (m_tiling.on && tileable(w)) // (away from a ring that stays where it is: here, out of the row, and it stays here)
+            if (m_tiling.on && tileable(w)) // away from a staying ring: it stays here
                 keepFromRow(key);
             return "here";
         case WA_WALL:
@@ -6159,18 +5805,17 @@ std::string CDesktop3D::windowAction(const PHLWINDOW& w, eWindowAction a) {
         case WA_PLAY: {
             if (m_mode != MODE_ACTIVE)
                 return "error: not in 3D";
-            if (windowPanel(w) < 0 && placed == m_placements.end()) { // (from another workspace: out here first)
+            if (windowPanel(w) < 0 && placed == m_placements.end()) { // from another workspace: bring it first
                 if (atRing() && tileable(w)) {
                     m_tiling.stay.insert(key);
                     tileWindow(w, lookSlot());
                 } else if (placeInFront(w, appRule(m_rules, classOf(w))) && m_tiling.on && tileable(w)) {
-                    // (away from a ring that stays where it is: here, as without tiling; carried into the row later,
-                    // tiling ending leaves it where it is, as one played into the row)
+                    // away from a staying ring: as without tiling, and it stays put when tiling ends
                     m_tiling.stay.insert(key);
                 }
             }
             const int i = windowPanel(w);
-            if (i < 0) { // (it shows from the next frame)
+            if (i < 0) { // shows from the next frame
                 m_play.on = false;
                 return "error: it isn't in the 3D view yet, try again";
             }
@@ -6186,7 +5831,7 @@ std::string CDesktop3D::windowAction(const PHLWINDOW& w, eWindowAction a) {
     return "error: no such action";
 }
 
-// pinned: it follows the view, in its top right corner (the next one pinned under it); unpinned it stays where it is
+// pinned: follows the view, top right, stacked down; unpinned: stays where it is
 std::string CDesktop3D::setPinned(const PHLWINDOW& w, bool on) {
     if (m_mode != MODE_ACTIVE)
         return "error: not in 3D";
@@ -6197,8 +5842,7 @@ std::string CDesktop3D::setPinned(const PHLWINDOW& w, bool on) {
             return "unpinned";
         auto& pl  = it->second;
         pl.pinned = 0;
-        // where it is as you see it, but not in a wall you stand close to (it was drawn over the world): brought nearer
-        // your eye, and smaller so it looks the same, till nothing is between you and its middle or its corners
+        // stays where you see it, pulled nearer and smaller out of any wall it was drawn over
         if (const int i = windowPanel(w); i >= 0) {
             const CBox&      box  = m_panels[i].box;
             const SPanelPose pose = poseFrom(pl.center, pl.rot, pl.scale, box);
@@ -6219,7 +5863,7 @@ std::string CDesktop3D::setPinned(const PHLWINDOW& w, bool on) {
         return "unpinned";
     }
     if (it == m_placements.end() || it->second.returning) {
-        // from wherever it's drawn now (from the wall: the corner's pose takes over from there)
+        // from where it's drawn now (e.g. the wall)
         const int i = windowPanel(w);
         if (i < 0)
             return "error: it isn't in the 3D view";
@@ -6233,7 +5877,7 @@ std::string CDesktop3D::setPinned(const PHLWINDOW& w, bool on) {
         it               = m_placements.find(key);
     }
     auto& pl = it->second;
-    if (!pl.pinned) { // (how big it was and how far away, carried or not: taken back into your hands so)
+    if (!pl.pinned) { // size and distance to take it back with
         const bool held    = m_hold.key == key;
         pl.pinnedFromScale = held ? m_screen.scale() * m_hold.scaleMul : pl.targetScale;
         pl.pinnedFromDist  = held ? m_hold.dist : length(pl.targetCenter - m_camera.eye) - carryFrom();
@@ -6241,14 +5885,12 @@ std::string CDesktop3D::setPinned(const PHLWINDOW& w, bool on) {
     if (m_hold.key == key)
         m_hold = {};
     pl.pinned  = ++m_pinCount;
-    pl.tiled   = false; // (out of tiling mode's row)
-    pl.follows = 0;     // (a dialog: not along with its window any more)
+    pl.tiled   = false;
+    pl.follows = 0;     // a dialog no longer follows its window
     return "pinned";
 }
 
-// Shift+H: the window you carry, else the one under the crosshair, pinned to your view; with one pinned, Shift+H takes
-// the last one pinned back into your hands, to put down where you point (the crosshair never reaches a pinned window:
-// it's in the view's corner, and the window under the crosshair would be pinned along with it)
+// Shift+H: pin the carried window, else take back the last pinned (unreachable by aim), else pin the aimed one
 std::string CDesktop3D::togglePin() {
     if (m_mode != MODE_ACTIVE)
         return "error: not in 3D";
@@ -6259,13 +5901,13 @@ std::string CDesktop3D::togglePin() {
     if (w)
         return setPinned(w, true);
 
-    if (m_menu.open()) // (the crosshair is hidden, and the mouse is the menu's)
+    if (m_menu.open()) // the crosshair is hidden
         return "error: close the Action Menu first";
     uint64_t  last = 0;
     uintptr_t lastKey = 0;
     for (const auto& [key, pl] : m_placements) {
         const auto pw = pl.window.lock();
-        if (pl.pinned > last && pw && windowPanel(pw) >= 0) { // (not one that isn't drawn: a hidden tab of a group)
+        if (pl.pinned > last && pw && windowPanel(pw) >= 0) { // drawn only, not a group's hidden tab
             last    = pl.pinned;
             lastKey = key;
         }
@@ -6282,8 +5924,7 @@ std::string CDesktop3D::togglePin() {
     return setPinned(w, true);
 }
 
-// G and H: the window carried put down where it is (where the crosshair points: on the wall it's on, or out in front
-// of you), else the one under the crosshair picked up
+// G and H: put down the carried window where the crosshair points, else pick one up
 std::string CDesktop3D::carry() {
     if (m_mode != MODE_ACTIVE)
         return "error: not in 3D";
@@ -6291,20 +5932,19 @@ std::string CDesktop3D::carry() {
         place();
         return "placed";
     }
-    if (m_menu.open()) // (the crosshair is hidden)
+    if (m_menu.open()) // the crosshair is hidden
         return "error: close the Action Menu first";
     grab();
     return m_hold.key ? "holding" : "error: point the crosshair at a window to pick it up";
 }
 
-// its real size (the app draws itself anew at it), logical px: floating, if it was tiled (a window can only be any
-// size that way). Its size in the world goes with it, text staying as big
+// resizes the real window (logical px), floating it first: only floating windows take any size
 std::string CDesktop3D::resizeReal(const PHLWINDOW& w, const Vector2D& size) {
     if (hypr::fullscreenOrMaximized(w))
         return "error: it's fullscreen";
     const Vector2D want{std::round(std::clamp(size.x, 64.0, 8192.0)), std::round(std::clamp(size.y, 48.0, 8192.0))};
     if (!w->m_isFloating)
-        (void)Config::Actions::floatWindow(Config::Actions::TOGGLE_ACTION_ENABLE, w); // (resize says if it can't be)
+        (void)Config::Actions::floatWindow(Config::Actions::TOGGLE_ACTION_ENABLE, w); // resize says if it can't
     if (const auto r = Config::Actions::resize(want, false, w); !r)
         return "error: " + r.error().message;
     return std::format("{:.0f}x{:.0f}", want.x, want.y);
@@ -6313,7 +5953,7 @@ std::string CDesktop3D::resizeReal(const PHLWINDOW& w, const Vector2D& size) {
 // the Action Menu's Apps (the favourites, then all) and Windows pages, and a window's own
 SMenuPage CDesktop3D::ownPage(const std::string& id) {
     SMenuPage p;
-    // (an icon not loaded yet is loaded a few a frame, in update(), and shows once it is)
+    // icons load a few a frame in update() and show once loaded
     const auto icon = [](const std::string& name) { return appIcon(name, ICON_PX, false); };
     if (id == "apps" || id == "apps/all") {
         const auto& all  = apps();
@@ -6343,7 +5983,7 @@ SMenuPage CDesktop3D::ownPage(const std::string& id) {
                            .icon   = "🔲",
                            .action = MA_TILING,
                            .on     = m_tiling.on});
-        if (m_tiling.on) // (its row going with you, or staying where it is: Y)
+        if (m_tiling.on)
             p.items.push_back({.label  = "Follow me",
                                .hint   = m_tiling.follow ? "going with you (Y)" : "staying here (Y)",
                                .icon   = "👣",
@@ -6365,8 +6005,6 @@ SMenuPage CDesktop3D::ownPage(const std::string& id) {
         }
         return p;
     }
-    // the maps (the one you're on lit, its hint "here"; another on its way "loading…"; the rest their size), then the
-    // courtyard. The configured one, loaded at login, says "default"
     if (id == "maps") {
         p.title                    = "Maps";
         const bool        loading  = m_mapLoader.busy();
@@ -6381,8 +6019,6 @@ SMenuPage CDesktop3D::ownPage(const std::string& id) {
         p.items.push_back({.label = "Courtyard", .hint = hint("", "built in"), .icon = "🏛️", .action = MA_MAP, .target = "", .on = next.empty()});
         return p;
     }
-    // the avatars, as the maps: the one shown "here", another on its way lit and "loading…", the rest their size; the
-    // configured one, loaded at login, "default"
     if (id == "avatars") {
         p.title                    = "Avatars";
         const bool        loading  = m_avatarLoader.busy();
@@ -6396,9 +6032,7 @@ SMenuPage CDesktop3D::ownPage(const std::string& id) {
         }
         return p;
     }
-    // close:ADDRESS: are you sure? "Close it" only at the bottom (5), every other slot keeps it: a key or a click that
-    // picked Close… (8, the top left: a game's keys and aim reach it when it isn't played) picks "Keep it" if it comes
-    // again
+    // close:ADDRESS: "Close it" only in slot 5, so repeating the key or click that picked Close… (8) keeps it
     if (id.starts_with("close:")) {
         const std::string addr = "0x" + id.substr(6);
         const auto        w    = findWindow(addr);
@@ -6438,8 +6072,7 @@ std::string CDesktop3D::windowsStatus() const {
     std::string list;
     for (const auto& [key, pl] : m_placements) {
         const auto w = pl.window.lock();
-        // (height: metres, the window's; apparent: how big it looks from your eye, 1 = as on the 2D desktop)
-        // (normal: the way its front faces; follows: the window a dialog goes along with)
+        // height in metres; apparent: size seen from the eye, 1 = as on the 2D desktop; follows: a dialog's window
         const V3 n = pl.rot.rotate({0, 0, 1});
         list += std::format(R"({}{{"class": "{}", "title": "{}", "address": "0x{:x}", "center": [{:.3f}, {:.3f}, {:.3f}], "normal": [{:.3f}, {:.3f}, {:.3f}], "distance": {:.3f}, "size": {:.3f}, "height": {:.3f}, "width": {:.3f}, "apparent": {:.3f}, "held": {}, "pinned": {}, "tiled": {}, "follows": "{}", "settled": {}, "returning": {}}})",
                             list.empty() ? "" : ", ", jsonEscape(w ? w->m_class : ""), jsonEscape(w ? w->m_title : ""), key, pl.center.x, pl.center.y, pl.center.z, n.x, n.y, n.z,
@@ -6454,11 +6087,8 @@ std::string CDesktop3D::windowsStatus() const {
 // ----------------------------------------------------------------- drawing
 
 namespace {
-    // How far down the top right corner Hyprland's own things reach on this monitor, output pixels (0 = none). They
-    // show on the focused monitor only: the config error bar (errorOverlay/Overlay.cpp, at the top unless
-    // debug:error_position is bottom), and the notifications, stacked from the top right under the reserved area
-    // (notification/NotificationOverlay.cpp's drawNotifications; its NOTIF_OFFSET_Y, NOTIF_PAD_Y and NOTIF_GAP_Y, 10 px
-    // each, aren't in a header). Their sizes are what Hyprland drew them at this frame, before our element.
+    // how far down the top right Hyprland's error bar and notifications reach (focused monitor, output px); NOTIF_*
+    // copied from NotificationOverlay.cpp
     float hyprlandOverlaysBottom(const PHLMONITOR& mon) {
         if (!mon || mon != Desktop::focusState()->monitor())
             return 0;
@@ -6466,7 +6096,7 @@ namespace {
         static auto     PERRORPOS = CConfigValue<Config::INTEGER>("debug:error_position");
         float           bottom    = 0;
         if (ErrorOverlay::overlay()->active() && *PERRORPOS == 0)
-            bottom = 10.f * (float)mon->m_scale + ErrorOverlay::overlay()->height(); // (its pad is 10 logical px)
+            bottom = 10.f * (float)mon->m_scale + ErrorOverlay::overlay()->height(); // pad: 10 logical px
         if (const auto notes = Notification::overlay()->getNotifications(); !notes.empty()) {
             float y = OFFSET_Y + (float)(mon->m_reservedArea.top() * mon->m_scale);
             for (const auto& n : notes)
@@ -6536,8 +6166,7 @@ std::vector<UP<IPassElement>> CDesktop3D::drawFrame() {
     f.monScale  = mon->m_scale;
     f.panels    = &m_panels;
     f.aimed     = m_mode == MODE_ACTIVE && !m_menu.visible() && !m_play.on && m_play.t <= 0.f && !m_shell.input ? m_aimed : -1;
-    // (none in play mode, here or filling the view, where the app's cursor is the only one, nor while the camera comes
-    // back from it; where the app's cursor shows, only its dot; none while the mouse is away on another monitor)
+    // no crosshair in play mode or away; only its dot where the app's cursor shows
     f.crosshair    = !m_menu.visible() && !m_play.on && m_play.t <= 0.f && !m_away && !m_shell.input;
     f.crosshairDot = m_cursorShown;
     f.typing       = m_typing;
@@ -6551,9 +6180,7 @@ std::vector<UP<IPassElement>> CDesktop3D::drawFrame() {
         f.avatar.shown     = &m_anim.partsShown();
         f.avatar.batchMaterials = m_anim.batchMaterials();
         f.avatar.transform = avatarTransform();
-        // not from inside its head: but in first person with the body, its head left out (not while the camera goes to
-        // the 2D desktop or comes from it, or faces a window played)
-        // (an emote's view out behind it: all of it, once the camera's out of its head)
+        // first person shows the headless body only; an emote's camera behind shows it whole
         const bool body      = fpBody() && m_mode == MODE_ACTIVE && !(m_play.t > 0.f && m_play.framed) && !m_fpCramped;
         const bool out       = m_emoteView > 0.f && length(m_camera.eye - playerCamera().eye) > 0.3f;
         f.avatar.firstPerson = body && !out;
@@ -6565,8 +6192,8 @@ std::vector<UP<IPassElement>> CDesktop3D::drawFrame() {
     f.menu = m_menu.hud();
     f.menu.alpha *= f.hudAlpha;
     m_badgeBox = {};
-    if (m_mic.on()) { // while it listens, a badge says so (and what's wrong, if the microphone gives nothing): top right,
-        // under Hyprland's notifications while they show
+    if (m_mic.on()) {
+        // lip sync badge (and microphone problems): top right, under Hyprland's notifications
         const float scale = (float)mon->m_scale;
         if (scale != m_badgeScale || m_badge.empty()) {
             drawBadge(m_badge, m_badgeW, m_badgeH, m_badgeText.empty() ? "lip sync: listening" : m_badgeText, scale);
@@ -6592,9 +6219,6 @@ std::vector<UP<IPassElement>> CDesktop3D::drawFrame() {
     return out;
 }
 
-// ------------------------------------------------------------ action menu
-
-// what's picked in the Action Menu
 // ------------------------------------------------------------------ lip sync
 
 std::string CDesktop3D::setLipSync(bool on) {
@@ -6634,7 +6258,7 @@ void CDesktop3D::setLipSyncSource(const std::string& v) {
     if (source == m_lipsyncSource)
         return;
     m_lipsyncSource = source;
-    if (m_mic.on()) { // listening: to that one now
+    if (m_mic.on()) { // restart on the new source
         m_mic.stop();
         m_lip.reset();
         m_micWatch = {};
@@ -6675,16 +6299,16 @@ void CDesktop3D::lipSync() {
 }
 
 namespace {
-    // what can be wrong with the microphone, as the badge says it
+    // microphone problems the badge reports
     enum eMicProblem : uint8_t {
-        MP_STARTING, // (nothing known yet)
+        MP_STARTING, // nothing known yet
         MP_NONE,
-        MP_ERROR,    // PipeWire ended the stream (it went away)
+        MP_ERROR,    // PipeWire ended the stream
         MP_UNLINKED, // nothing feeds it
         MP_MUTED,    // PipeWire has the source muted
-        MP_SILENT,   // exact zeros: a microphone muted on itself (its button), or a device that sends nothing
+        MP_SILENT,   // exact zeros: muted on the device itself
         MP_NOTHING,  // no samples at all
-        MP_MISSING,  // the microphone asked for isn't there: listening to the default one
+        MP_MISSING,  // lipsync_source missing: using the default
     };
 
     bool micThere(const SMicStatus& s) { // the one asked for (none: the default)
@@ -6693,7 +6317,7 @@ namespace {
 
     std::string micName(const SMicStatus& s) {
         std::string n = !s.sourceNick.empty() ? s.sourceNick : !s.sourceDescription.empty() ? s.sourceDescription : s.sourceName;
-        if (n.size() > 28) { // (whole letters)
+        if (n.size() > 28) { // whole UTF-8 characters
             size_t cut = 26;
             while (cut > 0 && ((unsigned char)n[cut] & 0xC0) == 0x80)
                 --cut;
@@ -6732,12 +6356,11 @@ namespace {
 void CDesktop3D::watchMicrophone() {
     const auto now = std::chrono::steady_clock::now();
     const float dt = m_micWatch.looked.time_since_epoch().count() ? std::chrono::duration<float>(now - m_micWatch.looked).count() : 0.f;
-    if (m_micWatch.problem >= 0 && dt < 0.25f) // (four times a second)
+    if (m_micWatch.problem >= 0 && dt < 0.25f)
         return;
     m_micWatch.looked = now;
     SMicStatus st     = m_mic.status();
-    // broken (PipeWire went away, or ended it: a microphone asked for that isn't there): open it again every few
-    // seconds, so a microphone plugged in (or PipeWire back) brings lip sync back
+    // broken stream: reopen every 3 s, so a microphone plugged in brings lip sync back
     if (st.stream == "error" || st.stream == "unconnected") {
         if (!st.error.empty())
             m_micWatch.error = st.error;
@@ -6810,6 +6433,8 @@ std::string CDesktop3D::lipSyncStatus() const {
         marks[0], marks[1], sources);
 }
 
+// ------------------------------------------------------------ action menu
+
 std::string CDesktop3D::menuAction(const SMenuItem& it) {
     switch (it.action) {
         case MA_VIEW: return setView(!m_thirdPerson);
@@ -6822,13 +6447,12 @@ std::string CDesktop3D::menuAction(const SMenuItem& it) {
         case MA_LAUNCH: {
             const std::string r = launch(it.target);
             if (!r.starts_with("error: "))
-                m_menu.hide(); // (to see it open)
+                m_menu.hide();
             return r;
         }
         case MA_WINDOW: {
             const auto a = (eWindowAction)it.arg;
             const auto w = findWindow(it.target);
-            // (what the Windows page did to which window, in the log: a close from it too)
             static constexpr const char* ACTIONS[] = {"focus", "bring here", "to the wall", "pin", "bigger", "smaller", "play", "close"};
             if (w)
                 logf("the Action Menu: {} {} ({})", a == WA_PIN && it.on ? "unpin" : a < std::size(ACTIONS) ? ACTIONS[a] : "?", classOf(w), clipped(w->m_title, 40));
@@ -6837,29 +6461,29 @@ std::string CDesktop3D::menuAction(const SMenuItem& it) {
                 m_menu.hide();
             return r;
         }
-        case MA_MENU_BACK: m_menu.back(); return "ok"; // (Keep it, on a window's Close page)
+        case MA_MENU_BACK: m_menu.back(); return "ok"; // Keep it on the Close page
         case MA_MAP: {
             const std::string r = pickMap(it.target);
             if (!r.starts_with("error: "))
-                m_menu.hide(); // (to see it come)
+                m_menu.hide();
             return r;
         }
         case MA_AVATAR: {
             const std::string r = pickAvatar(it.target);
             if (!r.starts_with("error: "))
-                m_menu.hide(); // (to see the avatar change)
+                m_menu.hide();
             return r;
         }
         case MA_TILING: {
             const std::string r = setTiling(!m_tiling.on);
             if (!r.starts_with("error: "))
-                m_menu.hide(); // (to see them go)
+                m_menu.hide();
             return r;
         }
         case MA_TILING_FOLLOW: {
             const std::string r = setTileFollow(!m_tiling.follow);
             if (!r.starts_with("error: "))
-                m_menu.hide(); // (to see it stay, or come round you)
+                m_menu.hide();
             return r;
         }
         default: break;
@@ -6883,10 +6507,10 @@ std::string CDesktop3D::menuCommand(const std::vector<std::string>& args) {
     if (m_mode != MODE_ACTIVE)
         return "error: not in 3D";
     if (args[0] == "open" || (args[0] == "toggle" && !m_menu.open())) {
-        if (m_shell.input) // (it has the mouse and the keys till it closes)
+        if (m_shell.input)
             return "error: a layer surface over the view has the keyboard: close it first";
         if (m_away)
-            setAway(false); // (it wants the mouse and keyboard: back into 3D from another monitor)
+            setAway(false); // the menu needs the mouse and keys
         setTyping(false);
     }
     return h3d::menuCommand(m_menu, args, [this](const SMenuItem& it) { return menuAction(it); });
@@ -6917,12 +6541,10 @@ std::string CDesktop3D::status() {
                             jsonEscape(w ? w->m_class : ""), m_aimPanelLocal.x, m_aimPanelLocal.y, m_aimSurface.expired() ? "false" : "true");
     }
     const char* modes[] = {"off", "entering", "active", "exiting"};
-    // a layer surface over the view (it has the keyboard): which, and where its pointer is
     std::string shell = "null";
     if (const auto ls = m_shell.layer.lock())
         shell = std::format(R"({{"namespace": "{}", "input": {}, "pointer": [{:.1f}, {:.1f}], "over": {}}})", jsonEscape(ls->m_namespace), m_shell.input, m_shell.pointer.x,
                             m_shell.pointer.y, m_shell.input && g_pSeatManager->m_state.pointerFocus ? "true" : "false");
-    // the app's cursor as it's drawn: where on the panel, how big and where its hotspot is
     std::string cursor = "null";
     if (m_cursorShown) {
         const auto size = hypr::pointer()->cursorSizeLogical();
@@ -6957,11 +6579,11 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         toggle();
         return "ok";
     }
-    if (cmd == "on") { // on [MONITOR]: 3D on that one, else on plugin:hypr3d:monitor's, else on the focused one
+    if (cmd == "on") { // on [MONITOR] (else plugin:hypr3d:monitor's or focused)
         PHLMONITOR mon;
         if (args.size() > 1) {
             std::string name = args[1];
-            for (size_t i = 2; i < args.size(); ++i) // (a description has spaces)
+            for (size_t i = 2; i < args.size(); ++i) // descriptions have spaces
                 name += " " + args[i];
             mon = monitorNamed(name);
             if (!mon)
@@ -6975,7 +6597,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         exit(args.size() > 1 && args[1] == "now");
         return "ok";
     }
-    if (cmd == "away") { // away [on|off|toggle]: the mouse and keyboard to the desktop on another monitor, or back
+    if (cmd == "away") { // away [on|off|toggle]: input to another monitor
         const std::string v = args.size() > 1 ? args[1] : "toggle";
         if (v != "on" && v != "off" && v != "toggle")
             return "error: away [on|off|toggle]";
@@ -6984,8 +6606,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
     if (cmd == "type") {
         return setTyping(args.size() > 1 ? args[1] != "off" : !m_typing);
     }
-    if (cmd == "play") { // play [on|off|toggle] [here|fill]: the window under the crosshair gets everything, played where it is
-        // or filling the view (a view alone: on, or switched to while playing); without a word, what's played
+    if (cmd == "play") { // play [on|off|toggle] [here|fill]; none: status
         if (args.size() < 2)
             return playStatus();
         std::string words;
@@ -6993,8 +6614,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
             words += args[i] + " ";
         return playDispatch(words);
     }
-    if (cmd == "camera") { // the camera as it's drawn: its eye, yaw and pitch (degrees) and up (the status's yaw and pitch are
-        // yours, which a window played filling the view leaves as they are, turning the camera)
+    if (cmd == "camera") { // the drawn camera, degrees (status: the player's)
         return std::format(R"({{"eye": [{:.3f}, {:.3f}, {:.3f}], "yaw": {:.2f}, "pitch": {:.2f}, "up": [{:.4f}, {:.4f}, {:.4f}]}})", m_camera.eye.x, m_camera.eye.y,
                            m_camera.eye.z, m_camera.yaw * 180.f / F_PI, m_camera.pitch * 180.f / F_PI, m_camUp.x, m_camUp.y, m_camUp.z);
     }
@@ -7035,8 +6655,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         onButton(nowMs(), button, false, nullptr);
         return "ok";
     }
-    if (cmd == "aim") { // aim [window]: turn to face a window's middle: that one (an address, a class or a title), else the one
-        // nearest to where you look (when the crosshair is on the wallpaper between them, say)
+    if (cmd == "aim") { // aim [window]: face it or the one nearest the crosshair
         if (m_mode != MODE_ACTIVE)
             return "error: not in 3D";
         const PHLWINDOW want = args.size() > 1 ? findWindow(args[1]) : nullptr;
@@ -7051,7 +6670,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
             if (!w || (want && w != want) || p.alpha < 0.5f)
                 continue;
             const V3 c = p.pose.at({p.box.w / 2, p.box.h / 2}), d = normalize(c - m_camera.eye);
-            if (dot(d, p.pose.normal) > -0.05f) // (from behind, or edge on)
+            if (dot(d, p.pose.normal) > -0.05f) // from behind or edge on
                 continue;
             if (const float k = dot(d, fwd); k > most) {
                 most = k;
@@ -7066,7 +6685,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         const auto w = best->window.lock();
         return std::format("0x{:x} {}", (uintptr_t)w.get(), w->m_class);
     }
-    if (cmd == "grab") // pick up the window under the crosshair, or put down the one carried, like G and H
+    if (cmd == "grab") // like G and H
         return carry();
     if (cmd == "place") {
         if (!m_hold.key)
@@ -7074,17 +6693,16 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         place();
         return "placed";
     }
-    if (cmd == "pin") // pin the window carried or under the crosshair to your view, or take the last one pinned back, like Shift+H
+    if (cmd == "pin") // like Shift+H
         return togglePin();
-    if (cmd == "hold") { // hold <distance> [scale]: while holding, set how far away (in third person past the avatar) and how big
+    if (cmd == "hold") { // hold <distance> [scale] of the carried window
         if (!m_hold.key)
             return "error: not holding anything";
         m_hold.dist     = std::clamp(num(1, m_hold.dist), CARRY_NEAREST, 12.f);
         m_hold.scaleMul = std::clamp(num(2, m_hold.scaleMul), 0.2f, 5.f);
         return "ok";
     }
-    if (cmd == "tile") { // tile [on|off|toggle|here|follow [on|off|toggle]]: tiling mode (T), the ring round you and the row to
-        // where you look (Shift+T), or the ring going with you or staying where it is (Y; no word: toggle); none: how it is
+    if (cmd == "tile") { // tile: T, Shift+T (here), Y (follow)
         const std::string v = args.size() > 1 ? args[1] : "";
         if (v.empty())
             return tilingStatus();
@@ -7100,7 +6718,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
             return "error: tile [on|off|toggle|here|follow]";
         return setTiling(v == "on" || (v == "toggle" && !m_tiling.on));
     }
-    if (cmd == "reset-windows") { // everything back on the desktop wall (tiling mode off); forget: nor go anywhere else again
+    if (cmd == "reset-windows") { // all to the wall; forget: also the spots
         m_hold      = {};
         m_tiling.on = false;
         forgetTiles();
@@ -7116,7 +6734,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         }
         return "ok";
     }
-    if (cmd == "panels") { // everything drawn in 3D, in drawing order: its kind, window, box on the desktop, state, surfaces
+    if (cmd == "panels") { // everything drawn in 3D, in drawing order
         static constexpr const char* KINDS[] = {"layer", "window", "popup"};
         const auto                   mon    = m_monitor.lock();
         const float                  aspect = mon && mon->m_size.y > 0 ? (float)(mon->m_size.x / mon->m_size.y) : 16.f / 9.f;
@@ -7125,11 +6743,11 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         for (size_t i = 0; i < m_panels.size(); ++i) {
             const auto& p = m_panels[i];
             const auto  w = p.window.lock();
-            std::string surfaces; // (on the desktop too; the app's cursor isn't one)
+            std::string surfaces; // desktop coords; not the app's cursor
             for (const auto& sf : p.surfaces)
                 if (sf.surface)
                     surfaces += std::format("{}[{:.0f}, {:.0f}, {:.0f}, {:.0f}]", surfaces.empty() ? "" : ", ", p.box.x + sf.box.x, p.box.y + sf.box.y, sf.box.w, sf.box.h);
-            // (its middle in the view as it was drawn last: ahead of the camera, within its field of view)
+            // its centre within the last drawn view
             const V3   c      = m_view.point(p.pose.at(p.box.size() * 0.5));
             const bool inView = m_mode != MODE_OFF && c.z < 0 && std::abs(c.y) <= -c.z * tanY && std::abs(c.x) <= -c.z * tanY * aspect;
             list += std::format(R"({}{{"kind": "{}", "class": "{}", "title": "{}", "box": [{:.0f}, {:.0f}, {:.0f}, {:.0f}], "placed": {}, "front": {}, "aimed": {}, "alpha": {:.2f}, "inView": {}, "surfaces": [{}]}})",
@@ -7138,11 +6756,11 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         }
         return "[" + list + "]";
     }
-    if (cmd == "windows") // the windows off the wall: where, how far from the eye, how big (1 = as on the wall), pinned
+    if (cmd == "windows") // windows off the wall (size 1 = as on the wall)
         return windowsStatus();
-    if (cmd == "log") // log [lines]: what the plugin logged lately (Hyprland's own log has it only with its debug logs on)
+    if (cmd == "log") // log [lines] (Hyprland logs it only with debug on)
         return logLines(args.size() > 1 ? (size_t)std::max(1, std::atoi(args[1].c_str())) : 400);
-    // everything after the command word (and more), so paths can have spaces
+    // the raw request after `words` words, so paths can have spaces
     auto afterWords = [&](int words) {
         std::string rest = request;
         for (int word = 0; word < words; ++word) {
@@ -7154,18 +6772,18 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
     };
     auto pathArg = [&] { return unquote(afterWords(2)); };
 
-    if (cmd == "launch") { // launch <desktop id|name|command>: in front of you in 3D
+    if (cmd == "launch") {
         const std::string what = unquote(afterWords(2));
         return what.empty() ? "error: launch <desktop id, name or command>" : launch(what);
     }
-    if (cmd == "apps") { // the desktop entries: id, name, what it runs, its icon found
+    if (cmd == "apps") {
         std::string list;
         for (const auto& e : apps())
             list += std::format(R"({}{{"id": "{}", "name": "{}", "exec": "{}", "class": "{}", "icon": {}}})", list.empty() ? "" : ", ", jsonEscape(e.id), jsonEscape(e.name),
                                 jsonEscape(e.exec), jsonEscape(e.wmClass), appIcon(e.icon, ICON_PX) != nullptr);
         return "[" + list + "]";
     }
-    if (cmd == "window") { // window <address|class|title> focus|bring|wall|pin|unpin|bigger|smaller|size W H|play|close
+    if (cmd == "window") {
         if (args.size() < 3)
             return "error: window <address|class|title> focus|bring|wall|pin|unpin|bigger|smaller|size W H|play|close";
         const auto w = findWindow(args[1]);
@@ -7193,7 +6811,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         if (sub == "reload" || sub == "forget" || sub == "scale") {
             if (m_mapPath.empty())
                 return "error: no map loaded";
-            if (sub == "forget") { // drop the saved spawn and desktop, guess them again
+            if (sub == "forget") { // re-guess the spawn and desktop
                 std::error_code ec;
                 std::filesystem::remove(mapStatePath(m_mapPath), ec);
             }
@@ -7202,15 +6820,13 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         }
         return requestMap(rest, g_cfgMapScale ? g_cfgMapScale->value() : 0.f);
     }
-    // avatar [path|none|reload|height <meters>|expression [name [weight]|none]|gesture [left|right|both <gesture>]|parts [reset]|
-    //         toggle <name> [on|off|reset]|shape <shape key> [weight|reset]|slider <name> [0..1|NN%|reset]|physics [on|off|toggle]|
-    //         emote [name|number|file|folder [once|loop]|stop]|attack [left|right]]
+    // avatar [path|none|reload|height <meters>|lipsync ...]; the other subcommands are m_ctl.command's (control.cpp)
     if (cmd == "avatar") {
         const std::string rest = pathArg();
         const std::string sub  = args.size() > 1 ? args[1] : "";
         if (rest.empty())
             return avatarStatus();
-        if (sub == "lipsync") { // avatar lipsync [on|off|toggle|gain dB|auto|source name|default]
+        if (sub == "lipsync") {
             const std::string v = args.size() > 2 ? args[2] : "";
             if (v == "on" || v == "off" || v == "toggle") {
                 if (const std::string r = setLipSync(v == "on" || (v == "toggle" && !m_lipsync)); r.starts_with("error"))
@@ -7238,11 +6854,11 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         }
         return requestAvatar(rest, g_cfgAvatarHeight ? g_cfgAvatarHeight->value() : 0.f);
     }
-    if (cmd == "view") { // view [first|third|toggle] [distance] [side] | view body [on|off|toggle]
+    if (cmd == "view") { // view [first|third|toggle] [distance] [side]
         const std::string v = args.size() > 1 ? args[1] : "";
         if (v.empty())
             return m_thirdPerson ? "third" : "first";
-        if (v == "body") { // first person from the avatar's eyes, its body and hands in view (till the config's changes)
+        if (v == "body") { // first-person body, until the config changes
             const std::string b = args.size() > 2 ? args[2] : "";
             if (b == "on" || b == "off" || b == "toggle")
                 m_fpBodyOn = b == "on" || (b == "toggle" && !m_fpBodyOn);
@@ -7257,7 +6873,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         }
         return r;
     }
-    if (cmd == "spawn") { // spawn [here]: go back to the spawn, or make where you stand the spawn
+    if (cmd == "spawn") { // spawn [here]: respawn, or set the spawn here
         if (args.size() > 1 && args[1] == "here") {
             if (m_mode != MODE_ACTIVE)
                 return "error: not in 3D";
@@ -7270,7 +6886,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         resetPlayer();
         return "ok";
     }
-    if (cmd == "desktop") { // desktop here [height in meters]: hang the desktop where the crosshair is
+    if (cmd == "desktop") { // desktop here [height m]: at the crosshair
         if (args.size() < 2 || args[1] != "here")
             return std::format(R"({{"center": [{:.3f}, {:.3f}, {:.3f}], "normal": [{:.3f}, {:.3f}, {:.3f}], "height": {:.3f}}})", m_world.desktop.center.x, m_world.desktop.center.y,
                                m_world.desktop.center.z, m_world.desktop.normal.x, m_world.desktop.normal.y, m_world.desktop.normal.z, m_world.desktop.height);
@@ -7320,15 +6936,13 @@ namespace {
         return 0;
     }
 
-    // Lua's own functions, from the Lua Hyprland runs; looked up when they're needed (a plugin that wants them
-    // when it's loaded doesn't load at all where Hyprland has them built in)
+    // Lua C API functions, looked up at call time: needing them at load fails where Hyprland has Lua built in
     template <typename F>
     F luaFunction(const char* name) {
         return reinterpret_cast<F>(dlsym(RTLD_DEFAULT, name));
     }
 
-    // hl.plugin.hypr3d.menu() toggles the Action Menu, menu("emotes") opens that page, menu("pick 2") and the like
-    // do what hyprctl hypr3d menu does; it gives back what that says
+    // hl.plugin.hypr3d.menu([args]): as hyprctl hypr3d menu (none: toggle, a page: open it)
     int luaMenu(lua_State* L) {
         using FType       = int (*)(lua_State*, int);
         using FToString   = const char* (*)(lua_State*, int, size_t*);
@@ -7352,10 +6966,7 @@ namespace {
         return 1;
     }
 
-    // hl.plugin.hypr3d.tile() turns tiling mode on or off (T), tile("here") brings the ring round you, its middle where
-    // you look (Shift+T), tile("follow") has it go with you or stay where it is (Y); it gives back what hyprctl hypr3d
-    // tile toggle, tile here or tile follow says ("tiling", "not tiling", "tiling here", "following", "staying", or an
-    // error)
+    // hl.plugin.hypr3d.tile([here|follow]): T, Shift+T or Y; returns what hyprctl hypr3d tile says
     int luaTile(lua_State* L) {
         using FType       = int (*)(lua_State*, int);
         using FToString   = const char* (*)(lua_State*, int, size_t*);
@@ -7379,9 +6990,7 @@ namespace {
         return 1;
     }
 
-    // hl.plugin.hypr3d.play() plays the window under the crosshair or stops (P, Super+Esc), play("here") or play("fill")
-    // plays it in that view or switches to it while playing, and "on", "off" or "toggle" (with a view too: "on fill")
-    // say which; it gives back what hyprctl hypr3d play says ("playing", "walking", or an error)
+    // hl.plugin.hypr3d.play([on|off|toggle] [here|fill]): as hyprctl hypr3d play
     int luaPlay(lua_State* L) {
         using FType       = int (*)(lua_State*, int);
         using FToString   = const char* (*)(lua_State*, int, size_t*);
@@ -7437,11 +7046,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_cfgAvatarHeight = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:avatar_height", "the avatar's height in meters, 0 = as it comes", 0.f,
                                                                 Config::Values::SFloatValueOptions{.min = 0.f, .max = 20.f});
     g_cfgAvatarPhysics = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:avatar_physics", "the avatar's hair, skirt and the like swing as it moves", true);
-    // plugin { hypr3d { first_person_body = true } }: first person from the avatar's eyes, its body and hands in view
+    // plugin { hypr3d { first_person_body = true } }
     g_cfgFirstPersonBody = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:first_person_body",
                                                                   "first person from the avatar's eyes: its body below, its hands in view doing what you do", true);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgFirstPersonBody);
-    // plugin { hypr3d { lipsync = false } }: off unless asked for; nothing heard is kept or sent
+    // plugin { hypr3d { lipsync = false } }: nothing heard is kept or sent
     g_cfgLipSync = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:lipsync", "lip sync: the microphone moves the avatar's mouth while in 3D", false);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgLipSync);
     // plugin { hypr3d { lipsync_gain = auto, lipsync_source = "" } }
@@ -7457,7 +7066,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_cfgAvatarEmotes = makeShared<Config::Values::CStringValue>("plugin:hypr3d:avatar_emotes",
                                                                  "more emotes: VRM animations (.vrma) or glTF clips, files or folders separated by commas", "");
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAvatarEmotes);
-    // plugin { hypr3d { emote_volume = 0.5 } }: emotes' sounds (a dance's song) at that much of how loud they are
+    // plugin { hypr3d { emote_volume = 0.5 } }
     g_cfgEmoteVolume = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:emote_volume",
                                                                "how loud emotes' sounds (a dance's song) play: 1 as loud as they are, 0 not at all", EMOTE_VOLUME,
                                                                Config::Values::SFloatValueOptions{.min = 0.f, .max = 1.f});
@@ -7471,31 +7080,27 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgApps);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAppRules);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgPinSize);
-    // plugin { hypr3d { monitor = DP-1 } }: 3D on that monitor, the others staying the desktop
+    // plugin { hypr3d { monitor = DP-1 } }
     g_cfgMonitor = makeShared<Config::Values::CStringValue>("plugin:hypr3d:monitor",
                                                             "the monitor 3D goes on: its name (DP-1) or desc: and its description; \"\" = the focused one", "");
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgMonitor);
-    // plugin { hypr3d { walk_speed = 1.6, run_speed = 4.5 } }: m/s, walking (W) and running (Shift+W)
+    // plugin { hypr3d { walk_speed = 1.6, run_speed = 4.5 } }: m/s
     g_cfgWalkSpeed = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:walk_speed", "how fast you walk in 3D, m/s", WALK_SPEED,
                                                              Config::Values::SFloatValueOptions{.min = 0.3f, .max = 10.f});
     g_cfgRunSpeed  = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:run_speed", "how fast you run in 3D (Shift), m/s", RUN_SPEED,
                                                             Config::Values::SFloatValueOptions{.min = 0.5f, .max = 15.f});
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgWalkSpeed);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgRunSpeed);
-    // plugin { hypr3d { tiling = false, tiling_follow = true } }: tiling mode (T) from the start, and its row going with
-    // you or staying where it is (Y)
+    // plugin { hypr3d { tiling = false, tiling_follow = true } }
     g_cfgTiling       = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:tiling", "tiling mode (T): the windows in 3D side by side round you", false);
     g_cfgTilingFollow = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:tiling_follow", "tiling mode's row goes with you (Y), else it stays where it is", true);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgTiling);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgTilingFollow);
-    // plugin { hypr3d { play_view = here } }: P plays a window where it is, the view as it was (here), or with the camera
-    // facing it, filling the view (fill); Shift+P the other
+    // plugin { hypr3d { play_view = here } }
     g_cfgPlayView = makeShared<Config::Values::CStringValue>("plugin:hypr3d:play_view",
                                                              "how P plays a window: here (where it is, the view as it was) or fill (facing it, filling the view); Shift+P the other", "here");
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgPlayView);
-    // plugin { hypr3d { play_size = 0.5 } }: played here in tiling mode's ring, a window takes that much of the view (0.25
-    // to 0.94: checkPlayConfig says so of another, taking the nearest), where you look, the windows beside it round it;
-    // Super+wheel changes it while you play
+    // plugin { hypr3d { play_size = 0.5 } }
     g_cfgPlaySize = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:play_size",
                                                             "played here in tiling mode's ring, how much of the view a window takes (0.25 to 0.94); Super+wheel changes it while you play",
                                                             PLAY_SIZE);

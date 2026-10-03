@@ -103,7 +103,6 @@ namespace h3d::gltf {
                 const SJson* v = get(key);
                 return v && v->type == NUMBER ? v->num : fallback;
             }
-            // reads up to n numbers of an array member
             void numbers(std::string_view key, float* out, size_t n) const {
                 if (const SJson* v = get(key); v && v->type == ARRAY)
                     for (size_t i = 0; i < std::min(n, v->items.size()); ++i)
@@ -235,8 +234,7 @@ namespace h3d::gltf {
                     const auto* ci = t->image;
                     img.name       = ci->name ? ci->name : ci->uri && std::strncmp(ci->uri, "data:", 5) != 0 ? ci->uri : std::format("image {}", ii);
                     if (const auto* s = t->sampler) {
-                        // cgltf keeps the file's numbers in its enums as they are: read them as numbers (an enum
-                        // holding another value is undefined), and take only GL's own
+                        // cgltf keeps raw file values in its enums: read them as ints (an unlisted enum value is UB)
                         const auto num = [](const auto& e) {
                             static_assert(sizeof(e) == sizeof(int));
                             int v = 0;
@@ -272,7 +270,7 @@ namespace h3d::gltf {
                 xf[5]         = t.offset[1];
             }
 
-            // a texture of the file by its index in "textures", as {"index": n}
+            // resolves {"index": n} into the file's "textures"
             int textureRef(const SJson* ref, bool srgb) {
                 if (!ref || ref->type != SJson::OBJECT)
                     return -1;
@@ -292,10 +290,7 @@ namespace h3d::gltf {
                 return std::nullopt;
             }
 
-            // HYPR3D_materials_blend: {"texture": {"index": n}, "factor": [r, g, b, a], "uvScale": [s, t], "uvOffset": [s, t],
-            // "transform": [mat2 columns, offset] (in place of uvScale and uvOffset), "maskTransform": (the same, the mask's; the
-            // layer's by default), "maskTexture": {"index": n}, "softness": s, "maskChannel": 1|3, "normalTexture": {"index": n},
-            // "layer1Tint": [r, g, b], "border": {"tint": [r, g, b], "strength": s, "softness": s, "offset": o}}, see tools/cs2map.py
+            // HYPR3D_materials_blend (tools/cs2map.py): Source 2's masked second layer
             void layer(const cgltf_material& cm, SMapMaterial& m) {
                 const auto j = extension(cm, "HYPR3D_materials_blend");
                 if (!j)
@@ -327,14 +322,7 @@ namespace h3d::gltf {
                 }
             }
 
-            // HYPR3D_materials_source2: what Source 2's shaders do that glTF doesn't say:
-            // {"normalYDown": true, "specular": [direct, indirect], "blendMode": "mod2x"|"add", "selfIllumAlbedo": f, "fog": false,
-            //  "mod2xLinear": true (mod2x's color is linear, not as it's stored), "vertexColor": "linear"|"srgb"|"none"|"paint"|"tint",
-            //  "scroll": [u, v] (the base color's uvs move by that much a second),
-            //  "tintMask": {"texture": {"index": n}, "uv": 0|1}, "decal": {"texture": {"index": n}, "uv": 0|1, "mode": "mix"|"multiply"},
-            //  "texture2": {"texture": {"index": n}, "transform": [mat2 columns, offset]} (the base color is multiplied by it),
-            //  "detail": {"texture": {"index": n}, "maskTexture": {"index": n}, "mode": "mod2x"|"overlay", "blend": f,
-            //             "blendToFull": f, "tint": [r, g, b], "transform": [mat2 columns, offset], "maskUV": 0|1, "uv": 0|1}}
+            // HYPR3D_materials_source2 (tools/cs2map.py): Source 2 shader features glTF lacks ("scroll": uv per second)
             void source2(const cgltf_material& cm, SMapMaterial& m) {
                 const auto j = extension(cm, "HYPR3D_materials_source2");
                 if (!j)
@@ -394,7 +382,7 @@ namespace h3d::gltf {
                 const SJson* d = j->get("detail");
                 if (!d || d->type != SJson::OBJECT)
                     return;
-                m.detailTex = textureRef(d->get("texture"), false); // data: mod2x's neutral is 0.5, not its sRGB decoding
+                m.detailTex = textureRef(d->get("texture"), false); // not sRGB: mod2x's neutral is a raw 0.5
                 if (m.detailTex < 0)
                     return;
                 const SJson* mode = d->get("mode");
@@ -430,14 +418,6 @@ namespace h3d::gltf {
             }
 
             // unity2hypr3d's material extras: what Unity's toon shaders do that glTF has no place for
-            //   "hypr3d_queue": Unity's render queue
-            //   "hypr3d_stencil": {"ref", "read", "write", "comp", "pass", "fail", "zfail", "again": {"comp", "alpha"}}
-            //   "hypr3d_outline": {"width", "space": "world"|"object"|"screen", "color", "base", "tint",
-            //                      "mask": {"index", "channel", "invert"}, "shift", "fix": [amount, max], "lit", "max"}
-            //   "hypr3d_back": {"color", "texture": {"index", "transform": {"offset", "scale"}}}
-            //   "hypr3d_light": {"min", "max", "chroma"}
-            // "hypr3d_toon": {"shade": [r, g, b], "base": times the base color, "texture": {"index"} (times it too), "lo",
-            // "hi" (N·L), "strength"}
             void toon(const SJson* t, SMapMaterial& m) {
                 auto& tn = m.toon;
                 tn.on    = true;
@@ -451,7 +431,6 @@ namespace h3d::gltf {
                 tn.strength = std::clamp(fileFloat(t->number("strength", 1), 1), 0.f, 1.f);
             }
 
-            // "hypr3d_matcap": {"index", "color": [r, g, b, a], "mode": "add"|"multiply"|"mix"|"median", "lit"}
             void matcap(const SJson* mc, SMapMaterial& m) {
                 auto& tn = m.toon;
                 if ((tn.matcapTex = textureRef(mc, true)) < 0)
@@ -551,7 +530,7 @@ namespace h3d::gltf {
                 }
             }
 
-            // VRM 1.0's MToon (VRMC_materials_mtoon): its outline and render queue offset
+            // VRMC_materials_mtoon (VRM 1.0 MToon): outline, render queue offset, shading and matcap
             void mtoon(const cgltf_material& cm, SMapMaterial& m) {
                 const auto j = extension(cm, "VRMC_materials_mtoon");
                 if (!j)
@@ -561,7 +540,7 @@ namespace h3d::gltf {
                 if (mode && mode->type == SJson::STRING && mode->str != "none" && w > 0) {
                     auto& ol = m.outline;
                     ol.space = mode->str == "screenCoordinates" ? OUTLINE_SCREEN : OUTLINE_WORLD;
-                    ol.width = ol.space == OUTLINE_SCREEN ? w * 2 : w; // screen: of its height
+                    ol.width = ol.space == OUTLINE_SCREEN ? w * 2 : w; // fraction of screen height -> NDC
                     ol.maxW  = 1e9f;
                     j->numbers("outlineColorFactor", ol.color, 3);
                     ol.lit = (float)j->number("outlineLightingMixFactor", 1);
@@ -572,8 +551,7 @@ namespace h3d::gltf {
                 }
                 if (const double off = j->number("renderQueueOffsetNumber", 0); off != 0)
                     m.queue = (m.alphaMode == ALPHA_BLEND ? 3000 : m.alphaMode == ALPHA_MASK ? 2450 : 2000) + fileInt(off, 0, -1000, 1000);
-                // its shading: N·L + shift from shade to lit over -1 + toony .. 1 - toony; its shade color times its shade
-                // texture (flat without one); its matcap added
+                // shading: N·L + shift ramps from shade to lit over -1 + toony .. 1 - toony
                 auto& tn = m.toon;
                 tn.on    = true;
                 j->numbers("shadeColorFactor", tn.shade, 3);
@@ -592,7 +570,7 @@ namespace h3d::gltf {
                 }
             }
 
-            // VRM 0.x's MToon (extensions.VRM.materialProperties, by material): its outline and render queue
+            // VRM 0.x MToon (extensions.VRM.materialProperties): outline, render queue, shading and matcap
             void vrm0() {
                 std::optional<SJson> j;
                 for (size_t e = 0; e < data->data_extensions_count && !j; ++e)
@@ -605,7 +583,7 @@ namespace h3d::gltf {
                 for (size_t k = 0; k < props->items.size(); ++k) {
                     const SJson& p  = props->items[k];
                     const SJson* nm = p.get("name");
-                    // one per material, in their order; by name when another has its name
+                    // entries follow the material order; look the material up by name when the names differ
                     size_t i = k;
                     if (nm && nm->type == SJson::STRING && (i >= data->materials_count || !data->materials[i].name || nm->str != data->materials[i].name))
                         for (size_t n = 0; n < data->materials_count; ++n)
@@ -629,11 +607,10 @@ namespace h3d::gltf {
                         const double t = tex && tex->type == SJson::OBJECT ? tex->number(key, -1) : -1;
                         return t >= 0 && t < (double)data->textures_count ? texture(&data->textures[(size_t)t], true) : -1;
                     };
-                    // its shading (MToon 0.x): N·L from _ShadeShift (all shade) to lerp(1, _ShadeShift, _ShadeToony)
-                    // (all lit); _ShadeColor times _ShadeTexture; _SphereAdd, a matcap added
+                    // all shade at N·L = _ShadeShift, all lit at lerp(1, _ShadeShift, _ShadeToony); _SphereAdd: matcap
                     auto& tn   = m.toon;
                     tn.on      = true;
-                    float c[4] = {0.97f, 0.81f, 0.86f, 1}; // (MToon.shader's)
+                    float c[4] = {0.97f, 0.81f, 0.86f, 1}; // MToon.shader's default
                     if (vec && vec->type == SJson::OBJECT)
                         vec->numbers("_ShadeColor", c, 4);
                     for (int ch = 0; ch < 3; ++ch)
@@ -645,7 +622,7 @@ namespace h3d::gltf {
                     tn.lo             = shift;
                     tn.hi             = std::max(shift + (1 - shift) * (1 - toony), shift + 1e-3f);
                     tn.matcapTex     = texOf("_SphereAdd");
-                    tn.matcapLit     = 0; // (added as it is)
+                    tn.matcapLit     = 0; // added unlit
                     const int   mode = fileInt(fl->number("_OutlineWidthMode", 0), 0);
                     const float w    = (float)fl->number("_OutlineWidth", 0) * 0.01f; // cm
                     if ((mode != 1 && mode != 2) || w <= 0)
@@ -707,8 +684,7 @@ namespace h3d::gltf {
                     if (m.normalTex >= 0)
                         out.images[m.normalTex].normal = true;
                     m.normalScale = cm.normal_texture.texture ? cm.normal_texture.scale : 1.f;
-                    // roughness and metalness: read from the occlusion texture's g and b when they share
-                    // an image (ORM), or from their own when there is no occlusion texture
+                    // metallic-roughness texture: only when it's the occlusion texture (ORM: g, b) or there's none
                     const auto& pbr = cm.pbr_metallic_roughness;
                     m.roughness     = cm.has_pbr_metallic_roughness ? pbr.roughness_factor : 1.f;
                     m.metalness     = cm.has_pbr_metallic_roughness ? pbr.metallic_factor : 0.f;
@@ -751,7 +727,7 @@ namespace h3d::gltf {
         return true;
     }
 
-    // what open() and openMemory() check of a file they've read (its buffers loaded)
+    // checks shared by open() and openMemory(), after loading the buffers
     static DataPtr checked(DataPtr guard, const std::string& what, std::string& error);
 
     DataPtr open(const std::string& path, const std::string& what, std::string& error) {
@@ -777,7 +753,7 @@ namespace h3d::gltf {
             return {nullptr, cgltf_free};
         }
         DataPtr guard(data, cgltf_free);
-        // (a GLB's own buffer is in it; one in a file of its own isn't)
+        // only a GLB's own buffer is in memory; buffers in separate files can't be loaded
         for (size_t i = 0; i < data->buffers_count; ++i)
             if (data->buffers[i].uri) {
                 error = std::format("the {} has a buffer in a file of its own", what);
@@ -792,12 +768,9 @@ namespace h3d::gltf {
 
     static DataPtr checked(DataPtr guard, const std::string& what, std::string& error) {
         cgltf_data* data = guard.get();
-        // What the file says must fit what it has (accessors in their buffer views, the views in their buffers,
-        // indices under their vertex counts, morph targets and animations counted alike, no loops among the nodes),
-        // else reading it runs past its data: cgltf_validate. First what it takes for granted: it reads a sparse
-        // accessor's indices before it looks at their buffer view, and adds up offsets, strides and counts in ways a
-        // huge number wraps around. So each view in its buffer, and offsets, counts and strides no bigger than any
-        // file's (2^48); and each accessor aligned for its type, as cgltf reads elements through pointers of it
+        // cgltf_validate checks bounds but trusts some things first: it reads sparse indices before checking their
+        // view, and its offset/stride/count sums can wrap. So: views within their buffers, sizes under 2^48, accessors
+        // aligned for their type (cgltf reads elements through typed pointers)
         constexpr size_t BIG = size_t(1) << 48;
         for (size_t i = 0; i < data->buffer_views_count; ++i)
             if (const auto& v = data->buffer_views[i]; v.buffer && (v.offset > v.buffer->size || v.size > v.buffer->size - v.offset)) {
@@ -819,9 +792,8 @@ namespace h3d::gltf {
                 return {nullptr, cgltf_free};
             }
         }
-        // and a node tree no deeper than a thousand (files have 20): cgltf_validate looks for loops by walking up from
-        // each node, as parts of ours walk up, and a chain of 200000 took a minute. Each node's depth here, from the
-        // nearest one above it that has one: a loop never gets to one
+        // and nesting at most DEEPEST: cgltf_validate's loop check walks up from every node, as our code does (a 200000
+        // chain took a minute). Depths are memoized; a loop never reaches a known depth, so it runs into DEEPEST
         {
             constexpr size_t    DEEPEST = 1000;
             std::vector<int>    depth(data->nodes_count, -1);
@@ -958,7 +930,7 @@ namespace h3d::gltf {
                 }
         }
 
-        // replaces the pixels with block compressed ones, every mip level, when the GPU takes them
+        // block compresses every mip level when the GPU supports the format
         void compressImage(SMapImage& img, int compress) {
             if (img.plain || img.w < 8 || img.h < 8 || img.w % 4 || img.h % 4)
                 return;
@@ -990,7 +962,7 @@ namespace h3d::gltf {
             img.levels = levels;
         }
 
-        // a texture that is one color all over (Source 2 Viewer writes a lot of those) needs one texel
+        // a single-color texture (Source 2 Viewer writes many) becomes one texel
         void flatten(SMapImage& img) {
             const size_t n = (size_t)img.w * img.h;
             if (n <= 1)
@@ -1081,7 +1053,7 @@ namespace h3d::gltf {
             const uint32_t sign = (x >> 16) & 0x8000u;
             const int      e    = (int)((x >> 23) & 0xffu) - 127 + 15;
             uint32_t       mant = x & 0x7fffffu;
-            if (e <= 0) { // too small: subnormal or 0
+            if (e <= 0) { // subnormal or 0
                 if (e < -10)
                     return (uint16_t)sign;
                 mant |= 0x800000u;
@@ -1098,7 +1070,7 @@ namespace h3d::gltf {
             return e ? std::ldexp(m + 0.5f, (int)e - 136) : 0.f;
         }
 
-        // an RGBE image -> RGB9E5 with `maxLevels` mip levels (box filtered, in linear light)
+        // RGBE -> RGB9E5 with up to `maxLevels` box-filtered mip levels (in linear light)
         SHdrImage hdrImage(const std::vector<uint8_t>& px, int w, int h, int maxLevels) {
             SHdrImage out;
             out.w      = w;
@@ -1143,7 +1115,6 @@ namespace h3d::gltf {
             return false;
 
         std::mutex errorLock;
-        // one of the file's images, decoded to `comps` channels
         const auto decode = [&](const SJson* ref, int comps, int& w, int& h, std::vector<uint8_t>& px) {
             const double i = ref && ref->type == SJson::OBJECT ? ref->number("image", -1) : -1;
             if (i < 0 || i >= (double)data->images_count)
@@ -1164,7 +1135,7 @@ namespace h3d::gltf {
             return true;
         };
 
-        // what to decode, done on a few threads: the big lightmaps take a second each
+        // decoded on a few threads: the big lightmaps take a second each
         std::vector<std::function<void()>> jobs;
         const SJson*                       sets = j->get("sets");
         const size_t                       n    = sets && sets->type == SJson::ARRAY ? sets->items.size() : 0;
@@ -1193,7 +1164,7 @@ namespace h3d::gltf {
             const SJson* pj = sj.get("probes");
             if (!pj || pj->type != SJson::OBJECT)
                 continue;
-            // (the map's numbers, bounded before they're used: a broken map mustn't take Hyprland down)
+            // clamp the map's numbers before use: a broken map mustn't take Hyprland down
             const auto bounded = [](double v, double lo, double hi) { return std::isfinite(v) ? std::clamp(v, lo, hi) : lo; };
             float      dims[3] = {0, 0, 0};
             pj->numbers("size", dims, 3);
@@ -1216,7 +1187,7 @@ namespace h3d::gltf {
                     v.numbers("max", hi, 3);
                     std::memcpy(vol.toBox.m, m, sizeof(m));
                     vol.bounds = {{lo[0], lo[1], lo[2]}, {hi[0], hi[1], hi[2]}};
-                    bool inside = true; // its part of the atlas is in the atlas
+                    bool inside = true; // volume's region lies within the atlas
                     for (int c = 0; c < 3; ++c) {
                         vol.atlasOffset[c] = (int)bounded(a[c], -1, 65536);
                         vol.atlasSize[c]   = (int)bounded(b[c], 1, 65536);
@@ -1228,7 +1199,7 @@ namespace h3d::gltf {
                     else
                         log.push_back(std::format("lighting set {}: a light probe volume reaches outside its atlas, left out", k));
                 }
-            // the atlas: its slices in a grid, `cols` wide; six blocks of probeDims[2] slices each
+            // the atlas: slices in a grid `cols` wide; six blocks of probeDims[2] slices each
             jobs.push_back([&, pj, cols] {
                 int                  w = 0, h = 0, sw = 0, sh = 0;
                 std::vector<uint8_t> irr, shd;
@@ -1238,7 +1209,7 @@ namespace h3d::gltf {
                 if (!decode(pj->get("shadows"), 1, sw, sh, shd))
                     shd.clear();
                 const auto at = [&](int slice, int x, int y, int iw) { return ((size_t)(slice / cols * H + y) * iw + (size_t)(slice % cols * W + x)); };
-                // the rows of slices an image of the first n blocks needs, and whether it's as big
+                // whether an image is big enough for the first `blocks` blocks of slices
                 const auto holds = [&](int iw, int ih, int blocks) { return (int64_t)iw >= (int64_t)cols * W && (int64_t)ih >= ((int64_t)blocks * D + cols - 1) / cols * H; };
                 if (!holds(w, h, 6))
                     return;

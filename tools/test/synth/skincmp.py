@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import unity2hypr3d as u
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:]
-files, poses = [], []  # poses[k]: what --pose turns in file k (they follow the file)
+files, poses = [], []  # poses[k]: the --pose turns given after file k
 i = 0
 while i < len(argv):
     if argv[i] == '--pose':

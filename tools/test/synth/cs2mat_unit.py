@@ -1,13 +1,10 @@
-# cs2mat_unit.py: tools/cs2map.py's CS2 material details on a small hand-made glTF scene, as CS2's own shaders have
-# them (decompiled from the game's csgo_vertexlitgeneric and csgo_unlitgeneric): the unlit shader's blend modes (4 adds:
-# de_dust2's clouds), its second color texture and that texture's uv transform, the DynamicParams that tile and move the
-# clouds (and g_vTexCoordScrollSpeed), g_bFogEnabled, F_NOTINT (no tint at all,
-# though Source 2 Viewer bakes it into the base color), the tint mask and the decal texture with the uv set each is read
-# with, and the lightmap's uv set coming after the ones a material reads itself (de_dust2's tower edges have no lightmap
-# uvs: their second set is their decal's). The result is written as a GLB and read back.
+# cs2mat_unit.py: tools/cs2map.py's CS2 material details on a small hand-made glTF scene, as CS2's own shaders
+# (decompiled csgo_vertexlitgeneric and csgo_unlitgeneric) have them: blend modes, second color textures, DynamicParams,
+# fog, tints, tint masks and decals with their uv sets, lightmap uvs after a material's own, draw call tints. The result
+# is written as a GLB and read back.
 #   python3 tools/test/synth/cs2mat_unit.py
 import sys, os, json, math, struct, zlib, tempfile
-sys.dont_write_bytecode = True  # (no __pycache__ left in tools/)
+sys.dont_write_bytecode = True  # no __pycache__ in tools/
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
 import cs2map
 
@@ -180,7 +177,7 @@ for u, v in ((0, 0), (1, 0), (0.3, 0.7)):
     near(f'its uv transform at ({u}, {v})', [xf[0] * u + xf[2] * v + xf[4], xf[1] * u + xf[3] * v + xf[5]],
          [x0[0] * u + x0[1] * v + x0[2], x1[0] * u + x1[1] * v + x1[2]])
 
-# moving textures: the DynamicParams CS2 evaluates each frame (in the decompiled .vmat), and g_vTexCoordScrollSpeed
+# moving textures: DynamicParams (CS2 evaluates them each frame) and g_vTexCoordScrollSpeed
 base_xf = lambda k: mats[M[k]]['pbrMetallicRoughness']['baseColorTexture'].get('extensions', {}).get('KHR_texture_transform')
 check("DynamicParams: the clouds' g_vTexCoordScale, on the base color", base_xf('clouds'), {'scale': [3.5, 3.5]})
 check('and their offset moving with time: a scroll', s2('clouds').get('scroll'), [0.0, 0.002])

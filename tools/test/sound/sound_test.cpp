@@ -1,16 +1,12 @@
-// sound_test: emotes' sounds on their own, for sound_check.sh: src/sound.cpp's decoding and src/speaker.cpp's playing
-// through PipeWire (PIPEWIRE_REMOTE says which: sound_check.sh runs one of its own).
+// sound_test: emote sounds on their own for sound_check.sh: src/sound.cpp's decoding and src/speaker.cpp's PipeWire
+// playback (to the PipeWire PIPEWIRE_REMOTE names).
 //
-//   sound_test decode FILE OUT    decodes FILE: prints its rate, channels and frames (or why it can't), writes its 16 bit
-//                                 samples to OUT
+//   sound_test decode FILE OUT    print FILE's rate, channels and frames (or the error); write its s16 samples to OUT
 //   sound_test play FILE [--loop] [--from S] [--volume V] [--for S] [--fade S] [--wait S] [--log FILE]
-//                                 plays it; once it's heard (clock() >= 0) it goes on for --for seconds (default 2),
-//                                 stops fading over --fade seconds (default 0.3) and waits for the stream to close; not
-//                                 heard after --wait seconds (default 10), it stops. The log has a line every 5 ms:
-//                                 seconds since play(), clock(), the stream's state, where in the sound it is, where it
-//                                 came in, the latency and the frames given. It ends with the status when it stopped,
-//                                 as a line of JSON, and a line of when it was heard, stopped and closed; exit status 0
-//                                 when it was heard and closed
+//                                 once heard (clock() >= 0), play --for seconds (2), stop with --fade (0.3) and wait
+//                                 for the stream to close, or stop after --wait seconds unheard (10). --log gets a line
+//                                 every 5 ms: time, clock(), stream state, position, start, latency, frames. Prints the
+//                                 last status as JSON and the timings; exit status 0 when it was heard and closed
 #include "sound.hpp"
 #include "speaker.hpp"
 
@@ -104,7 +100,7 @@ int main(int argc, char** argv) {
         if (heard < 0 && s.at >= 0)
             heard = t;
         if (stopped < 0 && s.on)
-            last = s; // (as it was when it stopped, or played to its end)
+            last = s; // status at the stop, or at the sound's end
         if (stopped < 0 && ((heard >= 0 && t - heard >= length) || (heard < 0 && t > wait))) {
             stopped = t;
             speaker.stop((float)fade);

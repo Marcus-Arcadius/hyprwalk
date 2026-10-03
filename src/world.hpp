@@ -29,7 +29,7 @@ namespace h3d {
     // the screen (the 2D desktop) lives on the north wall, centered on x = 0
     struct SScreenSpec {
         float height  = 2.4f;  // meters the full monitor height maps to
-        float centerY = 1.65f; // eye height, so the start of the transition is seamless
+        float centerY = 1.65f; // eye height, so the transition starts seamlessly
         float aspect  = 16.f / 9.f;
     };
 

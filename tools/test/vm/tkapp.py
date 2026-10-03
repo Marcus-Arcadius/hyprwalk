@@ -1,9 +1,5 @@
-# tkapp.py: an X11 app for tools/test/vm (Tk, through XWayland), with what X11 apps do that Wayland ones don't:
-# override-redirect windows for its menus (the menu bar's File menu, a right-click menu) and a tooltip, which the
-# compositor gets as windows of their own at absolute positions. It prints a line for what it gets, flushed:
-# "click X Y" (button 1 on the canvas, window coordinates), "button N", "key KEYSYM", "wheel up|down" (the list
-# scrolled, X11's buttons 4 and 5), "menu ITEM", "tooltip shown|hidden", "focus in|out", "size W H", and "text TEXT"
-# when Return is pressed in the entry.
+# tkapp.py: an X11 (Tk via XWayland) app for tools/test/vm with override-redirect menus (menu bar, right-click) and a
+# tooltip, which the compositor gets as separate windows at absolute positions. Prints a line per event, flushed.
 import tkinter as tk
 import sys
 

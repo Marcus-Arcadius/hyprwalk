@@ -1,5 +1,5 @@
-# For hyprpm, Hyprland's plugin manager: hyprpm add https://github.com/Marcus-Arcadius/hypr3d
-# (see Building in README.md). It builds with the headers `hyprpm update` fetched for the Hyprland you run.
+# For hyprpm: hyprpm add https://github.com/Marcus-Arcadius/hypr3d (see Install in README.md). It builds with the
+# headers hyprpm update fetched for the Hyprland you run.
 
 [repository]
 name = "hypr3d"

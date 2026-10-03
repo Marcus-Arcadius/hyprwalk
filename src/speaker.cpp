@@ -17,7 +17,7 @@ namespace h3d {
     namespace {
         using Clock = std::chrono::steady_clock;
 
-        constexpr float RAMP = 0.02f; // seconds the gain takes to go all the way: starting, and the volume changed, don't click
+        constexpr float RAMP = 0.02f; // gain ramp, s: no clicks on start or volume change
     }
 
     struct CSpeaker::SImpl {
@@ -26,7 +26,7 @@ namespace h3d {
         pw_core*                      core    = nullptr;
         pw_stream*                    stream  = nullptr;
         spa_hook                      coreHook{}, streamHook{};
-        std::shared_ptr<const SSound> sound; // (held here while the stream reads it, so the stream's thread never lets one go)
+        std::shared_ptr<const SSound> sound; // held so the stream's thread never frees it
         int                           rate = 48000, channels = 2; // the stream's, as the sound's
 
         // the rest the stream's thread and the main thread share
@@ -34,19 +34,19 @@ namespace h3d {
         const SSound*      playing = nullptr;
         std::string        name;
         bool               looping = false, started = false, fading = false, done = false;
-        Clock::time_point  asked;     // when play() was
-        // done (played to its end, or faded out): when the last of it is heard, for the stream to go then and not cut it
-        // short; stopped: when it goes whatever the stream does (one that's stopped being asked for more never fades)
+        Clock::time_point  asked;     // when play() was called
+        // heardBy: when the last of a finished or faded sound is heard, so closing doesn't cut it short; giveUp: close
+        // then regardless (a stream no longer asked for data never fades)
         Clock::time_point  heardBy, giveUp = Clock::time_point::max();
-        double             from = 0;  // where in the sound it started then (seconds)
-        uint64_t           given = 0; // the next frame to give, on the sound's time line: from its start, counting each time round
+        double             from = 0;  // start position, seconds
+        uint64_t           given = 0; // next frame on the sound's timeline, counting loops
         uint64_t           first = 0; // the first given
         float              gain = 0, volume = 1, fadeStep = 0;
-        // the clock: given before the last buffer and after it, when it was asked for, and how long till it's heard
+        // clock: frames given before and after the last buffer, when that buffer was asked for, and its latency
         uint64_t           clockFrames = 0, clockEnd = 0;
         Clock::time_point  clockAt;
         double             latency   = 0;
-        mutable double     lastClock = -1; // (it never goes back)
+        mutable double     lastClock = -1; // never goes back
         std::string        streamState = "unconnected", streamError;
 
         static void onProcess(void* data) {
@@ -65,7 +65,7 @@ namespace h3d {
                 pw_stream_queue_buffer(m->stream, b);
                 return;
             }
-            // how long till what's given now is heard: the graph's delay to the device, and what's queued before it
+            // latency of what's given now: the graph's delay to the device plus what's queued before it
             pw_time t{};
             double  late = 0;
             if (pw_stream_get_time_n(m->stream, &t, sizeof(t)) == 0 && t.rate.denom > 0)
@@ -75,7 +75,7 @@ namespace h3d {
             const SSound*   s      = m->playing;
             const size_t    frames = s ? s->frames() : 0;
             if (!m->started && !m->done) {
-                // the first heard: where the dance will be by then, so the song comes in with it
+                // start where the dance will be when this is heard, so the song comes in with it
                 m->started      = true;
                 const double at = m->from + std::chrono::duration<double>(now - m->asked).count() + late;
                 m->given        = (uint64_t)std::llround(std::max(0.0, at) * m->rate);
@@ -149,7 +149,7 @@ namespace h3d {
         static void onCoreError(void* data, uint32_t id, int, int res, const char* message) {
             auto* m = (SImpl*)data;
             if (id != PW_ID_CORE || res != -EPIPE)
-                return; // (the stream's own come as its state)
+                return; // the stream's errors arrive as its state
             std::lock_guard lock(m->mutex);
             m->streamState = "error";
             m->streamError = "PipeWire went away";
@@ -265,7 +265,7 @@ namespace h3d {
     void CSpeaker::stopNow() {
         if (m->loop)
             pw_thread_loop_stop(m->loop);
-        // (the loop's thread is gone, and the stream's goes with the stream: nothing else touches these)
+        // the loop's thread is stopped and the stream's goes with the stream: nothing else touches these
         if (m->stream) {
             spa_hook_remove(&m->streamHook);
             pw_stream_destroy(m->stream);
@@ -287,7 +287,7 @@ namespace h3d {
             std::lock_guard lock(m->mutex);
             m->playing = nullptr;
             m->started = m->fading = m->done = false;
-            m->streamState                   = m->streamError.empty() ? "unconnected" : "error"; // (its error stays till the next)
+            m->streamState                   = m->streamError.empty() ? "unconnected" : "error"; // the error stays till the next
         }
         m->sound.reset();
     }
@@ -318,8 +318,8 @@ namespace h3d {
         std::lock_guard lock(m->mutex);
         if (!m->playing || !m->started || m->done || m->fading || m->streamState == "error")
             return -1;
-        // what was given before the last buffer is heard after its latency, and on from there as time goes: up to what
-        // has been given (a late buffer holds it there), and never back
+        // frames given before the last buffer are heard after its latency, then time runs on, capped at what has been
+        // given (a late buffer holds it) and never going back
         const double since = std::chrono::duration<double>(Clock::now() - m->clockAt).count();
         const double t     = std::min((double)m->clockFrames / m->rate - m->latency + since, (double)m->clockEnd / m->rate - m->latency);
         m->lastClock       = std::max(m->lastClock, t);

@@ -1,5 +1,4 @@
-// Hyprland symbols that the plugin's headers pull into static initializers
-// (color constants, the logger); the harness isn't linked against Hyprland.
+// Hyprland symbols the plugin's headers use in static initializers; the harness isn't linked against Hyprland.
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/helpers/Color.hpp>
 

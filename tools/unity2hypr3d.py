@@ -14,67 +14,18 @@ options:
   --list             list the avatars found and stop (does not need Blender)
   --max-texture N    shrink textures bigger than N pixels (default 2048)
   --keep DIR         unpack packages into DIR and leave them there
-  --outfit NAME|PATH put an outfit on the avatar (a prefab or model by name or file, or a
-                     package or folder holding one), as dragging it onto the avatar in Unity and
-                     running Modular Avatar's Setup Outfit would; repeatable
-  --emote NAME|PATH  add a humanoid animation clip as an emote, as putting it in the avatar's
-                     Action layer would: a .anim file, a clip by name, or the clips of a package,
-                     zip or folder (less still poses when it has clips that move), each with its
-                     song if one is beside it; repeatable
+  --outfit NAME|PATH put on an outfit (a prefab or model by name or file, or a package or folder
+                     holding one) as Modular Avatar's Setup Outfit would; repeatable
+  --emote NAME|PATH  add humanoid clips as Action layer emotes: a .anim file, a clip by name, or
+                     the clips of a package, zip or folder (still poses left out when some clips
+                     move), each with its song if one is beside it; repeatable
 
-What it carries over, from the avatar descriptor and the files it points to:
-  the humanoid bone map (from the FBX import settings), visemes, the blink shape, the eye bones,
-  face gestures from the FX controller (both hands' signs together too) and the Gesture layer's
-  finger poses, Expressions Menu toggles (objects shown and hidden, shape keys set, materials
-  changed, objects moved, turned and scaled) and radial puppets (as sliders; two- and four-axis
-  ones as two-axis sliders), objects that start hidden, PhysBones and Dynamic Bones as springs and
-  colliders (spheres, capsules, planes, and ones that keep bones inside), and the materials (colour,
-  texture, cutout or transparent, emission, culling; Standard, lilToon, Poiyomi, MToon and UnlitWF).
-  A material a toggle or slider puts in a slot, or whose colour, emission or tiling it changes, is
-  written as a glTF material variant (KHR_materials_variants) the settings file names. Unity's
-  render queue, stencil (UnlitWF's stencil masks, lilToon's and Poiyomi's), toon outlines (UnlitWF,
-  lilToon, Poiyomi, MToon), UnlitWF's back faces and light clamp go in the materials' glTF extras;
-  UnlitWF's alpha from a mask, or inverted, is baked into the base texture.
-
-Emotes: humanoid clips in the Action layer (the avatar's, an MA Merge Animator's, a VRCFury Full
-Controller's) are written next to the GLB as VRM animations (OUT.<name>.vrma) and listed in the
-settings file's "emotes". Their muscle curves become bone turns for the avatar's T pose, the body
-curves move the hips, and shape key curves (MMD faces too) set the avatar's shape keys or VRM
-expressions. Weighted keys are Unity's Bezier spans, and a state with Foot IK plants the feet on
-the clip's goals. A dance motion set up with MA goes on with --outfit, like an outfit; one sold as
-bare clips goes on with --emote, named as its clip with its words spaced out, looping if the clip
-loops. A looping clip's "Loop" is left off (FreddyFazbearPumpItUp_Loop: Freddy Fazbear Pump It Up)
-unless it is one of a set (Thumbs up Entry, Thumbs up Loop). A bare clip's song (the sound file of
-its name beside it, or its folder's one sound file when it is the folder's one clip) is copied next
-to the GLB as OUT.<name>.ogg, the emote's "sound", when it is Ogg Vorbis (all hypr3d plays).
-
-Modular Avatar setups are built as MA builds them for VRChat: Merge Armature (an outfit's bones
-join the avatar's and its meshes follow the avatar's bones), Bone Proxy, Move To, Replace Object,
-PhysBone Blocker, Platform Filter, Scale Adjuster, Floor Adjuster and Global Collider; its menus
-(Menu Item, radial ones too, Menu Installer, Install Target and Group, Parameters) and reactive
-components (Object Toggle, Shape Changer, Mesh Cutter with its vertex filters, Material Setter,
-Material Swap); Blendshape Sync; Merge Animator for FX, Gesture and the Action layer, and Merge
-Blend Tree. --outfit puts on an outfit the avatar's prefab does not have yet, as MA's Setup Outfit
-does, whether or not the outfit is set up for MA. Visible Head Accessory, Mesh Settings, World
-Scale Object, Convert Constraints and MA's VRChat-only settings have nothing to do here.
-
-VRCFury setups are built after MA's, as VRCFury builds them: Armature Link (an outfit's bones
-linked to the avatar's, snapped on if it says so, its meshes following the avatar's bones, bones
-an animation moves kept apart), Toggles (objects turned on and off, shape keys, materials,
-material properties, FX floats, clips, the Scale, Smooth Loop and World Drop actions; exclusive
-tags, sliders, the resting state they give the avatar), Puppet (two-axis ones too), Gesture Driver
-(and Senky's, both-hand combos too), Blinking, Visemes, Full Controller (FX, Gesture and Action
-controllers with their path rewrites, menus and parameters), Blend Shape Link, Apply and
-Delete During Upload, Move and Reorder Menu Item, and the older Modes, Object State, Bone
-Constraint, Breathing and World Constraint features. An outfit linked with VRCFury is put on as
-it is. Features for VRChat's own systems (security locks, avatar scale, toes, talking, first
-person fixes and the like) change nothing hypr3d shows.
-
-What it does not: shader effects beyond the above (toon shading, matcaps, rim lights and the like),
-constraints, particles, audio (but a bare clip's song), contacts; VRCFury's SPS, TPS and OGB (each is named in a warning). MA's
-World Fixed Object is held in the world where its rest pose was when the avatar appeared (the settings
-file's "fixed"): MA fixes it to the world's origin, and hypr3d's worlds put you at their start. Full Controller layers other than FX, Gesture and Action have nothing to do
-here. Blender imports only binary FBX files, so a model in any other format stops the conversion.
+Carried over: bone map, visemes, blink, eyes, gesture faces and finger poses, menu toggles and
+puppets (as sliders), PhysBones and Dynamic Bones (as springs and colliders), materials (Standard,
+lilToon, Poiyomi, MToon, UnlitWF; variants, outlines, toon shading, matcaps, stencils) and Action
+layer emotes (OUT.<name>.vrma, a bare clip's Ogg Vorbis song as OUT.<name>.ogg), with Modular
+Avatar and VRCFury setups built as they build them for VRChat. Not carried: other shader effects,
+constraints, particles, contacts, VRCFury's SPS, TPS and OGB. Models must be binary FBX.
 """
 
 import sys, os, re, io, json, math, struct, zlib, tarfile, zipfile, tempfile, shutil, copy
@@ -167,8 +118,7 @@ def ref(x):
 
 
 def matkey(x):
-    """a material reference as a value to compare and keep: (guid, fileID), ('fbx', name) for a model's own
-    material as the model has it, None for none"""
+    """material reference as a comparable key: (guid, fileID), ('fbx', name) for a model's own material, or None"""
     if isinstance(x, dict):
         if 'fbxmat' in x:
             return ('fbx', str(x['fbxmat']))
@@ -258,10 +208,8 @@ def hash_id(s):
 
 # ---------------------------------------------------------------- Unity YAML
 #
-# Unity writes a small, regular subset of YAML: one document per object, block maps and
-# sequences (a sequence sits at the same indent as its key), flow maps for references, and
-# plain or quoted scalars that may wrap onto deeper lines. Scalars stay strings, since
-# fileIDs are 64-bit and some values are hex blobs.
+# Unity's YAML subset: a document per object, block maps and sequences (a sequence may sit at its key's indent),
+# flow maps for references, wrapping scalars. Scalars stay strings (64-bit fileIDs, hex blobs).
 
 _HDR = re.compile(r'--- !u!(\d+) &(-?\d+)( stripped)?')
 _KEY = re.compile(r'''^([^\s'"{\[\]},#&*!|>%@`-][^:]*?|-[^\s:][^:]*?|'(?:[^']|'')*'|"(?:[^"\\]|\\.)*")'''
@@ -273,7 +221,7 @@ _ESC = {'n': '\n', 't': '\t', 'r': '\r', '0': '\0', 'a': '\a', 'b': '\b', 'e': '
 
 def _logical(lines):
     """[(indent, text)] with wrapped scalars joined back onto their line"""
-    out = []  # [indent, text, column a continuation must pass, None | value is double-quoted]
+    out = []  # [indent, text, wrap column, quoted value? (None: no value)]
     for raw in lines:
         s = raw.rstrip('\r\n')
         t = s.strip()
@@ -581,7 +529,7 @@ def _ptoks(path):
 def set_prop(data, path, val):
     """apply one prefab override (propertyPath = value) to an object's body"""
     m = re.match(r'managedReferences\[(-?\d+)\]\.(.+)$', path)
-    if m:  # a field of a [SerializeReference] object: in the references block
+    if m:  # [SerializeReference] field: in the references block
         rid, refs = int(m.group(1)), dictof(data.get('references'))
         e = next((x for x in listof(refs.get('RefIds')) if isinstance(x, dict) and inum(x.get('rid'), None) == rid),
                  None)
@@ -641,7 +589,7 @@ def set_prop(data, path, val):
 
 SKIP_DIRS = {'Library', 'Temp', 'Logs', 'obj', 'UserSettings', 'Build', 'Builds', 'node_modules'}
 SKIP_EXT = {'.mp4', '.mov', '.webm', '.avi', '.dll', '.so', '.dylib', '.cs', '.pdb', '.mdb', '.exe'}
-AUDIO_EXT = {'.ogg', '.wav', '.mp3', '.aif', '.aiff', '.flac'}  # (kept: a bare clip's song, see clip_sound)
+AUDIO_EXT = {'.ogg', '.wav', '.mp3', '.aif', '.aiff', '.flac'}  # kept for a bare clip's song (clip_sound)
 IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.tga', '.psd', '.tif', '.tiff', '.bmp', '.exr', '.hdr',
              '.gif', '.dds', '.webp'}
 MODEL_EXT = {'.fbx', '.obj', '.dae', '.3ds', '.dxf', '.blend', '.ma', '.mb', '.max', '.c4d'}
@@ -680,7 +628,7 @@ class DB:
         self._meta = {}
         self._fbx = {}
         self._n = 0
-        self._seen = None  # the guids an input holds, while input_assets adds it
+        self._seen = None  # guids input_assets collects while adding an input
 
     def add(self, guid, upath, file):
         guid = guid.lower()
@@ -699,7 +647,7 @@ class DB:
         if low.endswith('.zip'):
             return self.add_zip(path)
         if os.path.isfile(path):
-            # a file inside a project: scan the project it belongs to
+            # a file inside a project: scan its whole project
             d = os.path.dirname(path)
             root = None
             while True:
@@ -808,7 +756,7 @@ class DB:
                     continue
                 name = info.filename
                 if not (info.flag_bits & 0x800):
-                    try:  # names without the UTF-8 flag are often Shift-JIS (Booth downloads)
+                    try:  # no UTF-8 flag: often Shift-JIS (Booth)
                         name = name.encode('cp437').decode('cp932')
                     except (UnicodeError, LookupError):
                         pass
@@ -1007,7 +955,7 @@ def _props70(n):
 
 
 class FBXInfo:
-    """what the converter needs from an FBX: the node tree, meshes, shape keys, materials"""
+    """the FBX node tree, meshes, shape keys and materials the converter needs"""
 
     def __init__(self, file, upath):
         self.path = upath
@@ -1058,7 +1006,7 @@ class FBXInfo:
                 ch_of.setdefault(b, []).append(deformers[a][1])
             elif a in materials and b in self.models:
                 mats_of.setdefault(b, []).append(materials[a])
-        self.mesh = {}  # model id -> {'skinned', 'shapes': [...], 'materials': [...], 'used': [...]}
+        self.mesh = {}  # model id -> {skinned, shapes, materials, used}
         for mid, g in geom_of.items():
             shapes = []
             for bs in bs_of.get(g, []):
@@ -1098,7 +1046,7 @@ DYN_GUID = '2a2c05204084d904aa4945ccff20d8e5'  # VRC.SDK3.Dynamics.PhysBone.dll
 PHYSBONE_FID = 1661641543
 COLLIDER_FID = -1631200402
 TRANSFORMS = (4, 224)
-# Modular Avatar's components: their scripts' guids (MA is installed as source, fileID 11500000)
+# MA component script guids (MA is installed as source: fileID 11500000)
 MA_SCRIPTS = {
     '2df373bf91cf30b4bbd495e11cb1a2ec': 'MergeArmature', '42581d8044b64899834d3d515ab3a144': 'BoneProxy',
     '4e6bb6a99e499d2489ccf296662fa3cd': 'MoveTo', 'a5bf908a199a4648845ebe2fd3b5a4bd': 'PBBlocker',
@@ -1115,16 +1063,15 @@ MA_SCRIPTS = {
     '8c38d6a064dbe9b91f24ee30e85c3c4f': 'VertexFilterByUVTile', '229dd561ca024a6588e388160921a70f': 'MergeBlendTree',
     '1fad1419b52a42ae89b0df52eb861e47': 'MenuInstallTarget', 'ba18e6eae93342fd8774b3f3f132928a': 'FloorAdjuster',
     '49bb23f95a7baca4186efa68bc5891b6': 'GlobalCollider'}
-# Modular Avatar's other components (1.18.7): Platform Filter is converted (in Avatar); the rest are said to be left
-# out (MA_WHY) or not (MA_QUIET), and they count as any other component would
+# other MA components (1.18.7): Platform Filter and World Fixed Object are converted, the rest have no use here
 MA_OTHER = {
     '8c8a67d5c01849629fa90c3b2eded93f': 'PlatformFilter', '0e2d9f1d69e34b92a96e6cc162770fad': 'WorldFixedObject',
     'e113c01563a14226b5e863befe6fe769': 'WorldScaleObject', 'e362b3df8a3d478c82bf5ffe18f622e6': 'ConvertConstraints',
     'dc5f8bfae24244aeaedcd6c2bb7264f9': 'RemoveVertexColor', '934543afe4744213b5621aa13a67e3b4': 'SyncParameterSequence',
     '89c938d7d8a741df99f2eda501b3a6fe': 'VRChatSettings', '04802bf95b218724a9f4b97003067857': 'RenameVRChatCollisionTags',
     'd1d979d3cedd4ddd969f414e2ea04fb8': 'MMDLayerControl', 'a8d5b07828ba4eefb9acc305478369d0': 'MoveIndependently'}
-NDMF_VRCHAT = 'nadena.dev.ndmf.vrchat.avatar3'  # NDMF's name for the platform a VRChat avatar is built for
-# and the fields that give them away when the script is not the one above (a copy, another version)
+NDMF_VRCHAT = 'nadena.dev.ndmf.vrchat.avatar3'  # NDMF's platform id for VRChat builds
+# fields that identify MA components when the script guid differs (a copy, another version)
 MA_FIELDS = (('MergeArmature', ('mergeTarget', 'prefix', 'suffix')),
              ('BoneProxy', ('boneReference', 'subPath', 'attachmentMode')),
              ('MoveTo', ('target', 'matchPosition', 'matchRotation')),
@@ -1133,7 +1080,7 @@ MA_FIELDS = (('MergeArmature', ('mergeTarget', 'prefix', 'suffix')),
              ('ShapeChanger', ('m_shapes',)),
              ('MenuInstaller', ('menuToAppend', 'installTargetMenu')),
              ('MergeAnimator', ('animator', 'layerType', 'pathMode')))
-# Unity's HumanBodyBones, in order (55 is LastBone); the fingers are named as the import settings name them
+# Unity's HumanBodyBones in order (55 is LastBone), fingers named as in the import settings
 HUMAN_BONES = ('Hips LeftUpperLeg RightUpperLeg LeftLowerLeg RightLowerLeg LeftFoot RightFoot Spine Chest Neck Head '
                'LeftShoulder RightShoulder LeftUpperArm RightUpperArm LeftLowerArm RightLowerArm LeftHand RightHand '
                'LeftToes RightToes LeftEye RightEye Jaw').split() + [
@@ -1149,10 +1096,10 @@ class Obj:
     def __init__(self, cls, kind, data, sid=0, src=''):
         self.cls, self.kind, self.data, self.sid, self.src = cls, kind, data, sid, src
         self.removed = False
-        self.fbx = None  # the FBXInst an object of a model belongs to
-        self.node = None  # its FBX model id (0: the model's root, which the file does not have)
+        self.fbx = None  # FBXInst it belongs to (objects of a model)
+        self.node = None  # FBX model id (0: the model root, not in the file)
         self.comps, self.children, self.parent, self.tf = [], [], None, None
-        self.name = None  # the name of its node in the GLB
+        self.name = None  # its node name in the GLB
 
     def __repr__(self):
         n = self.data.get('m_Name') if self.cls == 1 else ''
@@ -1187,9 +1134,9 @@ class FBXInst:
         self.key, self.guid, self.info = key, guid, info
         self.collapsed = collapsed
         self.top = top  # the stripped single root node, when collapsed
-        self.gos = {}  # model id -> GameObject Obj (0: the root when not collapsed)
-        self.bl = {}  # after the import: model id -> ('obj', object) | ('bone', armature, bone name)
-        self.orig = {}  # model id -> its Unity matrix as imported (world, from Blender)
+        self.gos = {}  # model id -> GameObject (0: root, if not collapsed)
+        self.bl = {}  # post-import: id -> ('obj', o) | ('bone', arm, bone)
+        self.orig = {}  # model id -> imported Unity world matrix
         self.used = False
 
 
@@ -1237,7 +1184,7 @@ def fbx_ids(guid, info, imp):
     for mid, p in walk('', top, counts):
         for cls in [1] + comps(mid):
             emit(mid, p, cls, counts)
-    # and with its single empty root node stripped (the ids of the other variant stay usable)
+    # and with its single empty root node stripped (both id variants stay usable)
     if len(top) == 1:
         counts = {}
         t = top[0]
@@ -1352,7 +1299,7 @@ class World:
         else:
             make(0, None)
         inst.root_tf = tfs[root_mid]
-        # both id variants lead to the same objects; the root of one is the stripped node of the other
+        # both id variants map to the same objects; one's root is the other's stripped node
         for mid, cls, fid in fbx_ids(a.guid, info, imp):
             o = gos.get(mid if not (collapsed and mid == 0) else fi.top, {}).get(cls)
             if o is not None:
@@ -1370,7 +1317,7 @@ class World:
             if cls == 1001:
                 if 'm_SourcePrefab' in body:
                     pis.append((fid, body))
-                continue  # a pre-2018.3 Prefab object: its objects are all written out already
+                continue  # pre-2018.3 Prefab: its objects are inline already
             o = Obj(cls, kind, copy.deepcopy(body), fid, uf.path)
             inst.objs[fid] = o
             inst.all.append(o)
@@ -1436,7 +1383,7 @@ class World:
 
 
 def _resolve(x, objs):
-    """a document's local {fileID} references as the objects they name (external ones stay dicts)"""
+    """local {fileID} references as the objects they name (external ones stay dicts)"""
     if isinstance(x, dict):
         if 'fileID' in x and len(x) <= 3 and set(x) <= {'fileID', 'guid', 'type'}:
             f, g = ref(x)
@@ -1518,8 +1465,7 @@ def is_constraint(c):
 
 
 def ma_platform_out(gos):
-    """the objects Modular Avatar's Platform Filter leaves out of a VRChat build (PlatformFilterPass, the first thing
-    MA does): one whose filters include other platforms but not VRChat's, or one that excludes VRChat's"""
+    """ids of the objects MA's Platform Filter leaves out of a VRChat build (PlatformFilterPass)"""
     by = {}
     for g in gos:
         for c in g.comps:
@@ -1607,7 +1553,7 @@ def find_avatars(db):
 # ---------------------------------------------------------------- the avatar, its animations and menus
 
 RENDERERS = (137, 23)  # SkinnedMeshRenderer, MeshRenderer
-# a Transform's properties as animation curves name them: position, rotation (quaternion), Euler angles, scale
+# curve attribute names of Transform properties -> position, quaternion, Euler angles, scale
 TF_ATTRS = {'m_LocalPosition': 'p', 'm_LocalRotation': 'q', 'localEulerAnglesRaw': 'e', 'localEulerAngles': 'e',
             'm_LocalEulerAngles': 'e', 'localEulerAnglesBaked': 'e', 'm_LocalScale': 's'}
 BUILTIN_PARAMS = {'IsLocal': 1, 'Grounded': 1, 'Upright': 1, 'TrackingType': 3, 'AvatarVersion': 3,
@@ -1662,7 +1608,7 @@ class Avatar:
         self._shapes = {}
         self._mats = None
         self.ma = None  # the ModularAvatar once it has run
-        self.tf_rest = {}  # id(GameObject) -> {'p', 'q', 'e', 's'}: its Transform's local values (transform_rests)
+        self.tf_rest = {}  # id(go) -> local p/q/e/s values (transform_rests)
 
     def comp(self, go, cls):
         for c in go.comps:
@@ -1671,7 +1617,6 @@ class Avatar:
         return None
 
     def shape_names(self, smr):
-        """the blend shape names of a renderer's mesh, in order"""
         n = self._shapes.get(id(smr))
         if n is None:
             n = []
@@ -1687,9 +1632,9 @@ class Avatar:
         k, o = prop[0], prop[1]
         if k == 'a':
             return 1.0 if truthy(o.data.get('m_IsActive', '1')) else 0.0
-        if k == 'c':  # an MA Mesh Cutter's cut (or a Shape Changer's delete): not in effect
+        if k == 'c':  # Mesh Cutter cut / Shape Changer delete: off
             return 0.0
-        if k == 't':  # a Transform's local value, as the avatar has it placed (transform_rests); 'm': a Scale multiplier
+        if k == 't':  # Transform local value at rest; 'm': Scale multiplier
             rest = self.tf_rest.get(id(o))
             c = prop[2]
             if c == 'm':
@@ -1720,14 +1665,12 @@ class Avatar:
         return 0.0
 
     def materials(self):
-        """the materials, read when first asked for"""
         if self._mats is None:
             self._mats = Materials(self.db)
         return self._mats
 
     def matprop(self, r, k, name, key=None):
-        """a property hypr3d carries ("_Color.r", "_MainTex_ST.z", "_Cutoff") of the material in a renderer's slot k (or
-        of the one `key` names); None if that material has no such property"""
+        """carried property ("_Color.r", "_MainTex_ST.z", "_Cutoff") of slot k's material (or key's), or None"""
         mk = key if key is not None else self.default(('m', r, k))
         if not mk or mk[0] == 'fbx':
             return None
@@ -1746,17 +1689,16 @@ class Avatar:
                                        'w': c[3]}.get(ch)
 
     def prop(self, path, cls, attr):
-        """what an animation curve drives: ('a', GameObject) active, ('e', renderer) enabled,
-        ('s', renderer, shape) a blend shape weight, ('m', renderer, slot) a material slot, ('mp', renderer,
-        "_Color.r") a property of its materials that hypr3d carries; None for anything else"""
+        """what an animation curve drives: ('a', go) active, ('e', renderer) enabled, ('s', r, shape), ('m', r, slot),
+        ('mp', r, "_Color.r"), ('h', root, MUSCLES index), ('t', go, 'px'..'sz') local value; None: not carried"""
         go = self.paths.get(path)
         if go is None:
             return None
         if cls == 1 and attr == 'm_IsActive':
             return ('a', go)
-        if cls == 95 and attr in MUSCLE_OF:  # a humanoid muscle: ('h', the root, MUSCLES index)
+        if cls == 95 and attr in MUSCLE_OF:
             return ('h', go, MUSCLE_OF[attr])
-        if cls == 4:  # a Transform: ('t', GameObject, 'px'..'pz' | 'qx'..'qw' | 'ex'..'ez' | 'sx'..'sz'), local values
+        if cls == 4:
             k, _, axis = attr.rpartition('.')
             kind = TF_ATTRS.get(k)
             return ('t', go, kind + axis) if kind and axis in ('xyzw' if kind == 'q' else 'xyz') else None
@@ -1782,8 +1724,7 @@ class Avatar:
             return self.default(p) if v is None else v
         if get(('e', r)) <= 0.5:
             return False
-        # what MA merges still shows and hides with its old parents (MA puts stand-ins for them in between); what a
-        # Bone Proxy moves goes with its new ones
+        # visibility follows old parents for merged objects (MA's stand-ins), new parents for Bone Proxy moves
         g = r.go
         while g is not None and g is not self.root:
             if get(('a', g)) <= 0.5:
@@ -1793,15 +1734,12 @@ class Avatar:
 
 
 def av_desc_collider(desc, slot):
-    """one of the avatar descriptor's colliders ("head", "handL", "fingerIndexR"...): {state, transform, radius,
-    height, position, rotation}"""
+    """a descriptor collider ("head", "handL", ...): {state, transform, radius, height, position, rotation}"""
     return dictof(desc.get('collider_' + slot))
 
 
 def blend2d(pts, p, polar=True):
-    """the weights of a 2D blend tree's children at p: gradient band interpolation (Johansen's, as Unity's 2D blend trees
-    use it), in polar space for the directional kinds (magnitudes and angles, the angles counting twice); a child at
-    the origin is the one with no direction"""
+    """child weights of a 2D blend tree at p: Unity's gradient band interpolation, polar for the directional kinds"""
     n = len(pts)
     if n <= 1:
         return [1.0] * n
@@ -1819,7 +1757,7 @@ def blend2d(pts, p, polar=True):
                 if li < 1e-6 and lj < 1e-6:
                     continue
                 mean = (li + lj) / 2
-                if li < 1e-6:  # from the middle out toward j: by how far only
+                if li < 1e-6:  # i at the origin: magnitude only
                     vij, vip = Vector((lj / mean, 0.0)), Vector((lp / mean, 0.0))
                 elif lj < 1e-6:
                     vij, vip = Vector((-li / mean, 0.0)), Vector(((lp - li) / mean, 0.0))
@@ -1860,12 +1798,11 @@ class Clip:
                 path = rewrite(path)
                 if path is None:
                     return False
-            if isinstance(base, tuple):  # VRCFury's: the first of these places that has it ("/...": the root)
+            if isinstance(base, tuple):  # VRCFury: first base that has it ("/...": the root)
                 return av.prop(path[1:], cid, attr) if path.startswith('/') else next(
                     (x for x in (av.prop(join_path(b, path), cid, attr) for b in base) if x is not None), None)
             return av.prop(join_path(base, path), cid, attr)
-        # a Transform's curves: vectors of its position, rotation (a quaternion, or Euler angles) or scale; Unity
-        # keeps them as floats among the editor curves too
+        # Transform curves come as vectors; Unity also keeps them as floats among the editor curves
         vectors = (('m_PositionCurves', 'm_LocalPosition', 'xyz'), ('m_RotationCurves', 'm_LocalRotation', 'xyzw'),
                    ('m_EulerCurves', 'localEulerAnglesRaw', 'xyz'), ('m_ScaleCurves', 'm_LocalScale', 'xyz'))
         has_vectors = any(listof(body.get(k)) for k, _, _ in vectors)
@@ -1893,7 +1830,7 @@ class Clip:
             if not keys:
                 continue
             cid = inum(c.get('classID'))
-            if cid == 4 and has_vectors:  # the vectors above have them
+            if cid == 4 and has_vectors:  # already read as vectors
                 continue
             p = find(str(c.get('path') or ''), cid, str(c.get('attribute') or ''))
             if p is False:
@@ -1903,7 +1840,7 @@ class Clip:
                 continue
             self.curves.append((p, keys))
             end = max(end, keys[-1][0])
-        for c in listof(body.get('m_PPtrCurves')):  # object references: materials put in a renderer's slots
+        for c in listof(body.get('m_PPtrCurves')):  # object references: materials in renderer slots
             c = dictof(c)
             p = find(str(c.get('path') or ''), inum(c.get('classID')), str(c.get('attribute') or ''))
             if p is False:
@@ -1918,7 +1855,7 @@ class Clip:
         self.length = max(num(st.get('m_StopTime'), end) - num(st.get('m_StartTime'), 0.0), 0.0) or end
 
     def sample(self, u=None):
-        """{prop: value} at normalized time u; None: where the clip rests (its start if it loops, else its end)"""
+        """{prop: value} at normalized time u; u None: the rest pose (start if looping, else end)"""
         out = {}
         for p, keys in self.curves:
             if u is None:
@@ -1940,13 +1877,12 @@ class Clip:
 
 
 class Anim:
-    """clips, blend trees and animator controllers, read when first used; base: where their paths start (an
-    animator MA merges with relative paths), or a tuple of places to look in turn (VRCFury's)"""
+    """lazily read clips, blend trees and controllers; base: path prefix, or prefixes to try in turn (VRCFury)"""
 
     def __init__(self, db, av, base='', rewrite=None):
         self.db, self.av, self.base, self.rewrite = db, av, base, rewrite
         self._clips = {}
-        self.other = set()  # names of clips with curves that are not converted
+        self.other = set()  # names of clips with unconverted curves
 
     def body(self, p, cls=None):
         if p is None:
@@ -2022,7 +1958,7 @@ class Anim:
                     continue
                 for pr, v in val(k).items():
                     d = self.av.default(pr)
-                    if pr[0] == 'm' or d is None or v is None:  # a material: the child with the most weight sets it
+                    if pr[0] == 'm' or d is None or v is None:  # material: the heaviest child sets it
                         if w > most.get(pr, 0.0):
                             most[pr] = w
                             out[pr] = v
@@ -2048,7 +1984,7 @@ class Anim:
             return val(kids[-1])
         y = params.get(str(bt.get('m_BlendParameterY') or ''), 0.0)
         pts = [vec3(k.get('m_Position'))[:2] for k in kids]
-        ws = blend2d(pts, (x, y), polar=typ in (1, 2))  # Simple and Freeform Directional: polar; Cartesian: not
+        ws = blend2d(pts, (x, y), polar=typ in (1, 2))  # Simple / Freeform Directional: polar
         parts = [(w, val(k)) for w, k in zip(ws, kids) if w > 1e-6]
         return self.mix(parts) if len(parts) > 1 else parts[0][1] if parts else {}
 
@@ -2242,7 +2178,7 @@ class Controller:
                 u = None
                 if truthy(st.get('m_TimeParameterActive', '0')):
                     u = params.get(str(st.get('m_TimeParameter') or ''), 0.0)
-                ln = {}  # a later layer's clip names what it sets, as its values win
+                ln = {}  # later layers' clip names win, as their values do
                 got = self.anim.motion(m, params, u, self.over, ln)
                 if layer['mask'] is not None:  # the humanoid parts its avatar mask lets it move
                     got = {pr: v for pr, v in got.items() if pr[0] != 'h' or muscle_part(pr[2]) in layer['mask']}
@@ -2254,14 +2190,13 @@ class Controller:
 
 
 class MotionLayer:
-    """what MA's Merge Motion (Blend Tree) components merge: one FX layer before all the others, a direct blend tree
-    that plays each of their motions at full weight; parts: [(Anim, motion, {its parameter names: the avatar's})]"""
+    """MA Merge Motion (Blend Tree): a first FX layer, a direct blend tree playing each motion fully"""
 
     def __init__(self, parts):
         self.parts = parts
         self.guid = parts[0][1][0] if parts else None
         self.name = 'ModularAvatar: Merge Blend Tree'
-        self.params = {}  # the parameters its trees blend by: floats, 0 unless FX says otherwise
+        self.params = {}  # blend parameters: floats, 0 unless FX has them
         for anim, p, view in parts:
             for pn in self.tree_params(anim, p, set()):
                 self.params.setdefault(view.get(pn, pn), (1, 0.0))
@@ -2302,8 +2237,7 @@ class MotionLayer:
         return vals, names, {}, params
 
 
-# VRChat's SDK's avatar masks (not in avatar packages: the SDK is installed on its own), by guid: the humanoid parts
-# (AvatarMaskBodyPart) each lets a layer move
+# VRChat SDK avatar masks by guid (not in avatar packages): the AvatarMaskBodyParts each lets a layer move
 VRC_MASKS = {'7ff0199655202a04eb175de45a6e078a': {7},  # vrc_Hand Left
              '903ce375d5f609d44b9f00b425d6eda9': {8},  # vrc_Hand Right
              'b2b8bad9583e56a46a3e21795e96ad92': {7, 8},  # vrc_HandsOnly
@@ -2312,8 +2246,7 @@ VRC_MASKS = {'7ff0199655202a04eb175de45a6e078a': {7},  # vrc_Hand Left
 
 
 def mask_parts(db, p):
-    """an AvatarMask's humanoid parts a layer may move (0 root, 1 body, 2 head, 3/4 left/right leg, 5/6 arm, 7/8
-    fingers, 9-12 IK goals), or None for no mask (all of them)"""
+    """body parts a mask allows (0 root, 1 body, 2 head, 3/4 legs, 5/6 arms, 7/8 fingers, 9-12 IK goals); None: all"""
     if not p or not p[0]:
         return None
     if p[0] in VRC_MASKS:
@@ -2391,8 +2324,7 @@ MA_MENU = ('MenuItem', 'MenuGroup', 'MenuInstaller', 'ObjectToggle', 'ShapeChang
 
 
 def ma_objref(av, r):
-    """AvatarObjectReference.Get on the hierarchy as the files have it (MA reads every reference before it moves
-    anything)"""
+    """AvatarObjectReference.Get on the unmodified hierarchy (MA resolves references before moving anything)"""
     r = dictof(r)
     path = r.get('referencePath')
     if not isinstance(path, str) or not path:
@@ -2411,9 +2343,7 @@ def ma_objref(av, r):
 
 
 def vertex_filter(av, c):
-    """an MA vertex filter (one of a Mesh Cutter's components) as {'kind': 'axis', 'bone', 'mask', 'shape' or 'uvtile',
-    its settings, 'mode': 0 any vertex, 1 all vertices or 2 the centroid of a triangle picks it, 'key': what tells it
-    from another}; None if c is none"""
+    """MA vertex filter as {'kind', settings, 'mode': 0 any vertex, 1 all, 2 centroid, 'key'}, or None"""
     k, d = ma_kind(c), c.data
     mode = inum(d.get('m_selectionMode'))
     if mode not in (0, 1, 2):
@@ -2454,7 +2384,6 @@ def av_path(av, g):
 
 
 def go_chain(g):
-    """g and its parents"""
     out = []
     while g is not None:
         out.append(g)
@@ -2463,8 +2392,7 @@ def go_chain(g):
 
 
 def set_data(av, pr, v):
-    """change the avatar's own data: an object on or off, a shape key's weight (what VRCFury and MA leave in the
-    avatar they upload)"""
+    """set an object's active state or a shape key weight in the avatar's own data (VRCFury and MA bake them)"""
     if pr[0] == 'a':
         pr[1].data['m_IsActive'] = '1' if v >= 0.5 else '0'
     elif pr[0] == 's':
@@ -2480,7 +2408,7 @@ def set_data(av, pr, v):
 
 
 def remap(v, pts):
-    """a value through a remap curve's points (MA's RemapCurve: straight lines between them, and on past the ends)"""
+    """v through MA's RemapCurve points: piecewise linear, extrapolated past the ends"""
     if not pts or len(pts) < 2:
         return v
     for x, y in pts:
@@ -2493,8 +2421,7 @@ def remap(v, pts):
 
 
 def follow_shapes(vals, syncs):
-    """shape keys that follow another mesh's (MA's Blendshape Sync, VRCFury's Blend Shape Link): what animates the
-    source, remapped, animates them too"""
+    """shape keys following another mesh's (MA's Blendshape Sync, VRCFury's Blend Shape Link), remapped"""
     for src, a, dst, b, pts in syncs:
         v = vals.get(('s', src, a))
         if v is not None:
@@ -2502,15 +2429,13 @@ def follow_shapes(vals, syncs):
 
 
 class MAToggles:
-    """what Modular Avatar (1.18) adds to the menu and FX: menu items under menu installers (and the parameters MA
-    gives items that have none), Object Toggles and Shape Changers (reactive components: in effect while their menu
-    item is on and their object active), animators merged into FX, and parameters from MA Parameters"""
+    """MA (1.18) menu and FX additions: menu items, their parameters, reactive components, merged animators"""
 
     def __init__(self, an, comps):
         self.an, self.av, self.db, self.comps = an, an.av, an.db, comps
         self.item = {}  # id(MenuItem) -> (parameter, value)
-        self.declared = {}  # parameter -> (value type, default): MA Parameters', and the ones MA makes for items
-        self.renames = {}  # id(GameObject with MA Parameters) -> {name: the name it becomes}
+        self.declared = {}  # parameter -> (value type, default), incl. MA-made ones
+        self.renames = {}  # id(go with MA Parameters) -> {name: new name}
         for c in comps.get('Parameters', []):
             for e in listof(c.data.get('parameters')):
                 e = dictof(e)
@@ -2523,7 +2448,7 @@ class MAToggles:
                 if sync in (1, 2, 3):
                     self.declared.setdefault(to or name, ({1: 0, 2: 1, 3: 2}[sync], num(e.get('defaultValue'))))
         self.assign()
-        self.cutters = {}  # (id(renderer), key) -> {'r', 'multi', 'filters', 'labels'}: what ('c', renderer, key) cuts
+        self.cutters = {}  # (id(renderer), key) -> what ('c', r, key) cuts
         self.rules = self.reactions()
         self.merged = self.animators()
         self.syncs = self.blendshape_syncs()
@@ -2642,8 +2567,7 @@ class MAToggles:
         """[(path of menu names, control)] MA adds to the avatar's menu (VirtualMenu)"""
         out, av = [], self.av
         by_target = {}
-        # an installer a Menu Install Target names puts its menu there instead, and only there (even when the install
-        # target is off)
+        # an installer named by a Menu Install Target installs only there (even when the target is off)
         targeted = {id(t.data['installer']) for t in self.comps.get('MenuInstallTarget', [])
                     if isinstance(t.data.get('installer'), Obj)}
         for c in self.comps.get('MenuInstaller', []):
@@ -2740,7 +2664,7 @@ class MAToggles:
                 shape = _str(e.get('ShapeName'))
                 if smr is None or shape not in self.av.shape_names(smr):
                     continue
-                if inum(e.get('ChangeType')) == 0:  # Delete: the triangles the shape key moves go (a vertex filter)
+                if inum(e.get('ChangeType')) == 0:  # Delete: removes triangles the key moves
                     key = ('shape', shape)
                     cut = self.cutters.setdefault((id(smr), key), {
                         'r': smr, 'multi': 0, 'filters': [{'kind': 'shape', 'shapes': [shape], 'mode': 0,
@@ -2754,7 +2678,7 @@ class MAToggles:
                     continue
                 props.setdefault(('s', smr, shape), []).append(
                     (num(e.get('Value')), self.conditions(c), truthy(c.data.get('m_inverted', '0'))))
-        # Mesh Cutters: the triangles their vertex filters pick go while they are in effect
+        # Mesh Cutters remove the triangles their vertex filters pick while in effect
         for c in self.comps.get('MeshCutter', []):
             g = ma_objref(self.av, c.data.get('m_object'))
             smr = next((x for x in g.comps if x.cls == 137), None) if g is not None else None
@@ -2774,8 +2698,7 @@ class MAToggles:
                 if g is not None:
                     props.setdefault(('a', g), []).append((1.0 if truthy(e.get('Active', '0')) else 0.0,
                                                            self.conditions(c), truthy(c.data.get('m_inverted', '0'))))
-        # the material changers: a material put in a renderer's slot, or one material swapped for another in every
-        # renderer (under a root, if it has one)
+        # Material Setter sets one slot; Material Swap swaps a material in every renderer (under m_root, if set)
         for c in self.comps.get('MaterialSetter', []):
             for e in listof(c.data.get('m_objects')):
                 e = dictof(e)
@@ -2796,14 +2719,13 @@ class MAToggles:
                     if root is not None and not any(g is root for g in go_chain(r.go)):
                         continue
                     for k in range(len(listof(r.data.get('m_Materials')))):
-                        if self.av.default(('m', r, k)) == frm:  # (a model's own material: the .mat that replaces it)
+                        if self.av.default(('m', r, k)) == frm:  # model materials compare as their remapped .mat
                             props.setdefault(('m', r, k), []).append((matkey(e.get('To')), self.conditions(c),
                                                                       truthy(c.data.get('m_inverted', '0'))))
         return props
 
     def conditions(self, comp, affected=None):
-        """BuildConditions: the first menu item from the component up is on, and every object from it up is active
-        (but the affected object and the ones above it: a rule for a hidden object does not matter)"""
+        """BuildConditions: nearest menu item up the hierarchy is on, every object up active except affected's chain"""
         out, item = [], False
         g = comp.go
         above = set(map(id, go_chain(affected))) if affected is not None else set()
@@ -2821,7 +2743,7 @@ class MAToggles:
         return out
 
     def blendshape_syncs(self):
-        """Blendshape Sync: [(the reference mesh, its shape key, the component's mesh, its shape key, remap points)]"""
+        """Blendshape Sync: [(source mesh, its shape key, this mesh, its shape key, remap points)]"""
         out = []
         for c in self.comps.get('BlendshapeSync', []):
             me = next((x for x in c.go.comps if x.cls == 137), None)
@@ -2845,7 +2767,7 @@ class MAToggles:
         return out
 
     def apply(self, params, vals):
-        """what the reactive components set, over the animators' values; then what Blendshape Sync copies"""
+        """reactive component values over the animators', then Blendshape Sync's copies"""
         vals = self.react(params, vals)
         if self.syncs:
             vals = dict(vals)
@@ -2866,7 +2788,7 @@ class MAToggles:
             if v is None:
                 v = self.av.default(c)
             return v >= 0.5
-        for _ in range(8):  # objects whose showing turns other rules on or off
+        for _ in range(8):  # shown objects switch other rules: iterate
             changed = False
             for key, rules in self.rules.items():
                 v = None
@@ -2890,8 +2812,7 @@ class MAToggles:
     # ---- animators merged into FX
 
     def animators(self):
-        """[(priority, Controller, {its parameter names: the avatar's})] of Merge Animator FX layers; a Replace one
-        first (it takes the FX controller's place)"""
+        """FX layers MA merges: [(priority, order, Controller, {param: avatar's}, replaces FX)], Merge Blend Tree first"""
         out = []
         for c in self.comps.get('MergeAnimator', []):
             d = c.data
@@ -2912,7 +2833,7 @@ class MAToggles:
                 continue
             replace = inum(d.get('mergeAnimatorMode')) == 1
             out.append((-1 << 30 if replace else inum(d.get('layerPriority')), len(out), ctl, self.view(c.go), replace))
-        # Merge Motion (Blend Tree): the motions, in one layer before everything else in FX (MergeBlendTreePass)
+        # Merge Motion (Blend Tree): one layer before everything else in FX (MergeBlendTreePass)
         parts = []
         for c in self.comps.get('MergeBlendTree', []):
             d = c.data
@@ -2998,8 +2919,7 @@ def face_name(clip):
 
 
 def humanoid_map(db, root, gos, quiet=False):
-    """{Unity human bone name: GameObject} from the humanoid rig of root's Animator, among gos (the ones of the rig's
-    own model first); quiet: {} for anything but a humanoid, without a word"""
+    """{human bone: GameObject} of root's Animator rig, its model's objects first; quiet: silent, {} unless humanoid"""
     say = (lambda m: None) if quiet else warn
     an = next((c for c in root.comps if c.cls == 95), None)
     if an is None:
@@ -3067,7 +2987,7 @@ class Analysis:
                 if k in MA_MENU:
                     comps.setdefault(k, []).append(c)
         self.mat = MAToggles(self, comps) if comps else None
-        self.merged = []  # [(priority, order, Controller, {its parameter names: the avatar's}, replaces FX)]
+        self.merged = []  # as MAToggles.animators() gives them
         if self.mat:
             for k, v in self.mat.declared.items():
                 self.eparams.setdefault(k, v)
@@ -3094,9 +3014,9 @@ class Analysis:
         self.skipped = list(self.vrcf.skipped) if self.vrcf else []  # menu controls not converted: (name, why)
         self.sliders = []  # radial puppets, as toggles() finds them
         self.kept = []  # the toggles, as toggles() finds them
-        self.cuts0 = frozenset()  # the Mesh Cutters' cuts in effect at rest (toggles() finds them)
-        self.pieces = []  # [(renderer, {cuts}, part name)]: what cut_meshes() made parts of
-        self.emote_params = set()  # the parameters that start the Action layers' emotes
+        self.cuts0 = frozenset()  # Mesh Cutter cuts in effect at rest (toggles())
+        self.pieces = []  # [(renderer, {cuts}, part name)] from cut_meshes()
+        self.emote_params = set()  # parameters that start Action layer emotes
         self.ma = None  # the ModularAvatar once it has run
 
     def evaluate(self, params):
@@ -3108,9 +3028,9 @@ class Analysis:
                 self.ma is not None and self.ma.replaced):
             return runs[0][0].evaluate(params)
         vals, names, track, out = {}, {}, {}, dict(params)
-        if self.vrcf:  # the FX floats VRCFury's toggles set, for the animators to read
+        if self.vrcf:  # FX floats VRCFury toggles set, for the animators
             out = self.vrcf.drive(out)
-        for ctl, view in runs:  # the layers MA merges come after FX's (or before, at a priority below 0)
+        for ctl, view in runs:  # MA's merged layers after FX (before if priority < 0)
             local = dict(out)
             for a, b in view.items():
                 if b in out:
@@ -3123,10 +3043,10 @@ class Analysis:
                 out[view.get(k, k)] = x
         if self.mat:
             vals = self.mat.apply(out, vals)
-        if self.ma is not None and self.ma.replaced:  # what animated a replaced object animates its replacement
+        if self.ma is not None and self.ma.replaced:  # Replace Object: animate the replacement
             vals = {q: v for q, v in ((self.ma.swap(p), v) for p, v in vals.items()) if q is not None}
             names = {q: v for q, v in ((self.ma.swap(p), v) for p, v in names.items()) if q is not None}
-        if self.vrcf:  # VRCFury's toggle layers come after everything MA made
+        if self.vrcf:  # VRCFury's toggle layers come after MA's
             vals = self.vrcf.apply(out, vals, names, track)
         return vals, names, track, out
 
@@ -3158,8 +3078,7 @@ class Analysis:
         return out, neg
 
     def transform_diff(self, vals, base):
-        """{GameObject: {component: value}}: the Transforms these values put elsewhere than base does, each with every
-        component the values animate ('px', 'qw', 'ey', 'sz', 'm': a scale multiplier, see Avatar.prop)"""
+        """{GameObject: {component: value}} of the Transforms these values move away from base"""
         av = self.av
         moved = {}
         for pr in set(vals) | set(base):
@@ -3177,8 +3096,7 @@ class Analysis:
         return {g: a for g, a in moved.values()}
 
     def material_state(self, vals, r, k):
-        """what a renderer's slot k shows with these values: (material key, ((property, value), ...)) with the
-        properties hypr3d carries that differ from the material's own"""
+        """what slot k of r shows: (material key, ((property, value), ...)) with carried properties that differ"""
         pr = ('m', r, k)
         mk = vals[pr] if pr in vals else self.av.default(pr)
         over = []
@@ -3208,14 +3126,14 @@ class Analysis:
             t = inum(c.get('type'))
             name = rich_text(str(c.get('name') or ''))
             pn = str(dictof(c.get('parameter')).get('name') or '')
-            if t == 203:  # a radial puppet: a slider of the float its first sub parameter is
+            if t == 203:  # radial puppet: slider of its first sub parameter
                 sp = _str(dictof((listof(c.get('subParameters')) or [None])[0]).get('name'))
                 if sp:
                     radial.append((prefix, name or sp, sp))
                 else:
                     self.skipped.append((name, 'a radial puppet with no parameter'))
                 continue
-            if t in (201, 202):  # a two-axis puppet (x, y) or a four-axis one (up, right, down, left): a 2D slider
+            if t in (201, 202):  # 2-axis (x, y) / 4-axis (u, r, d, l) puppet: 2D slider
                 sps = [_str(dictof(x).get('name')) for x in listof(c.get('subParameters'))][:2 if t == 201 else 4]
                 if any(sps):
                     puppets.append((prefix, name or next(x for x in sps if x), sps, t))
@@ -3323,12 +3241,10 @@ class Analysis:
         self.kept = kept
         return kept, base
 
-    GRID = 9  # a 2D slider's keys: this many across and up, over -1..1
+    GRID = 9  # 2D slider keys per axis, over -1..1
 
     def slider2(self, name, sps, kind, base_p, base, vis0):
-        """a puppet's two axes as a 2D slider: {'name', 'axes': 2, 'value': (x, y) where it starts, 'grid': n,
-        'keys': [{'at': (x, y), 'shapes', 'show', 'hide', 'materials', 'cuts', 'transforms'}]} at n x n points over
-        -1..1, row by row from the bottom; a four-axis puppet's parameters are how far up, right, down and left"""
+        """a puppet as a 2D slider: n x n keys over -1..1, bottom row first; 4-axis params: up, right, down, left"""
         av, n = self.av, self.GRID
 
         def params(x, y):
@@ -3382,9 +3298,7 @@ class Analysis:
         return {'name': name, 'axes': 2, 'params': sps, 'value': at, 'grid': n, 'keys': keys}
 
     def slider(self, name, pn, base_p, base, vis0):
-        """a radial puppet's float, 0 to 1, as keys: {'name', 'value' (where it starts), 'keys': [{'at', 'shapes',
-        'show', 'hide', 'materials'}]}; shape keys go in straight lines from key to key, and the rest is as the last
-        key at or below the value has it"""
+        """a radial puppet's 0..1 float as keys; shape keys interpolate, the rest is as the last key at or below"""
         av = self.av
 
         def at(x):
@@ -3417,7 +3331,7 @@ class Analysis:
         for s in [s for s in keys[0]['shapes'] if all(abs(k['shapes'][s] - keys[0]['shapes'][s]) < 1e-3 for k in keys)]:
             for k in keys:  # only what the slider moves
                 del k['shapes'][s]
-        # the Transforms it moves: at every key, where they are there
+        # the Transforms it moves, with their values at every key
         moved = {}
         for k in keys:
             for g in self.transform_diff(k['vals'], keys[0]['vals']):
@@ -3430,7 +3344,7 @@ class Analysis:
         if not any(k['shapes'] != keys[0]['shapes'] or state(k) != state(keys[0]) for k in keys) and not moved and not (
                 keys[0]['show'] or keys[0]['hide'] or keys[0]['materials'] or keys[0]['cuts'] != cuts_in(base) or base_tf):
             return None
-        # keys the ones on each side of them make anyway go
+        # drop keys their neighbours interpolate anyway
         out = [keys[0]]
         for i in range(1, len(keys) - 1):
             a, k, b = out[-1], keys[i], keys[i + 1]
@@ -3470,7 +3384,7 @@ class Analysis:
             key = (tuple(sorted(((id(k[0]), k[1]), round(w, 3)) for k, w in shapes.items())),
                    track.get('eyes') == 2, track.get('mouth') == 2)
             if key not in exprs:
-                # named as what sets most of it (a tie by name: the values' order follows sets of objects)
+                # named after the clip setting most of it; ties go by name (value order follows set order)
                 exprs[key] = {'shapes': shapes, 'clip': min(src, key=lambda c: (-src[c], c)) if src else '',
                               'eyes': key[1], 'mouth': key[2], 'label': label}
             return key
@@ -3480,9 +3394,7 @@ class Analysis:
                 p[P] = float(g)
                 p[P + 'Weight'] = 1.0
                 faces[(side, g)] = face(p, '%s %s' % (side, GESTURES[g]))
-        # both hands at once, where the avatar says so (a transition that tests both hands' signs, a VRCFury Gesture
-        # Driver's combo): a face neither hand's alone gives. Otherwise hypr3d shows the face of the hand that made its
-        # sign last
+        # both-hand faces neither hand gives alone: transitions testing both signs, VRCFury Gesture Driver combos
         combos = {}
         for l, r in sorted(self.gesture_pairs()):
                 p = dict(self.params)
@@ -3533,8 +3445,7 @@ class Analysis:
         return gmap, out
 
     def gesture_pairs(self):
-        """{(left sign, right sign)} the avatar has a face for, with both hands: its controllers' transitions that test
-        GestureLeft and GestureRight for signs at once, and VRCFury's Gesture Driver combos"""
+        """(left, right) sign pairs with their own face: transitions testing both, VRCFury Gesture Driver combos"""
         out = set()
         guids = ([self.fx.guid] if self.fx else []) + [x[2].guid for x in self.merged if isinstance(x[2], Controller)]
         for g in dict.fromkeys(x for x in guids if x):
@@ -3558,11 +3469,9 @@ class Analysis:
         return out
 
     def hand_poses(self):
-        """the Gesture layers' hand poses (the avatar's own, Modular Avatar's Merge Animators', VRCFury's Full
-        Controllers'), with both hands making each sign: {(hand: 0 left, 1 right; sign): {MUSCLES index: value}} of
-        each hand's fingers, where its layers move them"""
+        """Gesture layer finger poses per sign, both hands: {(hand 0 L / 1 R, sign): {MUSCLES index: value}}"""
         db, av = self.db, self.av
-        ctls = []  # (Controller, {its parameter names: the avatar's}, the humanoid parts the descriptor lets it move)
+        ctls = []  # (Controller, {param: avatar's}, mask parts or None)
         d = av.desc
         if truthy(d.get('customizeAnimationLayers', '0')):
             for l in listof(d.get('baseAnimationLayers')):  # (VRChat's AnimLayerType: 3 is Gesture)
@@ -3607,8 +3516,7 @@ class Analysis:
         return out
 
     def consonants(self):
-        """the visemes of the consonants (VRChat's PP ... RR): {'pp': {(renderer, shape key): weight}, ...}; hypr3d's lip
-        sync shows pp, ff, ss and ch"""
+        """consonant visemes: {'pp': {(renderer, shape key): weight}, ...}; hypr3d's lip sync uses pp, ff, ss, ch"""
         if self.vrcf is not None and self.vrcf.consonants:  # VRCFury's Visemes, in place of the descriptor's
             return dict(self.vrcf.consonants)
         d, av = self.av.desc, self.av
@@ -3617,11 +3525,11 @@ class Analysis:
             return {}
         names = [str(x) for x in listof(d.get('VisemeBlendShapes'))]
         have = av.shape_names(smr)
-        # (the descriptor's order: sil, PP, FF, TH, DD, kk, CH, SS, nn, RR, then the vowels)
+        # descriptor order: sil, PP, FF, TH, DD, kk, CH, SS, nn, RR, then the vowels
         return {n: {(smr, names[i]): 1.0} for i, (n, _) in enumerate(CONSONANT_VISEMES, 1) if i < len(names) and names[i] in have}
 
     def visemes(self):
-        if self.vrcf is not None and self.vrcf.visemes:  # VRCFury's Visemes, in place of the descriptor's
+        if self.vrcf is not None and self.vrcf.visemes:
             return [{'name': p, 'preset': p, 'shapes': sh} for p, sh in self.vrcf.visemes.items()]
         d, av = self.av.desc, self.av
         ls = inum(d.get('lipSync'))
@@ -3674,7 +3582,6 @@ class Analysis:
         return blink, bones
 
     def humanoid(self):
-        """{Unity human bone name: GameObject}"""
         return humanoid_map(self.db, self.av.root, self.av.gos)
 
     def dynamics(self):
@@ -3697,7 +3604,7 @@ class Analysis:
         return bones, cols
 
     def chained(self):
-        """the GameObjects the PhysBones and Dynamic Bones move"""
+        """ids of the GameObjects PhysBones and Dynamic Bones move"""
         av, out = self.av, set()
         for c in self.dynamics()[0]:
             d = c.data
@@ -3727,8 +3634,7 @@ TEX_KEYS = ('_MainTex', '_BaseMap', '_BaseColorMap', '_MainTexture', '_BaseTextu
 COLOR_KEYS = ('_Color', '_BaseColor', '_MainColor', '_TintColor', '_Tint')
 BLENDER_IMAGES = {'.png', '.jpg', '.jpeg', '.tga', '.bmp', '.tif', '.tiff', '.exr', '.hdr', '.psd',
                   '.dds', '.webp'}
-# the material properties an animation may change that hypr3d carries (MatInfo's): colour, emission colour, the
-# textures' tiling and offset, the cutoff
+# animatable material properties hypr3d carries: colour, emission colour, texture tiling and offset, cutoff
 MP_NAMES = frozenset(['%s.%s' % (c, ch) for c in COLOR_KEYS + ('_EmissionColor',) for ch in 'rgba'] +
                      ['%s_ST.%s' % (t, ch) for t in TEX_KEYS + ('_EmissionMap',) for ch in 'xyzw'] + ['_Cutoff'])
 
@@ -3739,7 +3645,7 @@ def to_linear(c):
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
-# VRChat's consonant visemes: the settings file's names for them, and VRCFury's Visemes' (state_PP ...)
+# VRChat consonant visemes: (settings file name, VRCFury Visemes name as in state_PP)
 CONSONANT_VISEMES = (('pp', 'PP'), ('ff', 'FF'), ('th', 'TH'), ('dd', 'DD'), ('kk', 'kk'), ('ch', 'CH'), ('ss', 'SS'), ('nn', 'nn'),
                      ('rr', 'RR'))
 
@@ -3748,8 +3654,7 @@ def linear_rgba(c):
     return tuple(round(x, 5) for x in (to_linear(c[0]), to_linear(c[1]), to_linear(c[2]), min(max(c[3], 0.0), 1.0)))
 
 
-# UnlitWF's shaders that draw stencil masks or outlines, by GUID (the .meta files of whiteflare's Unlit_WF_ShaderSuite,
-# zlib licence), for materials whose shader is not in the input
+# UnlitWF stencil mask / outline shaders by GUID, for shaders not in the input (Unlit_WF_ShaderSuite, zlib)
 UNLITWF_SHADERS = {
     '2efe527cfcbf0e1408b67463225f552f': 'UnlitWF/WF_UnToon_Transparent_Mask',
     '0b53cf0bcd0f9db4fa9d1297d255d06d': 'UnlitWF/WF_UnToon_Transparent_MaskOut',
@@ -3775,7 +3680,7 @@ UNLITWF_SHADERS = {
     '7240817400475dd41b084e32b1264d6f': 'UnlitWF/UnToon_PowerCap_Outline/WF_UnToon_PowerCap_Outline_TransCutout',
     '90cac9ec3b2a7524eb99b36ab87f25f1': 'UnlitWF/Custom/WF_UnToon_Custom_OffsetOutline_Opaque',
 }
-# lilToon's shaders that draw outlines, by GUID (the .meta files of lilxyzw/lilToon, MIT licence)
+# lilToon outline shaders by GUID (lilxyzw/lilToon .meta files, MIT licence)
 LILTOON_OUTLINE = {
     'efa77a80ca0344749b4f19fdd5891cbe': 'Hidden/lilToonOutline',
     '3b4aa19949601f046a20ca8bdaee929f': 'Hidden/lilToonCutoutOutline',
@@ -3799,7 +3704,7 @@ LILTOON_OUTLINE = {
 }
 UNITY_QUEUES = {'background': 1000, 'geometry': 2000, 'alphatest': 2450, 'geometrylast': 2500, 'transparent': 3000,
                 'overlay': 4000}
-MODE_QUEUE = {'OPAQUE': 2000, 'MASK': 2450, 'BLEND': 3000}  # what hypr3d takes a material's queue for without one
+MODE_QUEUE = {'OPAQUE': 2000, 'MASK': 2450, 'BLEND': 3000}  # hypr3d's default queue per alpha mode
 STENCIL_COMPS = ('always', 'never', 'less', 'equal', 'lequal', 'greater', 'notequal', 'gequal', 'always')  # by value
 STENCIL_OPS = ('keep', 'zero', 'replace', 'incrsat', 'decrsat', 'invert', 'incrwrap', 'decrwrap')
 STENCIL_WORDS = {'lessequal': 'lequal', 'greaterequal': 'gequal', 'disabled': 'always', 'incr': 'incrsat',
@@ -3816,23 +3721,21 @@ class MatInfo:
         self.tex_xf = ((1.0, 1.0), (0.0, 0.0))  # Unity's tiling and offset
         self.color = (1.0, 1.0, 1.0, 1.0)  # linear
         self.mode = 'OPAQUE'  # OPAQUE, MASK, BLEND
-        self.alpha = None  # alpha from elsewhere than the texture: (image file, 'R' or 'A'), or '' for none
+        self.alpha = None  # alpha not from the main texture: (image, 'R'|'A'), '': none
         self.cutoff = 0.5
         self.double = False
         self.emit = (0.0, 0.0, 0.0)  # linear, may go over 1
         self.emit_tex = None
         self.emit_xf = ((1.0, 1.0), (0.0, 0.0))
-        self.invert = None  # the alpha is 1 - its source's times this (UnlitWF's _AL_InvMaskVal)
-        # what the glTF material's extras carry for hypr3d (patch_materials): Unity's render queue when it is not
-        # the one of the material's alpha mode, the stencil test, the toon outline, the back faces, the light clamp
+        self.invert = None  # alpha = 1 - source alpha * this (_AL_InvMaskVal)
+        # glTF extras for hypr3d (patch_materials); queue only when it differs from the alpha mode's
         self.queue = -1
-        self.stencil = None  # {ref, read, write, comp, pass, fail, zfail}, and 'again': {comp, alpha} (MaskOut_Blend)
-        self.outline = None  # {width (m), space, color (linear), base, tint, mask: (image, channel), shift (m), fix, lit,
-        #                       tex: (image, (scale, offset), blend or None: times it)}
-        self.back = None  # {color (linear), tex: image or None (the main texture), xf}
-        self.light = None  # (min, max, chroma): UnlitWF's _GL_LevelMin, _GL_LevelMax, _GL_BlendPower
-        self.toon = None  # {shade: [r, g, b] (linear), base: times the base colour, tex: image or None, lo, hi, strength}
-        self.matcap = None  # {tex: image, color: [r, g, b, amount], mode: add|multiply|mix|median, lit}
+        self.stencil = None  # {ref, read, write, comp, pass, fail, zfail[, again]}
+        self.outline = None  # from outline(); widths in m, colours linear
+        self.back = None  # {color (linear), tex (None: main texture), xf}
+        self.light = None  # (_GL_LevelMin, _GL_LevelMax, _GL_BlendPower)
+        self.toon = None  # from toon(): {shade, base, tex, lo, hi, strength}
+        self.matcap = None  # {tex, color, mode: add|multiply|mix|median, lit}
 
     def key(self):
         return (self.name, self.tex, self.tex_xf, self.color, self.mode, self.alpha, self.cutoff, self.double,
@@ -3890,10 +3793,7 @@ class Materials:
         return self._shaders[g]
 
     def unlitwf_double(self, shader, low, fl, blend):
-        """whether an UnlitWF material shows both faces: its transparent shaders draw the back faces (a MAIN_BACK pass)
-        and then the front ones; the others cull by _CullMode, which defaults to the shader's (0 in the cutout
-        ones and the mobile transparent ones, else 2). Without the shader or its name, a see-through one is taken for
-        one of the transparent shaders"""
+        """UnlitWF two-sidedness: transparent shaders draw MAIN_BACK too; others by _CullMode (shader default)"""
         self.shader_name(shader)
         src = self._shader_src.get(ref(shader)[1] or '')
         if src:
@@ -3932,8 +3832,7 @@ class Materials:
         return a.file
 
     def props(self, guid, fid, depth=0):
-        """(name, shader, keywords, render queue, tags, textures, numbers, colours) of a material, over its
-        parent's when it is a variant"""
+        """(name, shader, keywords, queue, tags, textures, floats, colours), over the parent's for a variant"""
         uf = self.db.yaml(guid)
         if uf is None or uf.binary:
             return None
@@ -4012,15 +3911,15 @@ class Materials:
                 m.color = (to_linear(c[0]), to_linear(c[1]), to_linear(c[2]), c[3])
                 break
         m.mode = self.alpha_mode(low, kw, rq, tags, fl, col)
-        # UnlitWF, also by its property names when its shader is not in the input
+        # UnlitWF, or its property names when the shader is not in the input
         wf = 'unlitwf' in low.replace('_', '') or not sh and any(k in fl for k in ('_AL_Source', '_GL_LevelMin',
                                                                                     '_ES_Enable'))
-        blend = m.mode == 'BLEND'  # (before the alpha source may make it opaque)
+        blend = m.mode == 'BLEND'  # before unlitwf_alpha may make it opaque
         if m.mode != 'OPAQUE' and wf:
             self.unlitwf_alpha(m, tex, fl)
         if m.mode != 'OPAQUE' and m.tex and m.alpha is None and not self.tex_meta.get(m.tex, (0, True))[1] and \
                 m.color[3] >= 0.999:
-            m.mode = 'OPAQUE'  # the texture's alpha is switched off and nothing else is see-through
+            m.mode = 'OPAQUE'  # texture alpha unused, nothing else see-through
         m.cutoff = min(max(fl.get('_Cutoff', fl.get('_Clipping_Level', fl.get('_AlphaCutoff', 0.5))), 0.0), 1.0)
         m.double = int(round(fl.get('_Cull', fl.get('_CullMode', fl.get('_Culling', 2.0))))) == 0
         if wf:
@@ -4028,7 +3927,7 @@ class Materials:
         on = '_EMISSION' in kw or 'mtoon' in low or any(
             fl.get(k, 0.0) > 0.5 for k in ('_EnableEmission', '_UseEmission', '_EmissionEnabled', '_UseEmissive'))
         level = 1.0
-        if wf:  # UnlitWF's emission ("emissive scroll"): constant, or a wave
+        if wf:  # UnlitWF emissive scroll: constant or a wave
             on = on or '_ES_ENABLE' in kw or fl.get('_ES_Enable', 0.0) > 0.5
             off = fl.get('_ES_LevelOffset', 0.0)
             level = min(max(1 + off, 0.0), 1.0) if int(fl.get('_ES_Shape', 3)) == 3 else min(max(0.5 + off, 0.0), 1.0)
@@ -4046,9 +3945,7 @@ class Materials:
         m.toon, m.matcap = self.toon(shader, low, kw, tex, fl, col, wf)
         if wf:
             m.back = self.unlitwf_back(m, kw, tex, fl, col)
-            # the light's brightness kept between these (UnlitWF's anti-glare), its colour this saturated; the
-            # minimum moved towards 0 or 1 by _GL_LevelTweak (newer UnlitWF), then taken from gamma to linear
-            # (calcLightColorFrag's GammaToCurrentColorSpaceExact)
+            # anti-glare (min, max, saturation): min shifted by _GL_LevelTweak, gamma to linear (calcLightColorFrag)
             lo, tw = fl.get('_GL_LevelMin', 0.125), fl.get('_GL_LevelTweak', 0.0)
             lo = lo + (0.0 - lo) * -tw if tw < 0 else lo + (1.0 - lo) * tw
             m.light = (round(to_linear(min(max(lo, 0.0), 1.0)), 4), round(min(max(fl.get('_GL_LevelMax', 0.8), 0.0), 1.0), 4),
@@ -4056,12 +3953,10 @@ class Materials:
         return m
 
     def unlitwf_alpha(self, m, tex, fl):
-        """UnlitWF's alpha (WF_UnToon_Function.cginc pickAlpha): the main texture's and colour's (_AL_Source 0) or
-        a mask texture's red or alpha (1, 2) alone, times _AL_Power when blending; an empty mask is Unity's
-        default white, so the material is opaque (eyes drawn with the stencil mask shaders often are)"""
+        """UnlitWF pickAlpha: main alpha or a mask's R / A (_AL_Source 1, 2; none: white), times _AL_Power if blending"""
         src = int(fl.get('_AL_Source', 0))
         power = min(max(fl.get('_AL_Power', 1.0), 0.0), 2.0) if m.mode == 'BLEND' else 1.0
-        inv = fl.get('_AL_InvMaskVal', 0.0) > 0.5  # 1 - the source's alpha: baked into the texture (Build)
+        inv = fl.get('_AL_InvMaskVal', 0.0) > 0.5  # inverted alpha, baked into the texture (Build)
         if src in (1, 2):
             t = tex.get('_AL_MaskTex')
             mask = self.image(t[0]) if t and ref(t[0])[0] else None
@@ -4092,7 +3987,6 @@ class Materials:
 
     @staticmethod
     def shader_default(src, prop, default):
-        """a property's default in a shader's source"""
         m = re.search(r'^[ \t]*(?:\[[^\]\n]*\][ \t]*)*%s\s*\(\s*"[^"]*"\s*,(?:[^()\n]|\([^()\n]*\))*\)\s*=\s*(-?[\d.]+)'
                       % re.escape(prop), src, re.M)
         return float(m.group(1)) if m else default
@@ -4111,10 +4005,7 @@ class Materials:
         return -1
 
     def stencil(self, shader, fl):
-        """the stencil test and write of a material's shader: from the Stencil blocks of its passes (but outlines,
-        shadows and such), the first of them and another test a later pass makes (UnlitWF's MaskOut_Blend draws what
-        its mask hides again, fainter: 'again'); or, the shader not in the input, UnlitWF's by its name and lilToon's
-        and Poiyomi's by their material properties. None: it neither tests nor writes"""
+        """first Stencil block outside outline / shadow passes, 'again': a later pass's other test; None: no stencil"""
         src = self.shader_source(shader)
 
         def value(tok, default):
@@ -4181,8 +4072,7 @@ class Materials:
         return s
 
     def outline(self, shader, low, kw, tex, fl, col):
-        """the toon outline a material's shader draws (an inverted hull): UnlitWF's (_TL_*), lilToon's, Poiyomi's
-        or MToon's; None: none"""
+        """the inverted hull toon outline of UnlitWF (_TL_*), lilToon, Poiyomi or MToon; None: none"""
         name = self.known_shader(shader)
         nlow = name.lower()
         src = self.shader_source(shader)
@@ -4196,7 +4086,7 @@ class Materials:
             return linear_rgba(col.get(key, default))
 
         def ctex(key, uv=None, blend=None):
-            """the line's colour texture: (image, its tiling, how far the colour goes towards it; None: times it)"""
+            """the line's colour texture: (image, tiling, blend toward it; None: multiplied)"""
             t = tex.get(key)
             f = self.image(t[0]) if t and ref(t[0])[0] else None
             if not f:
@@ -4209,8 +4099,7 @@ class Materials:
             w = max(fl.get('_TL_LineWidth', 0.05), 0.0) * 0.01
             # the EDGE type's lines are pushed back ten widths, so only a silhouette's show
             back = fl.get('_TL_Z_Shift', 0.0) + (w * 10 if fl.get('_TL_LineType', 0.0) > 0.5 else 0.0)
-            # its custom colour texture, mixed in by _TL_BlendCustom, on the main texture's uv (UnlitWF's
-            # WF_TEX2D_OUTLINE_COLOR); white when it has none
+            # _TL_CustomColorTex mixed in by _TL_BlendCustom on the main uv (WF_TEX2D_OUTLINE_COLOR); white if none
             custom = min(max(fl.get('_TL_BlendCustom', 0.0), 0.0), 1.0)
             line = color('_TL_LineColor', (0.1, 0.1, 0.1, 1))
             ct = ctex('_TL_CustomColorTex', tex.get('_MainTex'), round(custom, 4)) if custom > 0 else None
@@ -4223,7 +4112,7 @@ class Materials:
         g = ref(shader)[1] or ''
         if g in LILTOON_OUTLINE or 'liltoon' in nlow and 'outline' in nlow:
             w = max(fl.get('_OutlineWidth', 0.08), 0.0) * 0.01
-            # its colour: _OutlineTex (often the main texture) times _OutlineColor (lilToon's OVERRIDE_OUTLINE_COLOR)
+            # colour: _OutlineTex (often the main texture) times _OutlineColor (lilToon's OVERRIDE_OUTLINE_COLOR)
             return {'width': round(w, 6), 'space': 'object', 'color': color('_OutlineColor', (0.6, 0.56, 0.73, 1)),
                     'mask': mask('_OutlineWidthMask'), 'shift': round(-fl.get('_OutlineZBias', 0.0), 5) + 0.0,
                     'fix': [round(min(max(fl.get('_OutlineFixWidth', 0.5), 0.0), 1.0), 4), 1.0],
@@ -4236,8 +4125,7 @@ class Materials:
             if fl.get('_OutlineFixedSize', 1.0) > 0.5:
                 fix = [round(min(max(fl.get('_OutlineFixWidth', 0.5), 0.0), 1.0), 4),
                        round(max(fl.get('_OutlinesMaxDistance', 1.0), 0.0), 4)]
-            # its colour: _OutlineTexture (on the first uv set) times the line's colour, times the base as much as
-            # _OutlineTintMix says (Poiyomi's outline fragment)
+            # colour: _OutlineTexture (first uv set) times the line colour, tinted toward the base by _OutlineTintMix
             return {'width': round(w, 6), 'space': 'world' if fl.get('_OutlineSpace', 0.0) > 0.5 else 'object',
                     'color': color('_LineColor', (1, 1, 1, 1)), 'tint': round(fl.get('_OutlineTintMix', 0.0), 4),
                     'mask': mask('_OutlineMask', fl.get('_OutlineMaskChannel', 0.0)), 'fix': fix,
@@ -4256,19 +4144,14 @@ class Materials:
                    'lit': round(lit, 4) if ten or int(fl.get('_OutlineColorMode', 0)) == 1 else 0.0}
             if mode == 2 and ten:  # of the screen's height, however far
                 out['width'], out['max'] = round(w * 2, 6), 1e6
-            elif mode == 2:  # in clip space, up to so far away
+            elif mode == 2:  # clip space, up to a max distance
                 out['max'] = round(max(fl.get('_OutlineScaledMaxDistance', 1.0), 0.0), 4)
             return out
         return None
 
     def toon(self, shader, low, kw, tex, fl, col, wf):
-        """a material's toon shading and matcap, as hypr3d draws them (MatInfo's toon and matcap): UnlitWF's toon shade
-        and matcap (_TS_*, _HL_*: WF_UnToon_Function.cginc's drawToonShade and calcMatcapColor), lilToon's first
-        shadow and matcap (lil_common_frag.hlsl), Poiyomi's Multilayer Math (lilToon's) and Flat lighting and its
-        first matcap, MToon's (0.x: MToonCore.cginc; MToon10: VRMC_materials_mtoon). The shade is lit by the sun as
-        the lit colour is, from where N·L is lo (all shade) to hi (all lit); a toon step on half-Lambert (N·L / 2 + 1/2,
-        as lilToon and UnlitWF have it) is taken to N·L. UnlitWF without its toon shade and Poiyomi's Flat are lit
-        the same all round (lo = hi = -1). (None, None): neither"""
+        """toon shade and matcap (MatInfo.toon, .matcap) as UnlitWF, lilToon, Poiyomi and MToon 0.x / 10 compute them;
+        the shade spans N·L lo (all shade) to hi (all lit), lo = hi = -1: lit evenly. (None, None): neither"""
         name = self.known_shader(shader)
         nlow = name.lower()
 
@@ -4282,7 +4165,7 @@ class Materials:
         def clamp(x, lo=0.0, hi=1.0):
             return min(max(x, lo), hi)
 
-        def step(lo, hi):  # N·L from where it's all shade to where it's all lit
+        def step(lo, hi):  # N·L range from all shade to all lit
             return round(lo, 4), round(max(hi, lo + 0.001), 4)
 
         def halfstep(lo, hi):  # from half-Lambert's
@@ -4292,12 +4175,11 @@ class Materials:
         shade = cap = None
         flat = {'shade': [1.0, 1.0, 1.0], 'base': True, 'tex': None, 'lo': -1.0, 'hi': -1.0, 'strength': 1.0}
         if wf:
-            # UnlitWF's light has no N·L in it (calcLightColorVertex: the lights' colours and the ambient's), so
-            # without its toon shade it's lit the same all round
+            # UnlitWF's light has no N·L in it (calcLightColorVertex), so without its toon shade it is flat
             shade = flat
             if '_TS_ENABLE' in kw or not kw and fl.get('_TS_Enable', 0.0) > 0.5:
-                # the colour times 1st / base, _TS_Power of the way there; UnlitWF weakens it as the other light gets
-                # stronger (calcShadowPower), to about 3/4 under hypr3d's sun and sky, unless _TS_FixContrast
+                # colour times 1st / base, _TS_Power of the way; calcShadowPower weakens it to about 3/4 under hypr3d's
+                # sun and sky, unless _TS_FixContrast
                 fix = '_TS_FIXC_ENABLE' in kw or fl.get('_TS_FixContrast', 0.0) > 0.5
                 p = clamp(fl.get('_TS_Power', 1.0), 0.0, 2.0) * (1.0 if fix else 0.75)
                 first, base = color('_TS_1stColor', (0.81, 0.81, 0.9, 1)), color('_TS_BaseColor', (1, 1, 1, 1))
@@ -4366,8 +4248,7 @@ class Materials:
         return shade, cap
 
     def unlitwf_back(self, m, kw, tex, fl, col):
-        """UnlitWF's back faces (_BK_*): its back texture (white when empty; often the main one) times its colour, in
-        place of the main texture and colour"""
+        """UnlitWF's back faces (_BK_*): back texture (white if empty) times its colour, in place of the main ones"""
         if not ('_BK_ENABLE' in kw or not kw and fl.get('_BK_Enable', 0.0) > 0.5):
             return None
         t = tex.get('_BK_BackTex')
@@ -4441,8 +4322,7 @@ class Materials:
         return None
 
     def state_material(self, state, r, k):
-        """the MatInfo of what a renderer's slot k shows (Analysis.material_state's (material key, property changes));
-        None: the model's own material"""
+        """MatInfo for renderer slot k's material_state (material key, property changes); None: the model's own"""
         mk, over = state
         fi = r.fbx
         if mk is None:
@@ -4515,8 +4395,7 @@ class Materials:
 # ---------------------------------------------------------------- unpacked prefabs
 
 def adopt(db, av):
-    """GameObjects of the prefab's own that stand for a model's objects (an unpacked prefab): the
-    renderers that draw a model's mesh, their bones and the rest by name"""
+    """bind an unpacked prefab's own GameObjects to model objects: mesh renderers, their bones, the rest by name"""
     fis = {}
     nfbx = [0]
 
@@ -4591,7 +4470,7 @@ def adopt(db, av):
             bg = b.go if isinstance(b, Obj) else None
             if bg is not None and id(bg) in av.inside:
                 hits = [x for x in fi.names.get(str(bg.data.get('m_Name', '')), []) if x not in fi.gos]
-                # a bone may share its name with a mesh (a Skirt bone and a Skirt mesh)
+                # prefer bones over same-named meshes (a Skirt bone and a Skirt mesh)
                 hits.sort(key=lambda x: (x in info.mesh, info.kind(x) not in ('LimbNode', 'Limb')))
                 if hits:
                     bind(fi, bg, hits[0])
@@ -4622,25 +4501,13 @@ def adopt(db, av):
 
 # ---------------------------------------------------------------- Modular Avatar
 #
-# What Modular Avatar (1.18) does to the hierarchy when VRChat builds the avatar, in its order: Merge Armature
-# (an outfit's bones join the avatar's, its meshes are weighted to the avatar's bones and the bones left over are
-# removed), Bone Proxy, Move To and the PhysBone Blockers they leave. It runs on a copy of the hierarchy; the
-# Blender scene is built as the files have it, with every object where MA leaves it, and the GLB gets MA's
-# hierarchy afterwards.
+# Modular Avatar (1.18) build passes, in order: Scale Adjuster, Merge Armature, Bone Proxy, Move To, Replace Object,
+# PhysBone Blocker. They run on a copy: Blender keeps the files' hierarchy with objects placed as MA leaves them; the
+# GLB gets MA's hierarchy.
 
-# components hypr3d has no use for: Visible Head Accessory keeps an object in VRChat's first person view (hypr3d draws
-# the avatar in third person only), Mesh Settings sets the light probe anchor and the bounds of meshes (hypr3d lights
-# the avatar by one probe where it stands and never culls its meshes)
+# no use here: Visible Head Accessory (VRChat's first person view), Mesh Settings (light probe anchor, mesh bounds)
 MA_QUIET = ('VisibleHeadAccessory', 'MeshSettings')
-# of MA_OTHER, these have nothing to do here either: Remove Vertex Color (the GLB has no vertex colours), Sync Parameter
-# Sequence (parameter order across PC and Quest uploads), VRChat Settings and MMD Layer Control (VRChat's MMD world
-# handling), Rename Collision Tags (contacts, which hypr3d does not have), Move Independently (an editor tool), Convert
-# Constraints (it turns Unity's constraints into VRChat's, and this tool converts neither kind) and World Scale Object
-# (it keeps an object at the world's scale while a VRChat player scales the avatar; hypr3d scales an avatar only as
-# avatar_height asks, and then all of it). World Fixed Object is converted: MA moves the object, as it is at rest, to
-# a root its constraint holds at the world's origin (WorldFixedObjectProcessor); the settings file's "fixed" has
-# hypr3d hold it in the world where its rest pose was when the avatar appeared (at the world's start, as a VRChat
-# world's origin usually is)
+# the rest of MA_OTHER does nothing here either; World Fixed Object is converted (self.fixed)
 MA_WHY = {}
 
 
@@ -4669,12 +4536,12 @@ class ModularAvatar:
         self.humans = {id(g) for g in human.values()}
         self.deleted = set()
         self.retarget = {}  # id(merged bone) -> the bone its weights go to
-        self.dead = set()  # ids of the PhysBone components MA removes as duplicates
+        self.dead = set()  # PhysBones MA removes as duplicates
         self.blocks = {}  # id(GameObject) -> the PhysBone Blocker tips under it
         self.vparent = {}  # id(GameObject a Bone Proxy moved) -> its new parent
-        self.bound = {}  # id(bone VRCFury linked) -> its world matrix when its meshes were given the avatar's bone
-        self.replaced = {}  # Replace Object: id(object or component replaced) -> what replaced it
-        self.db = {}  # MA's bone database: id(bone) -> merged (True) or kept (False), in the order added
+        self.bound = {}  # id(bone VRCFury linked) -> its matrix at rebinding
+        self.replaced = {}  # Replace Object: id(replaced) -> replacement
+        self.db = {}  # BoneDatabase: id(bone) -> True merged / False kept
         self.counts = {'merged': 0, 'removed': 0, 'proxies': 0, 'moves': 0, 'duplicates': 0, 'replaced': 0}
         self._mangled = 0
         comps = {}
@@ -4684,12 +4551,11 @@ class ModularAvatar:
                 if k:
                     comps.setdefault(k, []).append(c)
         self.comps = comps
-        # World Fixed Objects: held in the world (Settings' "fixed")
+        # World Fixed Objects: held where they rested when the avatar appeared (settings "fixed")
         self.fixed = [g for g in av.gos if id(g) in av.inside and any(
             c.cls == 114 and MA_OTHER.get(c.script()[1] or '') == 'WorldFixedObject' for c in g.comps)]
         self.pbblock = {id(c.go) for c in comps.get('PBBlocker', [])}
-        # Scale Adjuster, the first thing MA does to the hierarchy: the meshes weighted to its bone are weighted to a
-        # child of it scaled so (in the bone's axes) instead, and the bone's own children keep their size (apply())
+        # Scale Adjuster (MA's first pass): bone's mesh weights move to a scaled child; its children keep their size
         self.scales = {}
         for c in comps.get('ScaleAdjuster', []):
             s = Vector(vec3(c.data.get('m_Scale'), (1.0, 1.0, 1.0)))
@@ -4817,8 +4683,7 @@ class ModularAvatar:
             stack += self.kids[id(x)]
 
     def objref(self, r, now=False):
-        """AvatarObjectReference.Get: the GameObject a reference names (MA resolves them before it changes anything;
-        now: again, for one whose object is gone)"""
+        """AvatarObjectReference.Get (MA resolves before changing anything); now: a deleted target is found by path"""
         r = dictof(r)
         path = r.get('referencePath')
         if not isinstance(path, str) or not path:
@@ -4881,7 +4746,7 @@ class ModularAvatar:
 
     def merge_armatures(self, merges, proxies):
         av = self.av
-        self.pb_at = {}  # physBoneByRootBone: the PhysBone that starts at a bone, the last one found
+        self.pb_at = {}  # physBoneByRootBone: last PhysBone rooted at a bone
         for g in av.gos:
             for c in g.comps:
                 if is_physbone(c):
@@ -4916,8 +4781,7 @@ class ModularAvatar:
             done.add(id(m))
         for m in merges:
             topo(m)
-        # what has to stay: bone proxies and their targets, and every bone a PhysBone, collider, contact or
-        # constraint names
+        # kept bones: Bone Proxies, their targets, and bones a PhysBone, collider, contact or constraint names
         for p in proxies:
             self.retain(p.go)
             self.retain(self.proxy_target.get(id(p)))
@@ -4931,7 +4795,7 @@ class ModularAvatar:
                 elif not is_constraint(c):
                     continue
                 self.retain_refs(c)
-        # and a mesh's root bone that is off its parent, or scaled the other way
+        # also mesh root bones offset from their parent or scaled unlike it
         for r in av.renderers:
             rb = r.data.get('m_RootBone') if r.cls == 137 else None
             g = rb.go if isinstance(rb, Obj) else None
@@ -4973,7 +4837,7 @@ class ModularAvatar:
         self.prune_physbones()
 
     def rmerge(self, m, src, newp, zip_):
-        """RecursiveMerge: src goes under newp; if zipping, its children go under newp's children of their names"""
+        """RecursiveMerge: src goes under newp; if zipping, its children go under newp's same-named ones"""
         if src is newp:
             return
         if zip_:
@@ -5015,7 +4879,7 @@ class ModularAvatar:
             self.rmerge(m, child, to, zip2)
 
     def prune_physbones(self):
-        """PruneDuplicatePhysBones: an outfit's copy of a PhysBone the avatar already has on that bone goes"""
+        """PruneDuplicatePhysBones: drops outfit PhysBones the avatar has on the same bone"""
         def origin(g):
             while g is not None and id(g) in self.added:
                 g = self.parent[id(g)]
@@ -5036,12 +4900,11 @@ class ModularAvatar:
                     self.retain(obj)
 
     def unknown(self, g):
-        """does a bone have a component MA does not remove with it (anything but a Transform or an MA component)"""
+        """has a component besides Transforms and MA's (MA keeps such bones)"""
         return any(c.cls not in TRANSFORMS and id(c) not in self.dead and not ma_kind(c) for c in g.comps)
 
     def retarget_meshes(self):
-        """RetargetMeshes: meshes weighted to merged bones are weighted to the bones they merged into, and the
-        merged bones that nothing else needs go, their children moving to those bones"""
+        """RetargetMeshes: weights move to merge targets; unneeded merged bones go, children reparented"""
         for k, v in self.db.items():
             d = self.dest(self.byid[k]) if v else None
             if d is not None:
@@ -5149,9 +5012,7 @@ class ModularAvatar:
     # ---- Replace Object
 
     def replace_objects(self):
-        """ReplaceObjectPass: the component's object takes its target's place (its parent, children and place among
-        its siblings, where the world has it), and the target goes; what named the target or its components names the
-        replacement or its components of that type (the n-th of the n-th), animations included"""
+        """ReplaceObjectPass: the object takes its target's place and references, animations included"""
         reps = {}
         for c in self.comps['ReplaceObject']:
             t, g = self.ref.get(id(c)), c.go
@@ -5180,10 +5041,10 @@ class ModularAvatar:
             self.parent[id(t)] = None
             self.deleted.add(id(t))
             self.retarget[id(t)] = g
-            self.bound[id(t)] = self.U[id(g)].copy()  # its meshes go to the replacement as they were bound
+            self.bound[id(t)] = self.U[id(g)].copy()  # t's meshes rebind to g at g's pose
             self.replaced[id(t)] = g
             seen = {}
-            for comp in t.comps:  # its components: the replacement's of their type, in their order
+            for comp in t.comps:  # n-th component of a type -> g's n-th
                 key = (comp.cls, comp.script())
                 n = seen.get(key, 0)
                 seen[key] = n + 1
@@ -5215,7 +5076,7 @@ class ModularAvatar:
             self.human[k] = rep.get(id(g), g)
 
     def swap(self, pr):
-        """a property as animations reach it once Replace Object has run; None if the replacement has no such"""
+        """an animated property redirected by Replace Object; None if the replacement lacks it"""
         if self.replaced and id(pr[1]) in self.replaced:
             r = self.replaced[id(pr[1])]
             if pr[0] == 's' and pr[2] not in self.av.shape_names(r) or pr[0] == 'c':
@@ -5244,9 +5105,7 @@ class ModularAvatar:
     # ---- the GLB
 
     def apply(self, js, binc):
-        """the exported GLB as MA leaves the avatar: nodes under their new parents (where they are stays), skins
-        weighted to the bones their bones merged into (and scaled by the Scale Adjusters), and the merged bones that
-        went removed"""
+        """applies MA's changes to the exported GLB: parents, skin joints (and Scale Adjusters), removed bones"""
         av = self.av
         moved = [g for g in av.gos if id(g) not in self.deleted and self.parent[id(g)] is not (
             g.parent if g is not self.root else None)]
@@ -5274,7 +5133,7 @@ class ModularAvatar:
         gone = {node_of[k] for k in self.deleted if k in node_of}
 
         def anchor(g):
-            """the node of g, or of the nearest of its parents with one, as MA leaves them"""
+            """node of g or its nearest ancestor, after MA"""
             while g is not None:
                 if id(g) in self.deleted:
                     g = self.retarget[id(g)]
@@ -5333,8 +5192,7 @@ class ModularAvatar:
                 nodes[i]['rotation'] = [q.x, q.y, q.z, q.w]
             if any(abs(v - 1) > 1e-9 for v in s):
                 nodes[i]['scale'] = list(s)
-        # (b) skin joints on merged bones go to the bones they merged into; the inverse bind matrices change so
-        # that the mesh stays where it is
+        # (b) skin joints move to merge targets; inverse bind matrices keep meshes in place
         out = bytearray(binc)
         for sk in js.get('skins', []):
             joints = sk.get('joints', [])
@@ -5350,12 +5208,12 @@ class ModularAvatar:
                     if m < 0:
                         continue
                     d = self.retarget[id(g)]
-                    # where MA's retargeting left the bone: moving with the bone it merged into since then
+                    # bone pose at MA's retargeting, moved with its target since
                     V = self.bound.get(id(g))
                     if V is None:
                         V = self.U[id(d)] @ self.U0[id(d)].inverted_safe() @ self.U0[id(g)]
                     Lc = FLIP @ V @ self.U[id(g)].inverted_safe() @ FLIP
-                if id(g) in self.scales:  # first scaled about the bone, in its axes, as the Scale Adjuster's proxy does
+                if id(g) in self.scales:  # scaled in the bone's axes, like MA's proxy
                     Ug = self.U[id(g)]
                     X = FLIP @ Ug @ Matrix.Diagonal(self.scales[id(g)]).to_4x4() @ Ug.inverted_safe() @ FLIP
                     Lc = X if Lc is None else Lc @ X
@@ -5375,7 +5233,7 @@ class ModularAvatar:
             sk.pop('skeleton', None)
         if js.get('buffers'):
             js['buffers'][0]['byteLength'] = len(out)
-        # (c) the merged bones that went
+        # (c) drop removed bones' nodes
         if gone:
             keep = [i for i in range(len(nodes)) if i not in gone]
             new_index = {o: k for k, o in enumerate(keep)}
@@ -5412,48 +5270,33 @@ class ModularAvatar:
 
 # ---------------------------------------------------------------- VRCFury
 #
-# What VRCFury does when VRChat builds the avatar, as far as hypr3d carries it. VRCFury runs after Modular Avatar (NDMF's
-# build comes first), so it sees the hierarchy MA leaves. A VRCFury component holds one feature as a [SerializeReference]
-# ("content", or a list in the older "config.features") kept in the component's "references" block. This emulates what
-# VRCFury does with them. It was written after reading VRCFury's source for its serialized format and its behaviour,
-# and it contains none of VRCFury's code.
-#
-# - Armature Link: an outfit's bones ("Link From") are linked to an avatar bone ("Link To": a humanoid bone, falling back
-#   to the ones above it, an object or a path), and with "recursive" their children to the avatar's children of the
-#   same names, less a suffix. Each linked bone may be snapped onto the avatar's, goes under it, and the meshes weighted
-#   to it are weighted to the avatar's bone instead (not for bones a PhysBone moves); what nothing uses is removed.
-# - Toggle: a menu toggle (its name is a menu path) that turns objects on or off, sets shape keys and plays clips,
-#   exclusive with the toggles that share a tag. An object a toggle turns on rests off, and one it turns off rests on.
-# - Full Controller: an FX controller, menus (under a prefix) and parameters merged in, the parameters renamed apart
-#   unless global; animation paths are looked up from the component's object up to the avatar's root.
-# - Blend Shape Link: meshes whose shape keys follow a base mesh's (by name, loosely), at rest and when animated.
-# - Apply During Upload, Delete During Upload, and the older Modes, Object State and Bone Constraint features, as
-#   VRCFury upgrades them.
+# VRCFury's build-time features as far as hypr3d shows them, applied after Modular Avatar. Each component holds one
+# feature as a [SerializeReference] ("content", or the older "config.features" list) in its "references" block. Written
+# from VRCFury's format and behaviour; contains none of its code.
 
 VRCF_GUID = 'd9e94e501a2d4c95bff3d5601013d923'  # the VRCFury component (VF.Model.VRCFury)
 VRCF_DONE_ORDER = ('ArmatureLink', 'Toggle', 'FullController', 'BlendShapeLink', 'ApplyDuringUpload',
                    'DeleteDuringUpload', 'GestureDriver', 'SenkyGestureDriver', 'Blinking', 'Visemes', 'Puppet',
                    'MoveMenuItem', 'ReorderMenuItem')
 VRCF_DONE = set(VRCF_DONE_ORDER)
-# features that change nothing hypr3d shows: left out without a word
+# features with no visible effect in hypr3d: skipped silently
 VRCF_QUIET = {
     # how VRChat builds, draws and syncs the avatar
     'AnchorOverrideFix', 'AnchorOverrideFix2', 'BoundingBoxFix', 'BoundingBoxFix2', 'BlendshapeOptimizer',
     'DirectTreeOptimizer', 'FixWriteDefaults', 'MakeWriteDefaultsOff', 'MakeWriteDefaultsOff2', 'Slot4Fix',
     'UnlimitedParameters', 'DescriptorDebug', 'Gizmo', 'SetIcon', 'OverrideMenuSettings', 'MmdCompatibility',
-    # VRChat's first person view and eye tracking (hypr3d draws the avatar in third person only, eyes by bones)
+    # VRChat's first person view and eye tracking
     'CrossEyeFix', 'CrossEyeFix2', 'ShowInFirstPerson', 'HeadChopHead',
-    # the avatar's scale menu (hypr3d: avatar_height), toes and talking (no tracking or voice here)
+    # scale menu (hypr3d: avatar_height), toes, talking
     'AvatarScale', 'AvatarScale2', 'Toes', 'Talking',
-    # a PIN code in the menu: hypr3d has none, so every toggle works as if it had been entered
+    # menu PIN lock (toggles act unlocked)
     'SecurityLock', 'SecurityRestricted',
-    # colliders for other players' PhysBones and VRChat's hand colliders (hypr3d has neither)
+    # colliders for other players' PhysBones and VRChat's hands
     'AdvancedCollider',
-    # VRChat's own blinking taken away (said only when no Blinking feature takes its place)
+    # removes VRChat's blinking (warned about only without a Blinking feature)
     'RemoveBlinking',
     'TpsScaleFix', 'SpsOptions'}
-# VRCFury's SenkyGestureDriver, as it builds it: the sign of either hand shows some of its states, and each sign has a
-# lock toggle in an "Emote Lock" menu; states of the eyes stop the blinking
+# SenkyGestureDriver as VRCFury builds it: (hand sign, "Emote Lock" toggle, states); eye states block blinking
 SENKY = ((7, 'Happy', ('eyesHappy', 'mouthHappy')), (6, 'Sad', ('eyesSad', 'mouthSad', 'earsBack')),
          (5, 'Angry', ('eyesAngry', 'mouthAngry', 'earsBack')), (4, 'Tongue', ('mouthBlep',)))
 # why the rest are not converted, where that is not obvious
@@ -5480,8 +5323,7 @@ def is_vrcfury(c):
 
 
 def vrcf_refs(d):
-    """{id: (class, data)} of a component's [SerializeReference] objects: newer Unity keeps them as
-    references: {version: 2, RefIds: [{rid, type: {class, ns, asm}, data}]}, Unity 2019 as {version: 1, <id>: ...}"""
+    """{id: (class, data)} of a component's [SerializeReference] objects (RefIds, or Unity 2019's {id: ...})"""
     refs = dictof(d.get('references'))
     out = {}
     for e in listof(refs.get('RefIds')):
@@ -5495,8 +5337,7 @@ def vrcf_refs(d):
 
 
 def vrcf_deref(x, refs, depth=0):
-    """a value with its references ({rid: n}, or {id: n} in the old layout) replaced by what they name, as
-    {'@class': class, field: value...}; a null or missing reference is None"""
+    """x with references ({rid: n} or {id: n}) resolved to {'@class': ..., field: value}; missing ones None"""
     if depth > 40:
         return None
     if isinstance(x, dict):
@@ -5518,7 +5359,7 @@ _VRCF_FEATURES = {}
 
 
 def vrcf_features(c):
-    """a VRCFury component's features, as VRCFury's upgrades leave them: [{'@class': ..., field: value...}]"""
+    """a VRCFury component's features after its upgrades: [{'@class': ..., field: value...}]"""
     if id(c) not in _VRCF_FEATURES:
         d = c.data
         refs = vrcf_refs(d)
@@ -5534,9 +5375,9 @@ def vrcf_features(c):
 
 
 def vrcf_upgrade(f):
-    """what VRCFury's Upgrade and Migrate steps make of a feature saved by an older version: [features]"""
+    """VRCFury's Upgrade/Migrate of a feature saved by an older version: [features]"""
     cls, v = f['@class'], inum(f.get('version'), -1)
-    if cls == 'Modes':  # every mode a toggle, the modes exclusive
+    if cls == 'Modes':  # each mode becomes an exclusive toggle
         name = _str(f.get('name'))
         tag = 'mode_' + name.replace(' ', '').replace('/', '').strip()
         out = []
@@ -5545,7 +5386,7 @@ def vrcf_upgrade(f):
                                  'saved': f.get('saved'), 'state': dictof(m).get('state'), 'enableExclusiveTag': '1',
                                  'exclusiveTag': tag})
         return out
-    if cls == 'ObjectState':  # objects turned on or off, or deleted, during the upload
+    if cls == 'ObjectState':  # objects toggled or deleted at upload
         acts, out = [], []
         for s in listof(f.get('states')):
             s = dictof(s)
@@ -5573,7 +5414,7 @@ def vrcf_upgrade(f):
                            'enableLockMenuItem': '1', 'lockMenuItem': 'Emote Lock/' + lock, 'enableExclusiveTag': '1',
                            'exclusiveTag': re.match(r'[a-z]+', s).group(0), '@senky': lock})
         return vrcf_upgrade({'@class': 'GestureDriver', 'version': 1, 'gestures': gs})
-    if cls == 'Breathing':  # a toggle, on at first, that goes between breathing in and out
+    if cls == 'Breathing':  # default-on toggle looping breath in/out
         ins, outs = dictof(f.get('inState')), dictof(f.get('outState'))
         if v < 1:
             ins = {'actions': listof(ins.get('actions'))}
@@ -5588,7 +5429,7 @@ def vrcf_upgrade(f):
                                         'blendShapeValue': 100, 'allRenderers': '1'})
         return vrcf_upgrade({'@class': 'Toggle', 'version': 3, 'name': 'Breathing', 'defaultOn': '1', 'state': {
             'actions': [{'@class': 'SmoothLoopAction', 'state1': outs, 'state2': ins, 'loopTime': 5}]}})
-    if cls == 'WorldConstraint':  # a toggle that leaves the object where it is in the world
+    if cls == 'WorldConstraint':  # toggle that drops the object in the world
         return vrcf_upgrade({'@class': 'Toggle', 'version': 3, 'name': _str(f.get('menuPath')), 'state': {
             'actions': [{'@class': 'WorldDropAction', 'obj': f.get('@go')}]}})
     if cls == 'GestureDriver':
@@ -5620,7 +5461,7 @@ def vrcf_upgrade(f):
             else:
                 f['linkTo'] = [{'useBone': '1', 'bone': b, 'useObj': '0', 'obj': None, 'offset': ''}
                                for b in [f.get('boneOnAvatar', 0)] + listof(f.get('fallbackBones'))]
-        # None: decided when it is linked, from whether it is recursive
+        # None: decided at link time (align and auto scale follow recursion)
         f['recursive'] = None if mode == 4 else ('0' if mode == 3 else '1')
         f['@align'] = None if keep == 0 else keep == 2
         f['autoScaleFactor'] = None if scale <= 0 else '0'
@@ -5674,9 +5515,8 @@ def vrcf_upgrade(f):
 
 
 def vrcf_rewrite(rules):
-    """a Full Controller's rewriteBindings as a function of a clip's path (None: nothing to rewrite). Each rule in
-    turn moves the paths at or under its "from" to its "to" (an empty "from" puts every path under "to"; a path that
-    starts with "/" is from the avatar's root and stays), and one marked delete drops the paths it matches (None)"""
+    """rewriteBindings as a path function (None without rules): each rule moves paths at or under "from" to "to" (empty
+    "from": all but "/..." ones); delete rules drop them (None)"""
     rs = []
     for r in listof(rules):
         r = dictof(r)
@@ -5709,14 +5549,11 @@ def vrcf_rewrite(rules):
 
 
 def animated_transforms(an):
-    """the GameObjects whose Transforms the avatar's animations move, as VRCFury's Armature Link finds them before
-    it links (FindAnimatedTransformsService): ({ids moved or turned}, {ids scaled}), from every controller the avatar
-    plays (its own, Modular Avatar's Merge Animators', VRCFury's Full Controllers') and VRCFury's toggle clips. A
-    Transform curve counts by what its name has in it: position, euler (so not the quaternion m_LocalRotation) or
-    scale"""
+    """VRCFury's FindAnimatedTransformsService: ({ids moved or rotated}, {ids scaled}) by any controller or toggle clip;
+    position, euler and scale curves count, not quaternion"""
     db, av = an.db, an.av
     moved, scaled = set(), set()
-    todo = []  # (controller or clip guid, fileID or None for all, base, rewrite)
+    todo = []  # (guid, fileID or None = all, base, rewrite)
     d = av.desc
     if truthy(d.get('customizeAnimationLayers', '0')):
         for l in listof(d.get('baseAnimationLayers')) + listof(d.get('specialAnimationLayers')):
@@ -5802,8 +5639,7 @@ def animated_transforms(an):
 
 
 def vrcf_asset(w):
-    """what one of VRCFury's asset fields (GuidAnimationClip, GuidController, GuidMenu, GuidParams...) names:
-    (guid, fileID; 0 for the file's main object), or None: the reference itself, else its id (guid[:fileID]|path|name)"""
+    """(guid, fileID; 0 = main object) a VRCFury asset field names (objRef, else id "guid[:fileID]|..."), or None"""
     if isinstance(w, dict):
         f, g = ref(w.get('objRef')) if isinstance(w.get('objRef'), dict) else (0, None)
         if g:
@@ -5823,9 +5659,7 @@ def vrcf_path(s):
 
 
 def human_fallbacks(b):
-    """the humanoid bones (HumanBodyBones numbers) an Armature Link falls back to when bone b is not in the avatar:
-    for a finger bone its lower segments, the same segments of the fingers nearest it, then the hand; for any other
-    bone the one above it, and so on up to the hips"""
+    """fallbacks for missing bone b: a finger's lower segments, nearest fingers, hand; others' parents up to the hips"""
     up = {'Jaw': 'Head', 'LeftEye': 'Head', 'RightEye': 'Head', 'Head': 'Neck', 'Neck': 'UpperChest',
           'UpperChest': 'Chest', 'Chest': 'Spine', 'Spine': 'Hips', 'LeftShoulder': 'UpperChest',
           'RightShoulder': 'UpperChest', 'LeftToes': 'LeftFoot', 'RightToes': 'RightFoot'}
@@ -5851,30 +5685,28 @@ def human_fallbacks(b):
 
 
 class VRCFury:
-    """what VRCFury adds to the menu, the parameters and FX, and the resting state it gives the avatar (applied to
-    the objects' own data, as VRCFury changes the avatar it uploads)"""
+    """VRCFury's menu, parameters, FX rules and resting state (written into the objects' data, as at upload)"""
 
     def __init__(self, an, comps):
         self.an, self.av, self.db = an, an.av, an.db
         self.feats = [(c, f) for c in comps for f in vrcf_features(c)]
         self.declared = {}  # parameter -> (value type, default)
-        # [(test, what it tests, {property: value})], in the order of their FX layers: 'on' (a bool at 1), 'nonzero',
-        # 'slider' (a float: from where the property rests to the value), 'gesture' ((hand, sign, the right hand's
-        # sign of a combo, the lock parameter)), 'puppet' ([(stop, {property: value})] along the float)
+        # [(test, arg, {property: value})] in FX layer order; tests: 'on', 'nonzero', 'slider', 'gesture' (arg (hand,
+        # sign, combo sign, lock)), 'puppet' / 'puppet2' (stops)
         self.rules = []
-        self.drives = []  # [(test, what it tests, {FX float: value})]: Set an FX Float, while a toggle is on
-        self.blocks = []  # [(test, what it tests, 'eyes' | 'mouth')]: Block Blinking and Block Visemes
-        self.named = []  # [(test, what it tests, name)]: what a gesture face is called
+        self.drives = []  # [(test, arg, {FX float: value})]: Set an FX Float
+        self.blocks = []  # [(test, arg, 'eyes'|'mouth')]: Block Blinking/Visemes
+        self.named = []  # [(test, arg, name)]: gesture face names
         self.menu = []  # [(path of menu names, control)]
-        self.merged = []  # [(priority, order, Controller, {its parameter names: the avatar's}, False)]
+        self.merged = []  # [(priority, order, Controller, {param: avatar's}, False)]
         self.links = [(c, f) for c, f in self.feats if f['@class'] == 'ArmatureLink']
         self.skipped = []
-        self.missed = {}  # actions and features that are not converted: kind -> count
+        self.missed = {}  # unconverted kind -> count
         self.blink = None  # Blinking's face: {(renderer, shape key): weight}
         self.visemes = None  # Visemes': {preset: {(renderer, shape key): weight}}
-        self.consonants = None  # and its consonants': {'pp' ... 'rr': {(renderer, shape key): weight}}
-        self.loops = {}  # toggle parameter -> (seconds, {property: value} at one end, at the other): Smooth Loops
-        self.drops = {}  # toggle parameter -> [GameObjects left in the world while it is on]: World Drops
+        self.consonants = None  # {'pp' ... 'rr': {(renderer, shape key): weight}}
+        self.loops = {}  # Smooth Loops: param -> (seconds, props1, props2)
+        self.drops = {}  # World Drops: param -> [objects left in the world]
         others = {}
         for c, f in self.feats:
             k = f['@class']
@@ -5987,7 +5819,7 @@ class VRCFury:
                     out[('t', g, 'm')] = num(a.get('scale'), 1.0)
             elif k in ('FxFloatAction', 'BlockBlinkingAction', 'BlockVisemesAction', 'ResetPhysboneAction',
                        'SmoothLoopAction', 'WorldDropAction'):
-                pass  # extras() has the first three, toggles() the loops and drops; PhysBones settle by themselves
+                pass  # extras() / toggles() handle these; PhysBones settle
             elif count:
                 self.miss('%s action(s) in toggles' % re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', k[:-6] if k.endswith(
                     'Action') else k))
@@ -6005,7 +5837,7 @@ class VRCFury:
             g = self.go(a.get('renderer2'))
             rs = [c for c in g.comps if c.cls in RENDERERS] if g is not None else []
         t = inum(a.get('propertyType'))
-        if t == 4:  # what it is, from the materials: a colour, a tiling and offset, else a number
+        if t == 4:  # infer: colour, tiling/offset (_ST) or number
             t = 3 if name.endswith('_ST') else 1 if any(av.matprop(r, k, name + '.r') is not None for r in rs
                                                          for k in range(len(listof(r.data.get('m_Materials'))))) else 0
         vec = dictof(a.get('valueVector'))
@@ -6049,7 +5881,7 @@ class VRCFury:
             self.blocks.append((test, arg, b))
 
     def states(self, f):
-        """the States of a feature whose actions give the avatar a resting state (Apply During Upload's do not)"""
+        """a feature's States that set the resting state (not Apply During Upload's)"""
         out = []
 
         def walk(x, depth=0):
@@ -6079,8 +5911,7 @@ class VRCFury:
                     self.set_data(pr, v)
 
     def rest(self):
-        """the implicit resting state: an object some action turns on rests off, one it turns off rests on; a Full
-        Controller toggled by a parameter rests off"""
+        """implicit rest: what actions turn on rests off and vice versa; a toggled Full Controller's object rests off"""
         for c, f in self.feats:
             for st in self.states(f):
                 for a in self.actions(st):
@@ -6103,20 +5934,20 @@ class VRCFury:
             local = truthy(f.get('separateLocal', '0'))
             state = f.get('localState' if local else 'state')
             props = self.props(state, c)
-            if not props and truthy(f.get('hasTransition', '0')):  # an empty main state holds the end of the in one
+            if not props and truthy(f.get('hasTransition', '0')):  # empty state: use the transition-in one
                 state = f.get('localTransitionStateIn' if local else 'transitionStateIn')
                 props = self.props(state, c)
             g = _str(f.get('globalParam')).strip() if truthy(f.get('useGlobalParam', '0')) else ''
             param = g or 'VF%d_%s' % (k, name or 'Toggle')
             for a in self.actions(state):
-                if a['@class'] == 'SmoothLoopAction':  # from state 1 to 2 and back, over and over, while it is on
+                if a['@class'] == 'SmoothLoopAction':  # loops state1 <-> state2 while on
                     self.loops.setdefault(param, (max(num(a.get('loopTime'), 5.0), 0.05), self.props(
                         a.get('state1'), c), self.props(a.get('state2'), c)))
-                elif a['@class'] == 'WorldDropAction':  # the object stays in the world, where it is when it turns on
+                elif a['@class'] == 'WorldDropAction':  # object stays put in the world while on
                     obj = self.go(a.get('obj'))
                     if obj is not None:
                         self.drops.setdefault(param, []).append(obj)
-            if truthy(f.get('slider', '0')):  # a radial: from where the properties rest to the state's
+            if truthy(f.get('slider', '0')):  # radial: from rest to the state's values
                 self.declared.setdefault(param, (1, num(f.get('defaultSliderValue'))))
                 self.rule('slider', param, state, c, props)
                 entries.append((path, param, None, [], False, False))
@@ -6144,11 +5975,11 @@ class VRCFury:
                                                          'subParameters': [{'name': param}], 'value': 1.0}))
                 continue
             groups = list(dict.fromkeys(t for t in tags if count[t] > 1))  # exclusive with every toggle of each
-            if off and groups and not any(group_on.get(t) for t in groups):  # on while the others are off: at first
+            if off and groups and not any(group_on.get(t) for t in groups):  # on at first if the others are off
                 self.declared[param] = (2, 1.0)
                 for t in groups:
                     group_on[t] = True
-            if not path:  # no menu item
+            if not path:
                 continue
             ctl = {'name': path[-1], 'type': 101 if hold else 102, 'parameter': {'name': param}, 'value': 1.0}
             if groups:
@@ -6158,9 +5989,7 @@ class VRCFury:
             self.menu.append((tuple(path[:-1]), ctl))
 
     def puppets(self):
-        """Puppets: a radial along its stops (the one that moves along a single axis, VRCFury's slider), from where the
-        properties rest at 0; else a two-axis puppet whose stops are a 2D freeform directional blend tree's, the
-        resting state at the middle"""
+        """Puppets: one-axis sliders as radials over the stops, else 2D freeform directional blends; rest at 0"""
         for c, f in self.feats:
             if f['@class'] != 'Puppet':
                 continue
@@ -6190,7 +6019,7 @@ class VRCFury:
                                                      'subParameters': [{'name': param}], 'value': 1.0}))
 
     def gesture_drivers(self):
-        """Gesture Drivers (and Senky's): a hand's sign shows a State; a lock toggle in the menu shows it too"""
+        """Gesture Drivers (and Senky's): a hand sign or a menu lock toggle shows a State"""
         locks = {}
         n = 0
         for c, f in self.feats:
@@ -6252,7 +6081,7 @@ class VRCFury:
                     self.consonants = cons
 
     def move_menus(self):
-        """Move Menu Item and Reorder Menu Item, done to the whole menu when the rest is in (Analysis calls it)"""
+        """Move/Reorder Menu Item, applied by menu_moved() once the menu is complete"""
         self.moves = [f for c, f in self.feats if f['@class'] in ('MoveMenuItem', 'ReorderMenuItem')]
 
     def menu_moved(self, menu):
@@ -6328,8 +6157,7 @@ class VRCFury:
 
     @staticmethod
     def shape_map(f, base_names, link_names):
-        """which of a linked mesh's shape keys follow which of the base's: named alike (exactly, else ignoring case and
-        spaces, where that is unambiguous), all of them or the ones listed"""
+        """{base key: [linked keys]} by name (exact, else ignoring case and spaces if unique); all or the listed ones"""
         norms = [lambda x: x] + ([] if truthy(f.get('exactMatch', '0')) else
                                  [lambda x: re.sub(r'\s', '', x.lower())])
 
@@ -6365,7 +6193,6 @@ class VRCFury:
 
     @staticmethod
     def passes(test, arg, params):
-        """does a rule's test pass with these parameters"""
         if test == 'on':
             return abs(params.get(arg, 0.0) - 1.0) < 0.5
         if test == 'nonzero':
@@ -6386,8 +6213,7 @@ class VRCFury:
         return out
 
     def apply(self, params, vals, names=None, track=None):
-        """what the toggles and the rest set, over the animators' values (their FX layers come last); then what
-        linked shape keys follow. names and track collect a gesture face's name and what it blocks."""
+        """rules over vals (VRCFury's FX layers last), then linked shape keys; names / track: gesture faces, blocks"""
         if not self.rules and not self.syncs:
             return vals
         vals = dict(vals)
@@ -6396,18 +6222,18 @@ class VRCFury:
         def lerp(pr, d, t, w):
             if pr[0] in ('s', 'mp', 't') and d is not None and t is not None:
                 return d + (t - d) * w
-            if pr[0] == 'm':  # a material: an object curve steps, so only the end has it
+            if pr[0] == 'm':  # material: object curves step, so only at the end
                 return t if w >= 0.999 else d
             return t if w >= 0.5 else d
         for test, arg, props in self.rules:
-            if test == 'slider':  # from where the properties rest to the state's; VRCFury's two keys are flat
+            if test == 'slider':  # smoothstep, as VRCFury's two flat keys
                 x = min(max(params.get(arg, 0.0), 0.0), 1.0)
                 if x <= 0:
                     continue
                 w = x * x * (3 - 2 * x)
                 for pr, t in props.items():
                     vals[pr] = lerp(pr, vals[pr] if pr in vals else av.default(pr), t, w)
-            elif test == 'puppet2':  # a 2D freeform directional blend tree of the stops, the rest at the middle
+            elif test == 'puppet2':  # 2D freeform directional blend, rest at the centre
                 pts = [(0.0, 0.0)] + [s[0] for s in props]
                 ws = blend2d(pts, (params.get(arg[0], 0.0), params.get(arg[1], 0.0)), polar=True)
                 sets = [{}] + [s[1] for s in props]
@@ -6418,9 +6244,9 @@ class VRCFury:
                         continue
                     if pr[0] in ('s', 'mp', 't') and all(v is not None for _, v in got):
                         vals[pr] = sum(w * v for w, v in got)
-                    else:  # a material, an object: the stop with the most weight
+                    else:  # material, object: heaviest stop wins
                         vals[pr] = max(got, key=lambda x: x[0])[1]
-            elif test == 'puppet':  # between the stops on each side of it; 0 is where the properties rest
+            elif test == 'puppet':  # lerp between neighbouring stops; 0 = rest
                 x = params.get(arg, 0.0)
                 stops = [(0.0, {})] + [s for s in props if s[0] > 1e-6]
                 lo = max((s for s in stops if s[0] <= x), key=lambda s: s[0])
@@ -6466,7 +6292,7 @@ class VRCFury:
             seen = {}
 
             def rn(n, k=k, prms=prms, glob=glob, free=free, seen=seen):
-                """a parameter's name once merged: its own if global, else one of its own"""
+                """merged name: kept if global, else 'VF<k>_<name>'"""
                 if not n or n in VRC_PARAMS or (free and n not in prms):
                     return n
                 if n not in seen:
@@ -6489,9 +6315,8 @@ class VRCFury:
                 if not p:
                     continue
                 if inum(e.get('type'), 5) != 5:
-                    # (VRChat's AnimLayerType) an Action controller's humanoid clips are emotes (action_clips), a
-                    # Gesture one's are hand poses (Analysis.hand_poses); Base, Additive, Sitting, T Pose and IK Pose
-                    # ones are how VRChat walks, sits and calibrates the avatar, which hypr3d does in its own way
+                    # non-FX layers: Action clips are emotes (action_clips), Gesture ones hand poses
+                    # (Analysis.hand_poses); hypr3d does the rest
                     continue
                 if self.db.get(p[0]) is None:
                     warn('%s: the controller its Full Controller merges is not in the input' % go_name(c.go))
@@ -6522,7 +6347,7 @@ def link_armatures(h, vf, human, animated=(set(), set())):
     av, U = h.av, h.U
     humans = {id(g) for g in human.values()}
     moved, scaled = animated
-    # a PhysBone's root and the bones it moves are neither moved nor given the avatar's bones' weights
+    # PhysBone roots and the bones they move are neither moved nor reweighted
     pb_roots, pb_kids = set(), set()
     for g in av.gos:
         for c in g.comps:
@@ -6554,7 +6379,7 @@ def link_armatures(h, vf, human, animated=(set(), set())):
             continue
         rec = f.get('recursive')
         rec = external_skin(h, prop) if rec is None else truthy(rec)
-        if '@align' in f:  # an old link: alignment follows recursion unless it said
+        if '@align' in f:  # old link: align follows recursion unless set
             ap = ar = asc = rec if f['@align'] is None else f['@align']
         else:
             ap, ar, asc = (truthy(f.get(k, '0')) for k in ('alignPosition', 'alignRotation', 'alignScale'))
@@ -6587,7 +6412,7 @@ def link_armatures(h, vf, human, animated=(set(), set())):
                     lg = math.ceil(lg) if lg % 1.0 > 0.75 else math.floor(lg)
                     factor = 10.0 ** lg
         one = truthy(f.get('forceOneWorldScale', '0'))
-        def moved_above(p):  # is p under a bone of prop's that an animation moves or turns
+        def moved_above(p):  # p is under an animated bone of prop's
             x = h.up(p)
             while x is not None:
                 if id(x) in moved:
@@ -6596,7 +6421,7 @@ def link_armatures(h, vf, human, animated=(set(), set())):
                     return False
                 x = h.up(x)
             return False
-        stay = []  # bones left where they are, and so all under them
+        stay = []  # bones left in place, with all under them
         for p, q in reversed(pairs):  # the ones found last first, as VRCFury does
             if p is not prop and id(q) not in humans and (
                     id(p) in pb_kids or any(h.under(p, s) for s in stay) or moved_above(p)):
@@ -6609,7 +6434,7 @@ def link_armatures(h, vf, human, animated=(set(), set())):
                 h.place(p, Matrix.LocRotScale(tl if ap else pl, tr if ar else pr, s))
             h.set_parent(p, q)
             x = q
-            while x is not None:  # a PhysBone above where it goes leaves it out
+            while x is not None:  # a PhysBone above the target ignores it
                 if id(x) in pb_roots:
                     h.blocks.setdefault(id(x), []).append(p)
                 x = h.up(x)
@@ -6619,7 +6444,7 @@ def link_armatures(h, vf, human, animated=(set(), set())):
                 n_bones += 1
             done.append((p, q))
         n_links += 1
-    # what is left unused goes: an object nothing uses, with nothing under it that is used
+    # remove linked objects with nothing used at or under them
     used = vrcf_used(h)
     gone = 0
     for p, q in done:
@@ -6644,8 +6469,7 @@ def link_armatures(h, vf, human, animated=(set(), set())):
 
 
 def link_target(h, vf, f, human):
-    """an Armature Link's Link To: the first of its targets the avatar has (a humanoid bone, an object or the root,
-    with an offset path under it), then the humanoid bones above the first humanoid one"""
+    """Link To: the first target the avatar has (bone, object or root, plus offset), then the first bone's fallbacks"""
     tos = [dictof(x) for x in listof(f.get('linkTo'))] or [{'useBone': '1', 'bone': 0}]
     tries = list(tos)
     first = next((x for x in tos if truthy(x.get('useBone', '1')) and not _str(x.get('offset')).strip()), None)
@@ -6681,8 +6505,8 @@ def external_skin(h, prop):
 
 
 def vrcf_used(h):
-    """the GameObjects VRCFury's clean-up keeps: ones with a component (a Transform or a constraint aside), ones some
-    component names (a PhysBone's ignore list and the bones of meshes given the avatar's aside), and their parents"""
+    """ids VRCFury's clean-up keeps: objects with a component other than a Transform or constraint, or referenced by one
+    (not via ignoreTransforms or retargeted m_Bones), and their parents"""
     av, out = h.av, set()
 
     def mark(g):
@@ -6716,10 +6540,8 @@ def vrcf_used(h):
 
 # ---------------------------------------------------------------- Setup Outfit
 #
-# What MA's "Setup Outfit" does to an outfit put on the avatar with --outfit (SetupOutfit.cs and
-# HeuristicBoneMapper.cs): it finds the outfit's hips, works out the prefix and suffix of its bone names, renames the
-# bones its heuristics match to the avatar's, turns A-pose arms to the avatar's pose, and adds a Merge Armature (a
-# second one for an UpperChest the avatar does not have).
+# MA's Setup Outfit for --outfit (SetupOutfit.cs, HeuristicBoneMapper.cs): renames the outfit's bones to the avatar's,
+# turns A-pose arms and adds Merge Armatures.
 #
 # The bone names, in HumanBodyBones order, are MA's (Copyright (c) 2022 bd_, MIT License), which has them from
 # HhotateA's AvatarModifyTools (Copyright (c) 2021 @HhotateA_xR, MIT License) and Azukimochi's BoneRenamer
@@ -6863,7 +6685,7 @@ def subtree(g):
 
 
 class OutfitSetup:
-    """Setup Outfit on an outfit put under the avatar: specs, the Merge Armatures it adds (none if the outfit has one)"""
+    """Setup Outfit for an outfit under the avatar; specs: the Merge Armatures it adds (none if it has one)"""
 
     def __init__(self, db, av, human, root):
         self.av, self.human, self.root = av, human, root
@@ -6883,7 +6705,7 @@ class OutfitSetup:
             return
         ohuman = humanoid_map(db, root, gos, quiet=True)
         ohips = ohuman.get('Hips')
-        if ohips is None or ohips.parent is root:  # a rig with its hips at the top is taken for a broken one
+        if ohips is None or ohips.parent is root:  # hips at the rig's top: taken as broken
             ohips, ohuman = None, {}
         if ohips is None:
             ohips = self.find_hips(go_name(ahips))
@@ -6896,7 +6718,7 @@ class OutfitSetup:
         m = MergeSpec(ohips.parent, ahips.parent)
         armature = go_name(m.go)
         own = next((c for c in m.go.comps if ma_kind(c) == 'MergeArmature'), None)
-        if own is not None:  # its own, pointed at this avatar's armature (and MA leaves the unresolved one alone)
+        if own is not None:  # reuse its own unresolved Merge Armature
             m.prefix, m.suffix = _str(own.data.get('prefix')), _str(own.data.get('suffix'))
             m.mangle, m.comp = truthy(own.data.get('mangleNames', '1')), own
             log('%s: its Merge Armature targets nothing in this avatar; Setup Outfit points it at %s' % (
@@ -6916,12 +6738,12 @@ class OutfitSetup:
                 traverse(k, v)
         traverse(m.go, m.target)
         self.specs = [m]
-        for sub in skipped:  # an UpperChest the avatar lacks: merged into what its parent merges into
+        for sub in skipped:  # missing UpperChest: merges into its parent's target
             t = self.map_bone(m, sub.parent)
             if t is not None:
                 self.specs.append(MergeSpec(sub, t, m.prefix, m.suffix, mangle=False))
         if not m.prefix and not m.suffix and tf_find(av.root, go_name(m.go)) is not None:
-            m.go.data['m_Name'] = go_name(m.go) + '.1'  # so that Unity's humanoid mapping takes the avatar's
+            m.go.data['m_Name'] = go_name(m.go) + '.1'  # so Unity's humanoid mapping picks the avatar's
         log('Setup Outfit: %s/%s merges into %s%s: %d bones matched, %d renamed' % (
             self.name, armature, go_name(m.target), ' (bone names "%s…%s")' % (m.prefix, m.suffix) if m.prefix or m.suffix
             else '', len(self.pairs), renamed[0]))
@@ -7006,8 +6828,7 @@ class OutfitSetup:
             m.prefix = 'J_Bip_'
 
     def assign(self, m, src, dst, skipped, unassigned, obones, human):
-        """AssignBoneMappings: [(child of src, the child of dst it matches)], by name, then by the outfit's own
-        humanoid rig, the avatar's and the name table"""
+        """AssignBoneMappings: [(src child, matching dst child)] by name, then outfit rig, avatar rig, name table"""
         out = {}
         guess = []
         if unassigned is None:
@@ -7082,8 +6903,7 @@ class OutfitSetup:
         return t
 
     def fix(self, U):
-        """FixAPose: the outfit's shoulders and upper arms turned to point where the avatar's do, if they start where
-        the avatar's do and are as long; then a warning if what it matched does not line up"""
+        """FixAPose: turns outfit shoulders/upper arms onto the avatar's if start and length match; warns past 1 cm"""
         if not self.specs:
             return
         m = self.specs[0]
@@ -7106,7 +6926,7 @@ class OutfitSetup:
                 x = x.parent
             return c if c is not None and id(c) in U else None
         turned = 0
-        for arm in (11, 12, 13, 14):  # the shoulders and upper arms, down to the upper and lower arms
+        for arm in (11, 12, 13, 14):  # shoulder -> upper arm, upper arm -> lower arm
             a0, a1 = self.human.get(HUMAN_BONES[arm]), self.human.get(HUMAN_BONES[arm + 2])
             o0, o1 = outfit_bone(a0), outfit_bone(a1)
             if o0 is None or o1 is None:
@@ -7136,7 +6956,7 @@ class OutfitSetup:
 
 
 def input_assets(db, path):
-    """the assets a package, zip or folder named on the command line holds, added to db unless they are in it"""
+    """assets of an input package, zip or folder, added to db if new"""
     if path.lower().endswith('.unitypackage'):
         with tarfile.open(path, 'r:*') as tf:
             guids = {m.name.replace('\\', '/').lstrip('./').split('/')[0].lower() for m in tf}
@@ -7152,7 +6972,7 @@ def input_assets(db, path):
 
 
 def find_outfit(db, want):
-    """the prefab (or model) --outfit names: a file, the prefab of a package or folder, or an asset's name"""
+    """prefab or model for --outfit: a file, a package or folder's prefab, or an asset name"""
     path = os.path.abspath(os.path.expanduser(want))
     if os.path.exists(path):
         low = path.lower()
@@ -7186,7 +7006,7 @@ def find_outfit(db, want):
 
 
 def put_on(db, found, a, k):
-    """an outfit's prefab or model instantiated under the avatar's root, as dragged onto it in Unity"""
+    """instantiates an outfit under the avatar's root, as if dragged onto it in Unity"""
     w = World(db)
     w.nfbx = 1000 * k  # the outfit's models apart from the avatar's
     inst = w.instantiate(a.guid)
@@ -7205,25 +7025,17 @@ def put_on(db, found, a, k):
 
 # ---------------------------------------------------------------- Unity's humanoid clips, as VRM animations
 #
-# An Action layer (the avatar's own, one Modular Avatar merges in, a VRCFury Full Controller's) plays emotes and dances.
-# Unity keeps a humanoid clip as "muscles": for each humanoid bone, up to three angles given as fractions of their
-# limits (x a twist about the bone, y and z a swing), and the body's place (RootT, the centre of mass over the avatar's
-# human scale) and turn (RootQ). Unity turns them into bone rotations with axes it works out from the avatar's T pose
-# when it imports the model, and keeps nowhere in the files. This does the same, for the avatar's own T pose (its model's
-# humanDescription skeleton, else the model as it stands), and writes each clip as a VRM animation (.vrma) the plugin
-# retargets like any other: every humanoid bone's turn, the hips' place, and the faces the clip sets (by shape key name,
-# as expressions of the same name, else as the VRM preset of an MMD name).
+# Unity stores humanoid clips as "muscles" (per bone up to three angles as fractions of their limits: x twist, y and z
+# swing) plus RootT / RootQ (centre of mass in human scale, body rotation); the muscle axes come from the T pose at
+# import and are stored nowhere. This rebuilds them from the avatar's T pose and writes each clip as a .vrma.
 #
-# A muscle m is an angle of m times its limit's max (m >= 0) or its min's negative (m < 0), times the bone's sign for that
-# axis; the angles make a rotation twist-then-swing with each part as tan(angle / 2) (Unity's, not an exponential map); a
-# bone's rotation from its parent is preQ * that * postQ^-1, the twist of an upper arm or leg shared with the bone below
-# it, and the body goes where RootT and RootQ put its centre of mass and its frame (shoulders and hips). The muscle table,
-# the signs, the masses and the twist sharing are from lox9973's work on Unity's humanoid: ShaderMotion (MIT License,
-# Copyright 2020-2021 lox9973) and uvw.js (Apache License 2.0, Copyright 2022-2023 lox9973); see THIRD_PARTY.md. The
-# rules that build preQ and postQ from a T pose were worked out from those avatars' axes and checked against Unity's own
-# T pose clips. The jaw and the eyes are left as they are.
+# A muscle m is the angle m * max (m >= 0) or m * -min (m < 0) times the axis sign; the angles form a twist-then-swing
+# of tan(angle / 2) parts; local rotation = preQ * that * postQ^-1; upper arm and leg twist is shared with the bone
+# below. Muscle table, signs, masses and twist sharing are from lox9973's work on Unity's humanoid:
+# ShaderMotion (MIT License, Copyright 2020-2021 lox9973) and uvw.js (Apache License 2.0, Copyright 2022-2023 lox9973);
+# see THIRD_PARTY.md. preQ / postQ were derived from those avatars' axes and checked against Unity's T pose clips.
 
-# the muscles: the clip's name for it, its bone (HumanBodyBones), axis (0 x twist, 1 y, 2 z), and default limits
+# muscles: clip attribute, HumanBodyBones, axis (0 x twist, 1 y, 2 z), default min, max
 _MUSCLE_ROWS = """Spine Front-Back,7,2,-40,40|Spine Left-Right,7,1,-40,40|Spine Twist Left-Right,7,0,-40,40
 Chest Front-Back,8,2,-40,40|Chest Left-Right,8,1,-40,40|Chest Twist Left-Right,8,0,-40,40
 UpperChest Front-Back,54,2,-20,20|UpperChest Left-Right,54,1,-20,20|UpperChest Twist Left-Right,54,0,-20,20
@@ -7247,7 +7059,7 @@ MUSCLES = []  # (the clip's attribute, bone, axis, min, max)
 for _row in _MUSCLE_ROWS.replace('\n', '|').split('|'):
     _n, _b, _a, _lo, _hi = _row.split(',')
     MUSCLES.append((_n, int(_b), int(_a), float(_lo), float(_hi)))
-for _side, _base in (('Left', 24), ('Right', 39)):  # the fingers: 1 Stretched, Spread, 2 Stretched, 3 Stretched
+for _side, _base in (('Left', 24), ('Right', 39)):  # fingers: 1 Stretched, Spread, 2/3 Stretched
     for _f, (_fn, _lim) in enumerate((('Thumb', ((-20, 20), (-25, 25), (-40, 35), (-40, 35))),
                                       ('Index', ((-50, 50), (-20, 20), (-45, 45), (-45, 45))),
                                       ('Middle', ((-50, 50), (-7.5, 7.5), (-45, 45), (-45, 45))),
@@ -7258,9 +7070,9 @@ for _side, _base in (('Left', 24), ('Right', 39)):  # the fingers: 1 Stretched, 
                                                       ('3 Stretched', _b + 2, 2)), _lim):
             MUSCLES.append(('%sHand.%s.%s' % (_side, _fn, _part), _bone, _axis, float(_lo), float(_hi)))
 MUSCLE_OF = {m[0]: i for i, m in enumerate(MUSCLES)}
-# a muscle of a bone the avatar lacks goes to the bone next to it, scaled by their limits (uvw.js's guess)
+# a missing bone's muscles go to its neighbour, scaled by their limits (uvw.js's guess)
 MUSCLE_FALLBACK = ((54, 8), (8, 7), (9, 10), (11, 13), (12, 14))
-# per bone: the sign of each axis' angle (x, y, z) on the left (the right's are in _SIGN_R), the mass (parts of 165)
+# per bone: left-side angle sign per axis (right in _SIGN_R); BONE_MASS in parts of 165
 _SIGN_L = {0: (1, 1, 1), 7: (1, 1, 1), 8: (1, 1, 1), 54: (1, 1, 1), 9: (1, 1, 1), 10: (1, 1, 1), 1: (1, 1, 1),
            3: (1, -1, -1), 5: (1, 1, 1), 19: (1, 1, 1), 11: (1, 1, -1), 13: (1, 1, -1), 15: (1, 1, -1), 17: (1, 1, -1),
            21: (-1, 1, -1)}
@@ -7279,7 +7091,7 @@ VRM_BONES = ['hips', 'leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowe
     '%s%s%s' % (s, f, p) for s in ('left', 'right') for f, ps in (
         ('Thumb', ('Metacarpal', 'Proximal', 'Distal')),) + tuple((f, ('Proximal', 'Intermediate', 'Distal')) for f in (
             'Index', 'Middle', 'Ring', 'Little')) for p in ps] + ['upperChest']
-# MMD's face names and the VRM presets they are (for an avatar without shape keys of those names)
+# MMD face names -> VRM presets, for avatars without such shape keys
 MMD_PRESETS = {'あ': 'aa', 'い': 'ih', 'う': 'ou', 'え': 'ee', 'お': 'oh', 'えー': 'ee', 'ワ': 'aa', 'まばたき': 'blink',
                'ウィンク': 'blinkLeft', 'ウィンク２': 'blinkLeft', 'ウィンク右': 'blinkRight', 'ｳｨﾝｸ２右': 'blinkRight',
                '笑い': 'happy', 'にこり': 'happy', 'にやり': 'happy', '怒り': 'angry', '困る': 'sad', 'びっくり': 'surprised',
@@ -7306,13 +7118,12 @@ def _frame(X, refZ):
 
 
 class HumanAxes:
-    """Unity's muscle axes for an avatar in its T pose (Unity space, the avatar's root): per bone preQ, postQ, the signs
-    and limits, and what the body is made of"""
+    """Unity's muscle axes for the avatar's T pose (Unity space): per-bone preQ, postQ, signs, limits; body masses"""
     SPINE = (7, 8, 54, 9, 10)
 
     def __init__(self, tpose, human, limits=None, twists=None):
-        """tpose: [(name, parent index or -1, Unity local Matrix)]; human: {HumanBodyBones index: tpose index};
-        limits: {bone: (min Vector, max Vector)} the avatar's own; twists: (arm, forearm, upper leg, leg)"""
+        """tpose: [(name, parent index or -1, Unity local Matrix)]; human: {HumanBodyBones: tpose index}; limits: {bone:
+        (min, max)}; twists: (arm, forearm, upper leg, leg)"""
         self.names = [t[0] for t in tpose]
         self.parent = [t[1] for t in tpose]
         self.local = [t[2] for t in tpose]
@@ -7379,7 +7190,7 @@ class HumanAxes:
             pi = self.parent[self.human[b]]
             Wp = self.world[pi].to_quaternion() if pi >= 0 else Quaternion()
             self.pre[b] = Wp.inverted() @ N @ F
-        # the body: its centre of mass (at the middle of each bone with a mass) and its frame, in the T pose
+        # body: centre of mass (bone mid-points by mass) and frame, T pose
         mass = dict(BONE_MASS)
         if 54 not in self.human:
             mass[8] = mass.get(8, 0) + mass.pop(54)
@@ -7406,11 +7217,8 @@ class HumanAxes:
         return out
 
     def plant(self, local, root_t, root_q, goals):
-        """Unity's Foot IK (a state's m_IKOnFeet): each foot where the clip's goal (HumanClip.goals_at) puts it, by two-bone
-        IK on the leg, the knee bending the way it did, and turned as the goal says. A goal is in the body's frame (RootT,
-        RootQ) and human scales, the foot's turn times its muscle frame (post); a foot's is its sole, the ankle's height in
-        the T pose below the ankle along the foot's frame's x (down). (That is what the clips' goals match: the VRSuya
-        dances' feet within 5 cm and 3 degrees on average, their hands within 5 cm, though Foot IK is off there.)"""
+        """Unity's Foot IK (m_IKOnFeet): two-bone leg IK to the clip's goals (goals_at). Goals are in the body frame and
+        human scale; Q = foot rotation * post, T = sole (T pose ankle height below the ankle along the foot's x)"""
         world = self.world_of(local)
         out = list(local)
         for foot, upper, lower in ((5, 1, 3), (6, 2, 4)):
@@ -7419,7 +7227,7 @@ class HumanAxes:
             T, Q = goals[foot]
             iu, il, iff = self.human[upper], self.human[lower], self.human[foot]
             turn = root_q @ Q  # the foot's frame
-            h = self.world[iff].translation.y  # the ankle above the ground in the T pose
+            h = self.world[iff].translation.y  # T pose ankle height
             target = root_q @ (T * self.scale) + root_t * self.scale - turn @ Vector((h, 0.0, 0.0))
             H, K, A = world[iu].translation, world[il].translation, world[iff].translation
             l1, l2 = (K - H).length, (A - K).length
@@ -7428,7 +7236,7 @@ class HumanAxes:
             if l1 < 1e-6 or l2 < 1e-6 or to.length < 1e-6:
                 continue
             aim = to.normalized()
-            bend = (K - H) - aim * (K - H).dot(aim)  # the knee's way, off the line to the foot
+            bend = (K - H) - aim * (K - H).dot(aim)  # knee direction, off the hip-foot line
             if bend.length < 1e-6:
                 bend = world[iu].to_quaternion() @ Vector((0.0, 0.0, 1.0))
                 bend = bend - aim * bend.dot(aim)
@@ -7442,7 +7250,7 @@ class HumanAxes:
             rl = (A1 - K2).rotation_difference(A2 - K2)
             wl = rl @ ru @ world[il].to_quaternion()
             wf = turn @ self.post[foot].inverted()
-            # what is between them turns along (twist bones, if any): the parents' new turns
+            # locals from the parents' new rotations, so twist bones in between turn along
             par = lambda i: world[self.parent[i]].to_quaternion() if self.parent[i] >= 0 else Quaternion()
             for i, q in ((iu, par(iu).inverted() @ wu), (il, (ru @ par(il)).inverted() @ wl),
                          (iff, (rl @ ru @ par(iff)).inverted() @ wf)):
@@ -7462,7 +7270,7 @@ class HumanAxes:
         return s / tot if tot else s
 
     def body_frame(self, world):
-        """the body's turn: its x across the shoulders and hips, y from the hips up to the shoulders"""
+        """body rotation: x across shoulders and hips, y up from hips to shoulders"""
         p = {b: world[self.human[b]].translation for b in (13, 14, 1, 2) if b in self.human}
         if len(p) < 4:
             return Quaternion()
@@ -7474,7 +7282,7 @@ class HumanAxes:
         return Matrix((x, y, z)).transposed().to_quaternion()
 
     def pose(self, muscles, root_t, root_q):
-        """(every T pose node's local Matrix for these muscle values, the body's place and turn)"""
+        """local Matrix of every T pose node for these muscles, RootT and RootQ"""
         m = dict(muscles)
         vals = {}
         for i, (name, b, axis, lo, hi) in enumerate(MUSCLES):
@@ -7505,7 +7313,7 @@ class HumanAxes:
                 hi = hi[a] if hi is not None else mu[4]
                 ang[a] = math.radians(v * (hi if v >= 0 else -lo)) * MUSCLE_SIGN.get(b, (1, 1, 1))[a]
             pre = self.pre[b]
-            if b in push:  # the twist the bone above left it
+            if b in push:  # twist passed down from the bone above
                 pre = push[b] @ pre
             w = self.twists[split[b][1]] if b in split else 1.0
             q = pre @ swing_twist(ang[0] * w, ang[1], ang[2]) @ self.post[b].inverted()
@@ -7514,7 +7322,7 @@ class HumanAxes:
             i = self.human[b]
             t, _, sc = self.local[i].decompose()
             local[i] = Matrix.LocRotScale(t, q, sc)
-        # the body: its centre of mass where RootT says (in human scales), turned as RootQ says from the T pose's frame
+        # body: centre of mass at RootT (human scale), rotated by RootQ from the T pose frame
         world = self.world_of(local)
         hi = self.human[0]
         C0, B0 = self.com(world), self.body_frame(world)
@@ -7527,11 +7335,8 @@ class HumanAxes:
 
 
 def unity_curve(keys, t):
-    """a Unity AnimationCurve at t: cubic Hermite between keys by their slopes, flat beyond the ends; a key with an
-    infinite out slope holds its value. Keys are (time, value, in slope, out slope), and a weighted one (its
-    weightedMode 1 in, 2 out, 3 both) (..., in weight, out weight, mode): Unity makes the span a cubic Bezier in time
-    and value, its handles that share of the span along the slopes (a third, on a side not weighted), which is the
-    Hermite again when both are a third"""
+    """Unity AnimationCurve at t: Hermite by slopes, flat outside, an infinite out slope holds; keys (time, value, in
+    slope, out slope[, in weight, out weight, weightedMode]): weighted spans are Beziers, handles at the weights"""
     if not keys:
         return 0.0
     if t <= keys[0][0]:
@@ -7559,7 +7364,7 @@ def unity_curve(keys, t):
         return (2 * s3 - 3 * s2 + 1) * v0 + (s3 - 2 * s2 + s) * o0 * dt + (-2 * s3 + 3 * s2) * v1 + (s3 - s2) * i1 * dt
     a = 1.0 / 3 if wo is None else wo
     b = 1.0 / 3 if wi is None else wi
-    x = (t - t0) / dt  # the Bezier's time, 0..1 over the span: 3a(1-u)^2 u + 3(1-b)(1-u)u^2 + u^3, rising with u
+    x = (t - t0) / dt  # span fraction; bx(u) = x solved by bisection
 
     def bx(q):
         return 3 * a * (1 - q) ** 2 * q + 3 * (1 - b) * (1 - q) * q * q + q ** 3
@@ -7584,7 +7389,7 @@ def _slope(x):
 
 
 def curve_keys(c):
-    """an AnimationCurve's keys as unity_curve takes them, sorted: the weights only on weighted ones"""
+    """an AnimationCurve's keys for unity_curve, sorted (weights only when weighted)"""
     out = []
     for k in listof(dictof(c.get('curve')).get('m_Curve')):
         if not isinstance(k, dict):
@@ -7611,11 +7416,11 @@ class HumanClip:
                                                              'm_LoopBlendPositionXZ'))
         self.rate = min(max(num(body.get('m_SampleRate'), 60.0), 30.0), 60.0)
         self.muscles, self.root, self.faces = {}, {}, {}
-        self.goals = {}  # "LeftFootT.x"...: where the feet and hands were, in the body's frame (see HumanAxes.plant)
-        self.tdof = set()  # the bones it moves as well as turns (Translation DoF), which only some avatars take
+        self.goals = {}  # "LeftFootT.x"...: IK goals in the body frame
+        self.tdof = set()  # Translation DoF bones (if the avatar has it)
         self.foot_ik = False  # its state has Foot IK on (action_clips)
-        self.src = None  # (asset guid or file, fileID): where it was read from
-        self.sound = None  # (where it is in the input, the file): its song, played with it (find_emotes, clip_sound)
+        self.src = None  # source: (asset guid or file, fileID)
+        self.sound = None  # song: (input location, file); see clip_sound
         end = 0.0
         for c in listof(body.get('m_FloatCurves')) or listof(body.get('m_EditorCurves')):
             c = dictof(c)
@@ -7673,8 +7478,7 @@ class HumanClip:
 
 
 def human_tpose(db, av, human, U0):
-    """the avatar's T pose, as Unity's humanoid knows it: (HumanAxes, the humanoid's node names) from its model's
-    humanDescription skeleton; else from the avatar as it stands (U0: the Unity matrices before MA moved anything)"""
+    """(HumanAxes, node names) of the T pose: humanDescription skeleton, else the avatar as it stands (U0, before MA)"""
     an = next((c for c in av.root.comps if c.cls == 95), None)
     g = ref(an.data.get('m_Avatar'))[1] if an is not None else None
     imp = db.importer(g) if g else {}
@@ -7698,7 +7502,7 @@ def human_tpose(db, av, human, U0):
             tpose.append([nm, str(s.get('parentName') or ''), L])
         for t in tpose:
             t[1] = index.get(t[1], -1) if t[1] != t[0] else -1
-            if t[1] < 0:  # the model's root: the Animator's, whose space the humanoid is in
+            if t[1] < 0:  # model root = the Animator's space
                 t[2] = Matrix.Identity(4)
         hum = {HUMAN_BONES.index(h): index[b] for h, b in names.items() if h in HUMAN_BONES and b in index}
         if 0 in hum and len(hum) >= 10:
@@ -7726,11 +7530,9 @@ def human_tpose(db, av, human, U0):
 
 
 def action_clips(an):
-    """the humanoid clips the avatar's Action layers play (its own, Modular Avatar's Merge Animators', VRCFury's Full
-    Controllers'): [(name, HumanClip, loop, speed, {the parameters that start it})], named as the menu item that starts
-    it, else as its state"""
+    """Action-layer humanoid clips: [(name, HumanClip, loop, speed, {start params})], named by menu item or state"""
     db, av = an.db, an.av
-    ctls = []  # (controller guid, {its parameter names: the avatar's})
+    ctls = []  # (controller guid, {its param: avatar's})
     d = av.desc
     if truthy(d.get('customizeAnimationLayers', '0')):
         for l in listof(d.get('baseAnimationLayers')):
@@ -7758,7 +7560,7 @@ def action_clips(an):
         uf = db.yaml(g)
         if uf is None or uf.binary:
             continue
-        into = {}  # state -> [(parameter, value)] of the transitions to it
+        into = {}  # state -> [(param, value)] of transitions into it
         for fid in uf.order:
             if uf.cls(fid) != 1101:
                 continue
@@ -7800,12 +7602,10 @@ def action_clips(an):
 
 
 def find_emotes(db, want):
-    """the humanoid clips --emote names, as action_clips gives them: a clip file (.anim), a clip by name, or the
-    clips of a package, zip or folder, less its still poses when it has clips that move (a motion sold as bare clips,
-    for the buyer to put in their Action layer)"""
+    """--emote's clips (as action_clips): an .anim, a clip name or a package/zip/folder; stills dropped if some move"""
     path = os.path.abspath(os.path.expanduser(want))
-    files, many = [], False  # [(UFile, the guid or file it is, where it is, for the log)]
-    sounds = []  # [(where it is, the file)]: the sound files beside them, for their songs
+    files, many = [], False  # [(UFile, guid or file, location for the log)]
+    sounds = []  # [(location, file)] of nearby sound files (songs)
     if os.path.isfile(path) and path.lower().endswith('.anim'):
         try:
             files.append((UFile(path), os.path.realpath(path), os.path.basename(path)))
@@ -7860,7 +7660,7 @@ def find_emotes(db, want):
     names = [spaced_words(c.name.replace('_', ' ').strip()) or os.path.splitext(os.path.basename(w))[0]
              for w, c in found]
     loops = [c.loop and c.length > 0 for _, c in found]
-    for i, n in enumerate(names):  # X_Loop, the loop of X: X, unless X is taken or it is one of a set (X Intro, X End)
+    for i, n in enumerate(names):  # X Loop -> X unless taken or one of a set (X Intro...)
         short = re.sub(r'\s+loop$', '', n, flags=re.I)
         low = short.lower()
         if loops[i] and short != n and not any(m.lower() == low or m.lower().startswith(low + ' ')
@@ -7870,9 +7670,7 @@ def find_emotes(db, want):
 
 
 def clip_sound(where, sounds, clips):
-    """a bare clip's song, as its package puts it beside it for the buyer to play with it: the sound file of the clip's
-    name in its folder, else a folder's one sound file when the clip is the folder's one clip (of clips, where each is);
-    (where it is, the file), or None"""
+    """a bare clip's song (location, file): the same-named sound beside it, else a lone sound beside a lone clip"""
     def split(p):
         folder, _, name = p.replace('\\', '/').rpartition('/')
         return folder, os.path.splitext(name)[0].lower()
@@ -7888,8 +7686,7 @@ def clip_sound(where, sounds, clips):
 
 
 def write_sound(name, sound, fn):
-    """an emote's song (clip_sound's) copied to fn for the settings file's "sound": the file name, or None (and a
-    warning) when it is not Ogg Vorbis, all hypr3d plays"""
+    """copies an emote's Ogg Vorbis song to fn: its file name, else None with a warning"""
     try:
         with open(sound[1], 'rb') as f:
             head = f.read(64)
@@ -7904,18 +7701,16 @@ def write_sound(name, sound, fn):
 
 
 def spaced_words(name):
-    """a clip's name with its words spaced out: FreddyFazbearPumpItUp -> Freddy Fazbear Pump It Up, FallBackward2 ->
-    Fall Backward 2 (a capital after a capital starts no word: pHM, VRSuya, INTERNET stay whole)"""
+    """FreddyFazbearPumpItUp -> Freddy Fazbear Pump It Up, FallBackward2 -> Fall Backward 2; pHM, VRSuya stay whole"""
     return re.sub(r'(?<=[a-z])(?=[A-Z][a-z])|(?<=[a-z])(?=[0-9])|(?<=[0-9])(?=[A-Z][a-z])', ' ', name)
 
 
 def write_vrma(path, axes, names, clip, shapes, speed=1.0):
-    """a VRM animation of a humanoid clip on the avatar's T pose: its bones' turns, the hips' place, the faces (shapes:
-    the avatar's shape key names, to tell the MMD faces it has from the ones to give as VRM presets)"""
+    """a humanoid clip as a .vrma: bone rotations, hips, faces (shapes: the avatar's keys; others as MMD presets)"""
     fps = clip.rate
     n = max(1, int(math.ceil(clip.length * fps - 1e-6)))
     times = [clip.length * k / n for k in range(n + 1)] if clip.length > 0 else [0.0]
-    used = set()  # the T pose nodes the humanoid needs: its bones and what is above them
+    used = set()  # humanoid bones and their ancestors
     for b, i in axes.human.items():
         while i >= 0 and i not in used:
             used.add(i)
@@ -7928,7 +7723,7 @@ def write_vrma(path, axes, names, clip, shapes, speed=1.0):
     t0 = None
     for t in times:
         mus, rt, rq = clip.at(t)
-        if not all(clip.baked):  # what the clip leaves to root motion stays where it starts
+        if not all(clip.baked):  # root motion not baked into pose stays at the start
             if t0 is None:
                 t0 = (rt.copy(), rq.copy())
             if not clip.baked[2]:
@@ -8069,9 +7864,7 @@ def _base_name(s):
 
 
 def transform_rests(av, U):
-    """every GameObject's Transform in local values, as Unity has the avatar placed (what its animations' Transform
-    curves start from): position, rotation (quaternion x, y, z, w), Euler angles (Unity's, degrees: Z, then X, then
-    Y) and scale"""
+    """each GameObject's local Transform as placed (Transform curves start there): p, q (xyzw), Euler deg (ZXY), s"""
     for g in av.gos:
         if id(g) not in U:
             continue
@@ -8083,7 +7876,7 @@ def transform_rests(av, U):
             q = Quaternion((-q.w, -q.x, -q.y, -q.z))  # the sign the Transform has
         e = [math.degrees(a) for a in q.to_matrix().to_euler('ZXY')]
         hint = d.get('m_LocalEulerAnglesHint')
-        if isinstance(hint, dict):  # the editor's angles (maybe past 180), when they are the same turn
+        if isinstance(hint, dict):  # editor angles (maybe past 180) if the same rotation
             h = [num(hint.get(k)) for k in 'xyz']
             H = Euler([math.radians(a) for a in h], 'ZXY').to_quaternion()
             if abs(H.dot(q)) > 1 - 1e-6:
@@ -8092,8 +7885,7 @@ def transform_rests(av, U):
 
 
 def tf_local(comps, rest):
-    """a Transform's local matrix (Unity's) with these of its components set ({'px': ..., 'qw': ..., 'ey': ...,
-    'sx': ..., 'm': a scale multiplier}) over the rest ({'p', 'q', 'e', 's'})"""
+    """a Transform's Unity local matrix: these components ({'px', 'qw', 'ey', 'sx'..., 'm': scale}) over rest"""
     t = Vector([comps.get('p' + a, rest['p'][i]) for i, a in enumerate('xyz')])
     if any(('q' + a) in comps for a in 'xyzw'):
         q = Quaternion([comps.get('q' + a, rest['q'][i]) for i, a in zip((3, 0, 1, 2), 'wxyz')])
@@ -8120,17 +7912,17 @@ class Build:
             if g.fbx is not None and id(g.fbx) not in seen:
                 seen.add(id(g.fbx))
                 self.fis.append(g.fbx)
-        self.U = {}  # id(GameObject) -> its Unity world matrix, the avatar standing at the origin
+        self.U = {}  # id(GameObject) -> Unity world matrix, avatar at origin
         self.owner = {}  # Blender object pointer -> (FBXInst, model id)
         self.imported = []  # (FBXInst, [its Blender objects])
         self.post = {}  # Blender material name -> MatInfo
-        self.keys = {}  # id(renderer) -> {its mesh's shape name: the shape key's name in Blender}
-        self.variant_names = {}  # the material variants made: the name asked for -> the GLB's
+        self.keys = {}  # id(renderer) -> {mesh shape name: Blender key name}
+        self.variant_names = {}  # material variants: requested name -> GLB name
         self._images = {}
         self._relinked = set()
         self._tmp = 0
         self._made = {}  # MatInfo key -> Blender material
-        self._own = {}  # (id(renderer), slot) -> the Blender material the model came with
+        self._own = {}  # (id(renderer), slot) -> the model's own material
 
     # ---- import
 
@@ -8271,7 +8063,7 @@ class Build:
             fi = g.fbx
             if fi is not None and g.node and g.node in fi.orig:
                 pm = fi.info.models[g.node][2]
-                while pm and pm not in fi.orig:  # a model that did not come through: it stays where it is
+                while pm and pm not in fi.orig:  # skip parents that weren't imported
                     pm = fi.info.models[pm][2] if pm in fi.info.models else 0
                 L0 = (fi.orig[pm].inverted_safe() if pm else I) @ fi.orig[g.node]
             L = trs_merge(L0, d.get('m_LocalPosition'), d.get('m_LocalRotation'), d.get('m_LocalScale'))
@@ -8280,7 +8072,7 @@ class Build:
                 self.U[id(g)] = Matrix.LocRotScale(None, q, s)
             else:
                 self.U[id(g)] = self.U[id(g.parent)] @ L
-        # the plugin stands a humanoid up +Y: one lying down in its files is stood up
+        # the plugin expects humanoids +Y up: stand up one lying down in its files
         hips, head = human.get('Hips'), human.get('Head')
         if hips is None or head is None or id(hips) not in self.U or id(head) not in self.U:
             return
@@ -8358,7 +8150,7 @@ class Build:
         meshes = [o.data for o in replaced if o.type == 'MESH']
         for o in drop:
             bpy.data.objects.remove(o, do_unlink=True)
-        for me in meshes:  # a replaced object's mesh goes too, and its materials can give their names back
+        for me in meshes:  # drop replaced meshes too, freeing material names
             if me.users == 0:
                 bpy.data.meshes.remove(me)
         bpy.context.view_layer.update()
@@ -8368,7 +8160,7 @@ class Build:
                 if b[0] != 'obj' or g is None or self.skinned(b[1]):
                     continue
                 self.set_parent(b[1], self.anchor(g.parent) if g is not av.root else None)
-            for o in new:  # an armature Blender made for bones at the top of a file
+            for o in new:  # Blender-made armature for top-level bones
                 if o.as_pointer() in self.owner or o.type != 'ARMATURE':
                     continue
                 g = None
@@ -8483,7 +8275,7 @@ class Build:
         if m.mode != 'OPAQUE':
             bsdf.inputs['Alpha'].default_value = m.color[3]
         baked = self.alpha_image(m) if m.mode != 'OPAQUE' and (m.alpha or m.invert is not None) else None
-        if baked is not None:  # a mask texture's channel, or an inverted alpha: in the base texture's alpha
+        if baked is not None:  # mask channel or inverted alpha baked into base alpha
             tn = nt.nodes.new('ShaderNodeTexImage')
             tn.image = baked
             nt.links.new(tn.outputs['Color'], bsdf.inputs['Base Color'])
@@ -8510,9 +8302,7 @@ class Build:
         return bm
 
     def alpha_image(self, m):
-        """the base colour texture with UnlitWF's alpha in its own: a mask texture's red or alpha (_AL_Source 1, 2,
-        at the texture's size), or the texture's alpha times the colour's, inverted (_AL_InvMaskVal); None if neither
-        image can be read"""
+        """base texture with UnlitWF's alpha: mask red/alpha (_AL_Source 1, 2) or inverted (_AL_InvMaskVal), or None"""
         key = ('alpha', m.tex, m.alpha, m.invert)
         if key in self._images:
             return self._images[key]
@@ -8567,7 +8357,7 @@ class Build:
         return bm
 
     def materials(self, an=None, base=None):
-        """the renderers' materials, as the avatar rests (base: what its animators and components have it show)"""
+        """the renderers' materials at rest (base: what animators and components show)"""
         for r in self.av.renderers:
             b = self.counterpart(r.go) if r.go else None
             if b is None or b[0] != 'obj' or b[1].type != 'MESH':
@@ -8599,7 +8389,7 @@ class Build:
                     for n in s.material.node_tree.nodes:
                         if n.type == 'TEX_IMAGE' and n.image is not None:
                             self.relink(n.image, a.path)
-        # the models' materials nothing uses any more give their names back ("Skin", not "Skin.001")
+        # free the names of unused model materials ("Skin", not "Skin.001")
         for mt in list(bpy.data.materials):
             if mt.users == 0 and mt.name not in self.post:
                 bpy.data.materials.remove(mt)
@@ -8611,8 +8401,7 @@ class Build:
                 self.post[mt.name] = self.post.pop(old)
 
     def variants(self, todo):
-        """glTF material variants (KHR_materials_variants, which Blender's exporter writes): one per [(name,
-        {(renderer, slot): material state})], each putting other materials in some renderers' slots"""
+        """glTF material variants (KHR_materials_variants), one per (name, {(renderer, slot): material state})"""
         todo = [(n, m) for n, m in todo if m]
         if not todo:
             return
@@ -8620,7 +8409,7 @@ class Build:
         if not prefs.KHR_materials_variants_ui:
             prefs.KHR_materials_variants_ui = True  # registers the variant properties the exporter reads
         scene = bpy.data.scenes[0]
-        entries = {}  # (mesh, Blender slot, material) -> its variant mesh data
+        entries = {}  # (mesh, slot, material) -> variant mesh data
         copied = set()
         for name, mats in todo:
             v = scene.gltf2_KHR_materials_variants_variants.add()
@@ -8718,7 +8507,7 @@ class Build:
                     if ('bone', o.as_pointer(), bn) not in mapped:
                         items.append([4, len(items), ('bone', o, bn), bn, None])
         items.sort(key=lambda x: (x[0], x[1]))
-        # out of the way first, so that no name is taken by one not renamed yet
+        # temporary names first, so no wanted name is still taken
         for it in items:
             t = self._tmpname()
             b = it[2]
@@ -8837,8 +8626,7 @@ def max_scale(M):
 
 
 def patch_materials(js, post):
-    """what the Unity materials say that Blender's exporter leaves out or gets wrong: colour, cutout or
-    blending, emission, tiling, culling"""
+    """fixes what Blender's exporter drops or gets wrong: colour, cutout or blending, emission, tiling, culling"""
     used = set(js.get('extensionsUsed', []))
 
     def xform(info, xf):
@@ -8929,13 +8717,10 @@ def png_bytes(im):
 
 
 def material_extras(js, binc, b):
-    """what hypr3d reads from the materials' extras that glTF has no place for (MatInfo's queue, stencil, outline,
-    back faces, light clamp, toon shading, matcap): "hypr3d_queue", "hypr3d_stencil", "hypr3d_outline", "hypr3d_back",
-    "hypr3d_light", "hypr3d_toon", "hypr3d_matcap". The textures only they use (outline masks, back textures, shade
-    textures, matcaps) are added to the GLB as PNGs"""
+    """writes material extras hypr3d_queue, _stencil, _outline, _back, _light, _toon, _matcap and their PNGs"""
     out = bytearray(binc)
     made = {}  # image file -> texture index
-    stems = {}  # an image name the exporter gave one image only -> that image
+    stems = {}  # unique exporter image name -> image index
     for i, im in enumerate(js.get('images', [])):
         stems[im.get('name')] = i if im.get('name') not in stems else None
 
@@ -9005,7 +8790,7 @@ def material_extras(js, binc, b):
             ct = mi.outline.get('tex')
             if ct:
                 f, xf, blend = ct
-                # (the main texture's own, when it's that: its RGB; its alpha may have been baked)
+                # main texture: reuse the exported one (its alpha may be baked)
                 t = m.get('pbrMetallicRoughness', {}).get('baseColorTexture', {}).get('index') if f == mi.tex else texture(f)
                 if t is not None:
                     o['texture'] = {'index': t}
@@ -9019,7 +8804,7 @@ def material_extras(js, binc, b):
             bk = {'color': list(mi.back['color'])}
             f = mi.back['tex']
             t = None
-            if f and f == mi.tex:  # the main texture's (its RGB; its alpha may have been baked)
+            if f and f == mi.tex:  # main texture's (alpha may be baked)
                 t = m.get('pbrMetallicRoughness', {}).get('baseColorTexture', {}).get('index')
             elif f:
                 t = texture(f)
@@ -9056,8 +8841,7 @@ def material_extras(js, binc, b):
 
 
 def gltf_array(js, binc, i, raw_type=False):
-    """accessor i as a numpy array of floats, (count, components); sparse accessors too, normalized integers scaled
-    (raw_type: in its own component type, as stored)"""
+    """accessor i as a float numpy array (count, components), sparse and normalized handled (raw_type: as stored)"""
     import numpy as np
     a = js['accessors'][i]
     n = a.get('count', 0)
@@ -9098,11 +8882,8 @@ def texture_wrap(db, guid):
 
 
 def cut_meshes(js, binc, b, an):
-    """MA's Mesh Cutters and Shape Changers' deletes on the exported GLB, as ReactiveObjectPass has them: the triangles
-    their vertex filters pick go while they are in effect. A cut in effect in every state the avatar can be in
-    (as its toggles and sliders give them) takes them out of the mesh; one that a toggle or slider switches puts them in
-    a primitive of their own, a part ("hypr3d_part" in its extras) the settings file hides while the cut is in effect,
-    as MA's NaNimation hides them in VRChat. Returns (the binary chunk, [(renderer, {its cuts}, part name)])"""
+    """MA Mesh Cutter / Shape Changer deletes (ReactiveObjectPass): always-on cuts are removed, switchable ones become
+    "hypr3d_part" primitives the settings hide while cut (MA's NaNimation); returns (bin, [(renderer, {cuts}, part)])"""
     cutters = an.mat.cutters if an.mat is not None else {}
     states = [an.cuts0] + [t['cuts'] for t in an.kept] + [k['cuts'] for s in an.sliders for k in s['keys']]
     ever = frozenset().union(*states)
@@ -9317,7 +9098,7 @@ def cut_meshes(js, binc, b, an):
                 x = subset(prim, tris[sel])
                 x.setdefault('extras', {})['hypr3d_part'] = codes_used[cd]
                 prims.append(x)
-        if not prims:  # all of it cut away: one empty triangle keeps the mesh a mesh
+        if not prims:  # all cut: a degenerate triangle keeps it a mesh
             prims.append(subset(mesh['primitives'][0], np.zeros((1, 3), np.int64)))
         mesh['primitives'] = prims
         said.append('%s: %d triangles cut away%s' % (nodes[ni]['name'], removed, ', %d in %d part(s) toggles hide' % (
@@ -9330,8 +9111,7 @@ def cut_meshes(js, binc, b, an):
 
 
 def mask_image(b, guid):
-    """a mask texture's pixels as 8-bit RGB (rows from the bottom, as Unity reads them) and its wrap modes; None if
-    it cannot be read"""
+    """a mask texture's 8-bit RGB pixels (rows bottom-up, as Unity reads them) and wrap modes; None if unreadable"""
     if not hasattr(b, '_masks'):
         b._masks = {}
     if guid in b._masks:
@@ -9444,8 +9224,7 @@ class Settings:
         return out
 
     def tf_node(self, g, comps):
-        """(the node, its local TRS as the GLB has it: (t, r as x y z w, s)) once a Transform's components are set so
-        (Unity's local values over where it is), or None"""
+        """(node, GLB local TRS (t, r xyzw, s)) with these Transform components set over Unity's locals, or None"""
         n, U = self.node(g), self.b.U
         if n is None or id(g) not in U:
             return None
@@ -9458,9 +9237,9 @@ class Settings:
         own = self.av.tf_rest.get(id(g))
         if own is not None and abs(Euler([math.radians(a) for a in own['e']], 'ZXY').to_quaternion().dot(q)) > 1 - 1e-6:
             rest['e'] = own['e']
-        D = FLIP @ P @ tf_local(comps, rest) @ Ug.inverted_safe() @ FLIP  # how the world has it move
+        D = FLIP @ P @ tf_local(comps, rest) @ Ug.inverted_safe() @ FLIP  # world-space change, glTF axes
         pn = self.parent[n]
-        Wp = self.world0[pn] if pn >= 0 else Matrix.Identity(4)  # (a local value: from where the export has them)
+        Wp = self.world0[pn] if pn >= 0 else Matrix.Identity(4)  # locals relative to the exported pose
         t2, q2, s2 = (Wp.inverted_safe() @ D @ self.world0[n]).decompose()
         return n, (tuple(t2), (q2.x, q2.y, q2.z, q2.w), tuple(s2))
 
@@ -9472,8 +9251,7 @@ class Settings:
         return tuple(t), (q.x, q.y, q.z, q.w), tuple(sc)
 
     def transforms(self, d, every=None):
-        """{node name: {'t', 'r', 's'}}: where these Transforms' components ({GameObject: {component: value}}) put
-        their nodes; only what differs from the node's own, or `every` {node: set of 't', 'r', 's'} of them"""
+        """{node name: {'t', 'r', 's'}} these components ({GameObject: {comp: value}}) give, if changed or in `every`"""
         out = {}
         for g, comps in sorted(d.items(), key=lambda x: str(x[0].name)):
             got = self.tf_node(g, comps)
@@ -9497,8 +9275,7 @@ class Settings:
         return out
 
     def loop(self, seconds, a, b):
-        """a toggle's Smooth Loop: {'seconds', 'a': {'shapes', 'transforms'}, 'b': {...}}: what goes from a to b and back;
-        None if it moves nothing hypr3d carries"""
+        """a Smooth Loop {'seconds', 'a': {'shapes', 'transforms'}, 'b': ...} (a -> b -> a); None if it moves nothing"""
         av = self.av
         props = {pr for pr in set(a) | set(b) if pr[0] in ('s', 't')}
         va = {pr: (a[pr] if pr in a else av.default(pr)) for pr in props}
@@ -9528,8 +9305,7 @@ class Settings:
         return out
 
     def rest_transforms(self):
-        """what the avatar's animations do to its Transforms at rest, with every toggle off, into the GLB's nodes (as
-        the shape keys' resting values go into its meshes)"""
+        """bakes the animations' resting Transforms (toggles off) into the GLB nodes, like resting shape keys"""
         moved = self.an.transform_diff(self.base, {})
         done = 0
         for g, comps in moved.items():
@@ -9605,8 +9381,7 @@ class Settings:
         vis0 = {id(r): av.visible(r, self.base) for r in av.renderers}
 
         def cut(show, hide, cuts):
-            """the parts cut_meshes() made: (shown, hidden) in a state that shows and hides these renderers and has
-            these cuts in effect, against the rest; a part shows with its mesh unless one of its cuts is in effect"""
+            """(shown, hidden) cut_meshes() parts for a state showing / hiding these renderers with these cuts"""
             on, off = [], []
             for r, ks, nm in self.an.pieces:
                 was = vis0[id(r)] and not ks & self.an.cuts0
@@ -9653,7 +9428,7 @@ class Settings:
         sliders = []
         for s in self.an.sliders:
             keys = []
-            every = {}  # the components of each node the slider moves, at any key
+            every = {}  # node -> components the slider moves at any key
             for k in s['keys']:
                 for n, x in self.transforms(k['transforms']).items():
                     every.setdefault(self.index[n], set()).update(x)
@@ -9677,7 +9452,7 @@ class Settings:
                 if tf:
                     y['transforms'] = tf
                 keys.append(y)
-            if s.get('axes') == 2:  # a puppet's: n x n keys over -1..1, row by row from the bottom
+            if s.get('axes') == 2:  # puppet: n x n keys over -1..1, rows from the bottom
                 sliders.append({'name': s['name'], 'axes': 2, 'value': _v(s['value'], 4), 'grid': s['grid'],
                                 'keys': keys})
             else:
@@ -9691,10 +9466,8 @@ class Settings:
                     'fingerRingL', 'fingerRingR', 'fingerLittleL', 'fingerLittleR', 'footL', 'footR')
 
     def global_colliders(self):
-        """MA's Global Colliders that end up as one of the avatar's hand or finger colliders, which its own PhysBones
-        collide with when they allow collision (VRChatGlobalColliderPass: manual ones first, the low priority ones
-        first among them; the others take the fingers left, ring, middle, little, then index). A head, torso or foot
-        one only touches contacts, which hypr3d does not have"""
+        """MA Global Colliders that become hand or finger colliders (VRChatGlobalColliderPass: manual first, low
+        priority first, then free fingers ring, middle, little, index); head, torso, foot ones only touch contacts"""
         comps = self.ma.comps.get('GlobalCollider', []) if self.ma else []
         if not comps:
             return []
@@ -9732,11 +9505,9 @@ class Settings:
         return [slot[t] for t in sorted(slot) if 2 <= t <= 11]
 
     def limit(self, d, roots, n, skip):
-        """a VRC PhysBone's limit (Angle, Hinge or Polar) as VRMC_springBone_limit has it (a cone, a hinge or a spherical
-        limit, radians), for the settings file's spring of the GLB node n and the bones under it, or None. The limit
-        turns by its Rotation (Unity's Euler angles) from a frame whose y is along the bone, to its first child that
-        swings. The GLB's frames are Unity's mirrored (x), so the rotation is mirrored; or, where n's bone has other
-        axes in the two, worked out from where its frame and that child are in both"""
+        """a VRC PhysBone limit as VRMC_springBone_limit (cone, hinge, spherical; radians) for node n's spring, or None;
+        its frame (y toward the first swinging child) turned by its Rotation, mirrored in x, or matched via both
+        frames"""
         kind = {1: 'cone', 2: 'hinge', 3: 'spherical'}.get(inum(d.get('limitType')))
         if kind is None:
             return None
@@ -9744,18 +9515,18 @@ class Settings:
         out = {'pitch': _r(ax), 'yaw': _r(min(az, math.pi / 2))} if kind == 'spherical' else {'angle': _r(ax)}
         E = Euler([math.radians(a) for a in vec3(d.get('limitRotation'))], 'ZXY').to_quaternion()  # Unity's: Z, X, Y
 
-        def from_y(v):  # the shortest turn from y to v (straight down: half a turn round x)
+        def from_y(v):  # shortest rotation y -> v (down: half turn about x)
             v = v.normalized()
             return Quaternion((0.0, 1.0, 0.0, 0.0)) if 1 + v.y < 1e-6 else Quaternion((1 + v.y, v.z, 0.0, -v.x)).normalized()
 
-        def mirrored(q):  # a turn in Unity's space as the GLB's has it: x mirrored
+        def mirrored(q):  # Unity rotation in GLB space (x mirrored)
             return Quaternion((q.w, q.x, -q.y, -q.z))
 
         def find(x):  # the GameObject of node n, from a root down
             if self.node(x) == n:
                 return x
             return next((f for f in (find(c) for c in self.ma.down(x)) if f is not None), None)
-        rot = mirrored(E)  # (where the GLB's frames are Unity's mirrored, as Blender's FBX import keeps them)
+        rot = mirrored(E)  # default: GLB frames are Unity's mirrored
         g = next((f for f in (find(r) for r in roots) if f is not None), None)
         kid = next((c for c in self.nodes[n].get('children', []) if 0 <= c < len(self.nodes) and not skip(c)), None)
         cg = next((c for c in self.ma.down(g) if self.node(c) == kid), None) if g is not None and kid is not None else None
@@ -9797,7 +9568,7 @@ class Settings:
             d, go = c.data, c.go
             if go is None or id(go) not in av.inside:
                 continue
-            kind = None  # 'inside': it keeps the bones in; 'plane': they keep to the side its normal (its Y) points to
+            kind = None  # 'inside': bones kept in; 'plane': on the normal side
             if 'm_colliderToHijack' in d:  # MA's Global Collider: a capsule along its root's Y
                 T = ma_objref(av, d.get('m_rootTransform')) or go
                 r = num(d.get('m_radius'), 0.05)
@@ -9818,7 +9589,7 @@ class Settings:
                 axis = Quaternion(quat(d.get('rotation'))) @ Vector((0.0, 1.0, 0.0))
                 pos = Vector(vec3(d.get('position')))
                 grow = max_scale(U[id(T)]) if id(T) in U else 1.0
-            else:  # Dynamic Bone Collider, or Plane Collider (no radius: its bound says which side the bones keep to)
+            else:  # Dynamic Bone or Plane Collider (no m_Radius)
                 T = go
                 axis = Vector([(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)][min(max(inum(d.get('m_Direction')), 0), 2)])
                 if 'm_Radius' not in d:
@@ -9832,7 +9603,7 @@ class Settings:
                 pos = Vector(vec3(d.get('m_Center')))
                 grow = U[id(T)].col[0].xyz.length if id(T) in U else 1.0
             n = self.near(T)
-            if n is None and id(T) in U:  # on the avatar's root, which is no node: on the armature's top one
+            if n is None and id(T) in U:  # avatar root isn't a node: use the armature's top
                 hips = self.node(self.human['Hips']) if 'Hips' in self.human else None
                 while hips is not None and self.parent[hips] >= 0:
                     hips = self.parent[hips]
@@ -9876,12 +9647,11 @@ class Settings:
                 rad = num(d.get('radius'))
                 cl = [name_of[id(y)] for y in listof(d.get('colliders')) if isinstance(y, Obj) and id(y) in name_of]
                 if inum(d.get('limitType')) != 0:
-                    # a limit is mostly there to keep the chain out of the body: the colliders hypr3d makes for the body
-                    # too (but for the bones that start inside them; the limit, written below, keeps those out)
+                    # limits keep chains out of the body: add body colliders (bones starting inside rely on the limit)
                     cl.append('body')
                 allow = inum(d.get('allowCollision'), 1)
                 if allow == 1 or (allow == 2 and truthy(dictof(d.get('collisionFilter')).get('allowSelf', '1'))):
-                    cl += globals_  # the avatar's own hands and fingers, as far as they are converted
+                    cl += globals_  # the avatar's converted hand/finger colliders
                 imm = num(d.get('immobile')) if inum(d.get('immobileType')) == 0 else 0.0
                 if inum(d.get('multiChildType')) == 0:  # a root with several children stays put
                     kids = [k for k in self.ma.down(R) if k not in ignore]
@@ -9927,8 +9697,7 @@ class Settings:
             if imm > 0.9:
                 y['immobile'] = _r(imm, 3)
             if 'pull' in d and imm > 0:
-                # its Immobile is of all of what its root's parent does (VRChat's All Motion), the walk's and the dances' too,
-                # as hypr3d's own "immobile" is of where the avatar goes
+                # VRChat's All Motion: damps the parent's walk and dance motion too (hypr3d's "immobile": travel only)
                 y['parentImmobile'] = _r(imm, 3)
             y['colliders'] = list(dict.fromkeys(cl))
             want |= set(y['colliders'])
@@ -9940,10 +9709,7 @@ class Settings:
         return [x for x in out_c if x['name'] in want], springs
 
     def floor(self):
-        """MA's Floor Adjuster (FloorAdjusterPass, after everything else MA does): the one that is active marks where
-        the floor is, and MA moves the hips so that the avatar stands there. hypr3d stands an avatar on its lowest point
-        (which is the same for the usual heels) unless the settings file says where its floor is: the adjuster's
-        height, in the GLB's units. None without one"""
+        """MA's Floor Adjuster (FloorAdjusterPass): the active one's height in GLB units, else None (lowest point)"""
         comps = self.ma.comps.get('FloorAdjuster', []) if self.ma else []
         if not comps:
             return None
@@ -10007,7 +9773,7 @@ class Settings:
 # ---------------------------------------------------------------- running it
 
 def write_emotes(db, av, human, ma, acts, out):
-    """the Action layers' humanoid clips as VRM animations next to the GLB, for the settings file's emotes"""
+    """writes the Action layers' clips as .vrma files beside the GLB; returns the settings' emotes"""
     axes, names = human_tpose(db, av, human, ma.U0)
     if axes is None:
         warn('the avatar has no humanoid T pose, so its %d emote(s) are not converted' % len(acts))
@@ -10021,12 +9787,12 @@ def write_emotes(db, av, human, ma, acts, out):
             fn = '%s.%s %d.vrma' % (os.path.splitext(out)[0], stem, k)
             k += 1
         used.add(fn)
-        if clip.tdof and getattr(axes, 'tdof', False):  # (an avatar without Translation DoF leaves them out, as here)
+        if clip.tdof and getattr(axes, 'tdof', False):  # without Translation DoF Unity ignores them too
             warn('emote "%s": the bones it moves (Translation DoF: %s) only turn' % (name, ', '.join(sorted(clip.tdof))))
         dur, faces = write_vrma(fn, axes, names, clip, shapes)
         e = {'file': os.path.basename(fn), 'name': name, 'loop': loop}
         if not loop:
-            e['hold'] = True  # as VRChat holds its last frame till the menu item goes off
+            e['hold'] = True  # VRChat holds the last frame till the item is off
         if abs(speed - 1.0) > 1e-4:
             e['speed'] = _r(speed, 4)
         song = getattr(clip, 'sound', None) and write_sound(name, clip.sound, os.path.splitext(fn)[0] + '.ogg')
@@ -10055,8 +9821,7 @@ class HandPoses:
 
 
 def write_hands(db, av, human, ma, poses, out):
-    """the Gesture layers' hand poses, as a VRM animation next to the GLB with a sign at each second (HandPoses), and
-    what the settings file's "hands" says of it; None without any"""
+    """writes the Gesture layers' hand poses as a .vrma, one sign per second; returns the settings' "hands" or None"""
     if not poses:
         return None
     axes, names = human_tpose(db, av, human, ma.U0)
@@ -10076,7 +9841,6 @@ def write_hands(db, av, human, ma, poses, out):
 
 
 def slider_variant(s, k):
-    """the name of the material variant a slider's key shows"""
     if s.get('axes') == 2:
         return '%s %g, %g' % (s['name'], round(k['at'][0], 3), round(k['at'][1], 3))
     return '%s %g%%' % (s['name'], round(k['at'] * 100, 1))
@@ -10115,7 +9879,7 @@ def convert(db, found, opts, outfits=(), emotes=()):
     log('avatar "%s" in %s: %d objects, %d renderers' % (av.name, found.asset.path, len(av.gos), len(av.renderers)))
     adopt(db, av)
     an = Analysis(db, av)
-    acts = action_clips(an)  # emotes and dances: their menu items are not outfit toggles
+    acts = action_clips(an)  # emotes/dances; their menu items aren't toggles
     for e in emotes:  # --emote's, after the Action layers'
         if any(a[1].src == e[1].src for a in acts):
             log('--emote: "%s" is one of the avatar\'s emotes already' % e[0])
@@ -10132,12 +9896,12 @@ def convert(db, found, opts, outfits=(), emotes=()):
     transform_rests(av, b.U)
     ma = ModularAvatar(av, dict(human), b.U, [m for x in setups for m in x.specs])
     an.ma = av.ma = ma
-    for k, g in list(human.items()):  # a humanoid bone MA's Replace Object replaced: its replacement
+    for k, g in list(human.items()):  # follow MA's Replace Object
         human[k] = ma.replaced.get(id(g), g)
     if an.vrcf is not None and an.vrcf.links:
         link_armatures(ma, an.vrcf, human, animated_transforms(an))
     jaw = human.get('Jaw')
-    if jaw is not None and id(jaw) in an.chained():  # Unity's guess, which the avatar does not use as a jaw
+    if jaw is not None and id(jaw) in an.chained():  # Unity's guess; not really a jaw
         warn('the Jaw bone %s swings with a PhysBone, so it is left out of the humanoid map' % jaw.data.get('m_Name'))
         del human['Jaw']
     kept, base = an.toggles()

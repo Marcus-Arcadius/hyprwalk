@@ -7,8 +7,8 @@
 
 namespace h3d {
 
-    // A sound an emote plays (a dance's song, "sound" in the settings file): an Ogg Vorbis file decoded whole, 16 bits
-    // a sample, interleaved, mono or stereo. The speaker (speaker.hpp) plays it
+    // an emote's sound ("sound" in the settings file): an Ogg Vorbis file decoded whole to interleaved 16-bit mono or
+    // stereo, played by speaker.hpp
     struct SSound {
         std::string          file;
         int                  rate = 0, channels = 0;
@@ -22,7 +22,7 @@ namespace h3d {
         }
     };
 
-    // the longest a sound can be, and its file's biggest (what decoding one would take otherwise is a file's say)
+    // limits on sound length and file size, so a file can't make decoding take any amount of memory
     constexpr double SOUND_MAX_SECONDS = 600;
     constexpr size_t SOUND_MAX_BYTES   = 128u << 20;
 

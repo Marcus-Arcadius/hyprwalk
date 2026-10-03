@@ -14,9 +14,8 @@ namespace h3d {
     // thrown from inside a load when it gets cancelled
     struct SCancelled {};
 
-    // Runs `load(request, cancel)` on a worker thread. `fd()` becomes readable
-    // when a result is waiting, which `take()` then hands over (on the main
-    // thread). Results need `req` and `error` members, requests a `path`.
+    // runs `load(request, cancel)` on a worker thread; `fd()` turns readable when a result waits for `take()` (main
+    // thread). Results need `req` and `error` members, requests a `path`
     template <typename Req, typename Res>
     class CBackgroundLoader {
       public:
@@ -36,8 +35,8 @@ namespace h3d {
         int fd() const {
             return m_fd;
         }
-        // a load is on its way: started, and its result not taken yet (a result waiting counts, as the main thread
-        // only takes it in between Hyprland's requests: within one hyprctl --batch it's still on its way)
+        // started and its result not taken yet; a waiting result counts, as the main thread takes it only between
+        // Hyprland's requests (within one hyprctl --batch it's still busy)
         bool busy() const {
             return m_busy;
         }

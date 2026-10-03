@@ -35,8 +35,7 @@
 namespace h3d {
 
     namespace {
-        // the haze on a map's backdrop, relative to the map's own: it's kilometres away, and would be
-        // all fog at the map's density
+        // backdrop fog density relative to the map's: it's kilometres away and would be all fog otherwise
         constexpr float BACKDROP_FOG = 0.125f;
 
         // tiny per-program uniform location cache
@@ -191,7 +190,6 @@ namespace h3d {
             UNIT_OUTLINE_MASK = 17, // the avatar's, in its vertex shader
         };
 
-        // which texture unit each of MAP_FS_BODY's samplers reads
         void setSamplerUnits(GLuint prog) {
             static constexpr std::pair<const char*, int> UNITS[] = {
                 {"uBaseTex", UNIT_BASE},         {"uEmissiveTex", UNIT_EMISSIVE},       {"uOccTex", UNIT_OCCLUSION},       {"uLayerTex", UNIT_LAYER},
@@ -204,7 +202,6 @@ namespace h3d {
                 glUniform1i(U(prog, name), unit);
         }
 
-        // the uniforms of a map material in MAP_FS_BODY, and its textures
         void setMaterial(GLuint prog, const SMapMaterial& m, const std::vector<GLuint>& textures, const std::vector<SMapImage>& images, GLuint white) {
             const auto loaded = [&](int image) { return image >= 0 && (size_t)image < textures.size() && textures[image]; };
             const auto tex    = [&](int unit, int image) {
@@ -249,7 +246,7 @@ namespace h3d {
             glUniform1i(U(prog, "uDoubleSided"), m.doubleSided ? 1 : 0);
             const int layer = !loaded(m.layerTex) ? 0 : loaded(m.layerMaskTex) ? 2 : 1;
             glUniform1i(U(prog, "uLayer"), layer);
-            // a tint mask and a decal texture go where the layers' textures would (CS2 has them on materials without layers)
+            // tint mask and decal use the layer units (CS2 has them on materials without layers)
             const int tintMask = layer || m.effect || !loaded(m.tintMaskTex) ? 0 : 1 + m.tintMaskUV;
             const int decal    = layer || m.effect || !loaded(m.decalTex) ? 0 : m.decal;
             glUniform1i(U(prog, "uTintMask"), tintMask);
@@ -317,7 +314,7 @@ namespace h3d {
         // lightmap mips stop early: a chart shrunk much further bleeds into its neighbours
         constexpr int LIGHTMAP_LEVELS = 4;
 
-        // the game's lighting textures (HYPR3D_lighting); returns the bytes used
+        // HYPR3D_lighting textures; returns the bytes used
         size_t uploadLighting(const SMapModel& model, auto& gl) {
             const auto& L = model.lighting;
             size_t      bytes = 0;
@@ -328,7 +325,7 @@ namespace h3d {
                 auto&       out = gl.lightSets[k];
                 out.average     = {s.average[0], s.average[1], s.average[2]};
                 if (s.irradiance) {
-                    // shared exponent HDR, its mips made on the loader thread (it can't render into it)
+                    // RGB9E5 HDR; mips are made on the loader thread (GL can't render into it to generate them)
                     glGenTextures(1, &out.irradiance);
                     glBindTexture(GL_TEXTURE_2D, out.irradiance);
                     glTexStorage2D(GL_TEXTURE_2D, s.irradiance.levels, GL_RGB9_E5, s.irradiance.w, s.irradiance.h);
@@ -380,8 +377,7 @@ namespace h3d {
             clampedLinear(GL_TEXTURE_3D, false);
             glBindTexture(GL_TEXTURE_3D, 0);
 
-            // how blurry the fog's view of the sky gets (CS2's fog cube goes 7 mips down from a face the
-            // width of about half the panorama)
+            // sky lod for fog: CS2's fog cube is 7 mips down from a face about half the panorama wide
             if (L.skyImage >= 0 && (size_t)L.skyImage < model.images.size())
                 gl.skyLod = std::max(0.f, std::log2((float)std::max(model.images[L.skyImage].w, 1)) - 5.f);
             return bytes;
@@ -407,7 +403,7 @@ namespace h3d {
         m_progLight      = gl::makeProgram("light", shaders::LIGHT_VS, shaders::LIGHT_FS);
         m_progSky        = gl::makeProgram("sky", shaders::SKY_VS, withCommon(shaders::SKY_FS_BODY, true));
         m_progWorld      = gl::makeProgram("world", shaders::WORLD_VS, withCommon(shaders::WORLD_FS_BODY, true, true));
-        // (with blending's second source for glass when there is one, else without)
+        // dual-source blending for glass when available
         m_dualSource = dualSource && gl::hasExtension("GL_EXT_blend_func_extended");
         m_progMap    = m_dualSource ? gl::makeProgram("map", shaders::MAP_VS, withCommon(shaders::MAP_FS_BODY, true, true, true)) : 0;
         if (!m_progMap) {
@@ -442,7 +438,6 @@ namespace h3d {
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
 
-        // world mesh
         glGenVertexArrays(1, &m_worldVAO);
         glGenBuffers(1, &m_worldVBO);
         glBindVertexArray(m_worldVAO);
@@ -468,7 +463,6 @@ namespace h3d {
             return false;
         }
 
-        // sun
         m_sunDir = world.sunDir;
         GLint maxTex = 2048;
         glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTex);
@@ -542,9 +536,7 @@ namespace h3d {
         return true;
     }
 
-    // light space box around `region` (what gets shadows), deep enough for
-    // everything in `casters`; the view never turns and the box is snapped to
-    // whole texels, so moving it along doesn't make edges crawl
+    // light-space box around `region`, deep enough for `casters`; a fixed view and texel snapping stop edge crawl
     void CRenderer::setupSun(const SAABB& casters, const SAABB& region) {
         const V3 c    = casters.center();
         const M4 view = M4::lookAt(c + m_sunDir * (length(casters.size()) + 10.f), c, {0, 1, 0});
@@ -685,7 +677,7 @@ namespace h3d {
         glVertexAttribIPointer(5, 4, GL_UNSIGNED_SHORT, stride, (void*)offsetof(SAvatarVertex, joints));
         glEnableVertexAttribArray(6);
         glVertexAttribPointer(6, 4, GL_UNSIGNED_BYTE, GL_TRUE, stride, (void*)offsetof(SAvatarVertex, weights));
-        // what the morphs move the vertices by (without any, attributes 7 and 8 read the zeros drawAvatar sets)
+        // morph offsets (without morphs, attributes 7 and 8 read the zeros drawAvatar sets)
         if (!model->morphs.empty() && model->morphEnd > model->morphFirst) {
             glGenBuffers(1, &m_avatar.morphVBO);
             glBindBuffer(GL_ARRAY_BUFFER, m_avatar.morphVBO);
@@ -787,7 +779,7 @@ namespace h3d {
         return true;
     }
 
-    // adds what changed since the last frame; every so often all of it again, so rounding can't pile up
+    // adds the changes since last frame; a full rewrite every so often keeps rounding from piling up
     void CRenderer::updateMorphs(const std::vector<float>& w) {
         const auto& md = *m_avatar.model;
         auto&       a  = m_avatar;
@@ -863,7 +855,7 @@ namespace h3d {
             glUniform4f(U(prog, "uBaseXf"), m.baseXf[0], m.baseXf[1], m.baseXf[2], m.baseXf[3]);
             glUniform2f(U(prog, "uBaseOffset"), m.baseXf[4], m.baseXf[5]);
             glUniform1f(U(prog, "uAlphaScale"), cut ? m.baseColor[3] : 1.f);
-            // blended hair and cloth: whatever is mostly there
+            // blended hair and cloth: shadow where mostly opaque
             glUniform1f(U(prog, "uCutoff"), !cut ? 0.f : m.alphaMode == ALPHA_MASK ? m.alphaCutoff : 0.5f);
             glDrawElements(GL_TRIANGLES, b.count, GL_UNSIGNED_INT, (void*)(b.first * sizeof(uint32_t)));
         }
@@ -932,7 +924,7 @@ namespace h3d {
         std::vector<size_t> casters;
         for (size_t i = 0; i < f.panels->size(); ++i) {
             const auto& p = (*f.panels)[i];
-            // the wallpaper hangs flat on the wall, no point
+            // the wallpaper lies flat on the wall: no shadow
             if (p.layer == 0 || p.alpha < 0.5f || p.clip.w < 1 || p.clip.h < 1 || !m_panelGL.contains(p.key))
                 continue;
             casters.push_back(i);
@@ -1048,7 +1040,7 @@ namespace h3d {
         glBindRenderbuffer(GL_RENDERBUFFER, m_msaaColor);
         glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_RGBA8, w, h);
         glBindRenderbuffer(GL_RENDERBUFFER, m_msaaDepth);
-        // with a stencil for the avatar's (Unity's stencil masks: eyes that show through the hair)
+        // with stencil for the avatar's Unity stencil masks (eyes showing through hair)
         glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_DEPTH24_STENCIL8, w, h);
 
         glBindFramebuffer(GL_FRAMEBUFFER, m_msaaFBO);
@@ -1306,8 +1298,7 @@ namespace h3d {
             if (!wanted(b))
                 continue;
             const auto& m = model.materials[b.material];
-            // Source's decals that multiply what's under them, glows that add to it, and glass that keeps what's
-            // behind it by as much as its second color says, channel by channel (MAP_FS_BODY's fragKeep)
+            // mod2x decals, additive glows, and glass keeping the background per channel by its second color (fragKeep)
             const int want = m.alphaMode != ALPHA_BLEND ? BLEND_NORMAL : m.glass && m_dualSource ? GLASS_DUAL : m.blend;
             if (want != blending) {
                 blending = want;
@@ -1322,7 +1313,7 @@ namespace h3d {
             }
             setMaterial(prog, m, m_map.textures, model.images, m_map.white);
             glUniform1i(U(prog, "uMode"), b.sky ? 2 : m.unlit ? 1 : 0);
-            // light the 3D skybox adds (its clouds, the sun's glow) goes onto the sky behind it, which the shader knows
+            // the 3D skybox's additive light (clouds, sun glow) goes over the sky, which the shader knows
             glUniform1i(U(prog, "uOverSky"), backdrop && want == BLEND_ADD ? 1 : 0);
             glDrawElements(GL_TRIANGLES, b.count, GL_UNSIGNED_INT, (void*)(b.first * sizeof(uint32_t)));
         }
@@ -1333,7 +1324,7 @@ namespace h3d {
     void CRenderer::setBakedLighting(GLuint prog, const SFrameParams& f, size_t set) {
         const bool baked = m_map.model && m_map.model->lighting.present && !m_map.lightSets.empty();
         glUniform1i(U(prog, "uBaked"), baked ? 1 : 0);
-        // the backdrop's effects fade by distances in its own, smaller units (its fog is the map's, where it appears)
+        // backdrop effects fade by distances in its own, smaller units; its fog is the map's
         if (set == 1 && m_map.model) {
             const M4&   b = m_map.model->backdropTransform;
             const float s = std::max(length(V3{b.m[0], b.m[1], b.m[2]}), 1e-3f);
@@ -1355,8 +1346,7 @@ namespace h3d {
         bind(UNIT_IRRADIANCE, GL_TEXTURE_2D, gl.irradiance);
         bind(UNIT_DIRECTIONAL, GL_TEXTURE_2D, gl.directional);
         bind(UNIT_BAKED_SHADOW, GL_TEXTURE_2D, gl.shadows);
-        // CS2 shadows its sun by (1 - its channel of the baked shadows) times its realtime shadow on every surface; a sun
-        // with no channel has only the realtime shadow, as the probes' alpha says then too (0: none baked)
+        // CS2: sun shadow = (1 - baked channel) * realtime shadow; a sun with no channel has only the realtime one
         glUniform1i(U(prog, "uBakedShadow"), gl.shadows ? 1 : 0);
         bind(UNIT_PROBES, GL_TEXTURE_3D, gl.probes);
         const bool sky = L.skyImage >= 0 && (size_t)L.skyImage < m_map.textures.size() && m_map.textures[L.skyImage];
@@ -1389,9 +1379,7 @@ namespace h3d {
         glUniform1f(U(prog, "uExposure"), f.exposure * std::exp2(k[7]));
     }
 
-    // A game's 3D skybox, kilometres of scenery around the map. It gets a depth
-    // range of its own, the map's stays as fine as it was, and the map then
-    // draws over it (the way Source draws its 3D skybox).
+    // a game's 3D skybox in its own depth range so the map keeps its precision; the map draws over it, as in Source
     void CRenderer::drawBackdrop(const SFrameParams& f, int lightCount, const float* lights) {
         if (!m_map.model || !std::ranges::any_of(m_map.model->batches, [](const SMapBatch& b) { return b.backdrop && b.render; }))
             return;
@@ -1426,9 +1414,8 @@ namespace h3d {
         if (!m_avatar.live || !f.avatar.visible)
             return;
         const auto& model = *m_avatar.model;
-        // a batch's material says which pass it's in (a material variant may make it blended, or not): what's opaque
-        // or alpha tested before the windows, what blends or tests the stencil after them and the map's glass; each
-        // by its render queue, as Unity draws them (a stencil mask before what it shows through)
+        // opaque and alpha-tested batches before the windows, blended or stencil-tested ones after them and the map's
+        // glass (as the material variant says); by render queue as in Unity, stencil masks first
         const auto&                         mats = avatarMaterials(f);
         std::vector<std::pair<int, size_t>> order; // (queue, batch)
         for (size_t i = 0; i < model.batches.size(); ++i) {
@@ -1446,7 +1433,7 @@ namespace h3d {
         glEnable(GL_DEPTH_TEST);
         glBlendEquation(GL_FUNC_ADD);
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-        // the output is drawn upside down (flipY()), which turns the triangles round: front faces go clockwise
+        // flipY() mirrors the output, so front faces are clockwise
         glFrontFace(GL_CW);
         glCullFace(GL_FRONT);
 
@@ -1458,8 +1445,7 @@ namespace h3d {
         glUniform1i(U(prog, "uJoints"), 5);
         setSamplerUnits(prog);
         setBakedLighting(prog, f, 0);
-        // in a map with the game's lighting, it's lit like the game lights players: by the light
-        // probe volume it's in, per pixel
+        // with baked lighting, lit the way the game lights players: per pixel from the probe volume it's in
         int  mode = LIGHT_OWN;
         M4   probe = M4::identity();
         V3   lo, hi;
@@ -1537,7 +1523,7 @@ namespace h3d {
                 }
             }
             glUniform3f(U(prog, "uLightClamp"), m.lightClamp[0], m.lightClamp[1], m.lightClamp[2]);
-            // toon shading and the matcap: their textures where the layer mask and the detail mask go (in MAP_FS_BODY)
+            // toon shade and matcap textures use the layer mask and detail mask units (MAP_FS_BODY)
             const auto& tn = m.toon;
             glUniform1i(U(prog, "uToon"), !tn.on ? 0 : loaded(tn.shadeTex) ? 2 : 1);
             if (tn.on) {
@@ -1570,7 +1556,7 @@ namespace h3d {
                 glUniform3f(U(prog, "uOutlineMix"), ol.base, ol.tint, ol.lit);
                 glActiveTexture(GL_TEXTURE0 + UNIT_OUTLINE_MASK);
                 glBindTexture(GL_TEXTURE_2D, mask ? m_avatar.textures[ol.maskTex] : m_avatar.white);
-                // its color's texture, where the detail texture goes (an avatar has none, and the samplers are all taken)
+                // outline color texture in the detail unit (avatars have none; every other sampler is taken)
                 const bool colorTex = loaded(ol.colorTex);
                 glUniform2f(U(prog, "uOutlineTex"), colorTex && ol.colorBlend < 0 ? 1.f : 0.f, colorTex && ol.colorBlend >= 0 ? ol.colorBlend : 0.f);
                 if (colorTex) {
@@ -1585,7 +1571,7 @@ namespace h3d {
                 glDisable(GL_CULL_FACE);
             }
             draw();
-            // UnlitWF's MaskOut_Blend: again where its mask hid it, fainter
+            // UnlitWF's MaskOut_Blend: drawn again, fainter, where its stencil mask hid it
             if (st.on && st.again > 0) {
                 glEnable(GL_BLEND);
                 glDepthFunc(GL_LEQUAL);
@@ -1630,10 +1616,8 @@ namespace h3d {
         const auto visible = [&](const SPanel& p) { return p.front == front && p.clip.w >= 1 && p.clip.h >= 1 && m_panelGL.contains(p.key); };
         const auto facing  = [&](const SPanel& p) { return dot(f.eye - p.pose.origin, p.pose.normal) > 0.f; };
 
-        // the opaque parts of panels out in the world go into the depth buffer
-        // first, so they hide each other properly where they cross; the ones on
-        // the desktop wall are stacked in parallel and just drawn back to front.
-        // The ones in front of everything are drawn last, over it all, in order
+        // opaque parts of world panels go into the depth buffer first so crossing panels occlude correctly; desktop
+        // wall panels are parallel and drawn back to front; front panels (over everything) go last, in order
         glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
         glDepthMask(GL_TRUE);
         glDisable(GL_BLEND);
@@ -1807,7 +1791,7 @@ namespace h3d {
         drawMap(f, viewProj, lightCount, lights, MAP_PASS_OPAQUE);
         drawAvatar(f, viewProj, lightCount, lights, false);
         drawPanels(f, viewProj, false);
-        // glass and such after the windows: they're mostly on walls behind it
+        // glass after the windows, which are mostly on walls behind it
         drawMap(f, viewProj, lightCount, lights, MAP_PASS_BLEND);
         drawAvatar(f, viewProj, lightCount, lights, true);
         drawPanels(f, viewProj, true);

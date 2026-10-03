@@ -1,6 +1,5 @@
-# obsws.py REQUEST [JSON] [--save FILE]: one obs-websocket (v5, built into OBS) request to the OBS running in
-# tools/test/vm's VM, on localhost:4455 without a password, and its answer as JSON. --save FILE writes a
-# GetSourceScreenshot's image there (its imageData, decoded). The standard library only: a websocket by hand.
+# obsws.py REQUEST [JSON] [--save FILE]: one obs-websocket v5 request to the VM's OBS on localhost:4455 (no password);
+# prints the answer as JSON. --save writes a GetSourceScreenshot's image to FILE. Standard library only.
 import base64
 import hashlib
 import json

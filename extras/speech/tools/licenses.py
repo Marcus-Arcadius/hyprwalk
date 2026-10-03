@@ -30,7 +30,6 @@ w('- **isolated**: the whole utterance is the vowel: a kana read aloud (あ, い
 w('- **word**: the vowel cut out of a short word, next to a voiceless stop or affricate so the cut falls in the silent closure (the あ of あか, both う of うつ, ...). '
   'These add speakers where isolated vowels are scarce, above all for あ and う.\n')
 
-# counts
 w('## Counts\n')
 w('| Vowel | Recordings | Isolated | From words | Male | Female | Speakers |')
 w('|---|---|---|---|---|---|---|')

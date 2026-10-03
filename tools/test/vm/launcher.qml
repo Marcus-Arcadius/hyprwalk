@@ -1,8 +1,7 @@
-// launcher.qml: a launcher as a shell has one on a keybind (Serpantinum's on Super+D): a layer surface over the whole
-// screen on the overlay layer, see-through but for a box in the middle, that maps when it's shown and takes the keyboard
-// then (focusable: on demand, as Quickshell's PanelWindow asks for it); a click outside the box closes it, and so does
-// Esc. And a smaller one that takes the keyboard exclusively, as rofi, fuzzel and wofi do. What's typed into them and
-// clicked in them goes to /tmp/h3d-launcher.log, a line each.
+// launcher.qml: a launcher as a shell opens on a keybind: a full-screen layer surface on the overlay layer, see-through
+// but for a box in the middle, that maps when shown and then takes the keyboard on demand (Quickshell's focusable
+// PanelWindow); a click outside the box or Esc closes it. And a smaller one with exclusive keyboard focus, as rofi,
+// fuzzel and wofi take. Typing and clicks go to /tmp/h3d-launcher.log, a line each.
 //   quickshell -p launcher.qml
 //   quickshell ipc -p launcher.qml call launcher toggle     (or: exclusive)
 import QtQuick

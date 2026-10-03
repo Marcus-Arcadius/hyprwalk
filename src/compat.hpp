@@ -1,15 +1,11 @@
 #pragma once
 
-// What Hyprland 0.56 changed for plugins, said one way so hypr3d builds against 0.55 and 0.56 alike. In 0.56 the
-// window and monitor lists, finding the monitor at a point, warping the cursor, scheduling a frame and suspending
-// hidden windows left CCompositor for state trackers and controllers (Desktop::windowState(), State::monitorState(),
-// Pointer::pointerController(), Desktop::globalWindowController()); the pointer manager and the cursor's shape
-// overrides went into namespace Pointer, and fullscreen into Fullscreen::controller(), its modes no longer bit flags; a
-// window's or layer's animated position and size are reached through positionAnimation() and sizeAnimation(), a
-// layer's or popup's fade through alpha(); a window or layer that closes fades out as a picture of it, so nothing in
-// the lists is fading out; and CPointerManager::renderSoftwareCursorsFor, which the plugin hooks, takes another flag.
-// With 0.55 each of these is what the code said before. 0.56 is told apart by its output/ headers (Monitor.hpp moved
-// there).
+// Hyprland 0.55/0.56 compatibility: one API for both. 0.56 moved the window and monitor lists, monitor lookup, cursor
+// warps, frame scheduling and window suspension from CCompositor to state trackers and controllers; the pointer manager
+// and cursor shape overrides into namespace Pointer; fullscreen into Fullscreen::controller(), whose modes are no
+// longer bit flags. Animated position and size became positionAnimation() / sizeAnimation(), fades alpha(); closing
+// windows and layers fade out as snapshots, so nothing in the lists is fading out; renderSoftwareCursorsFor gained a
+// flag. 0.56 is detected by its output/ headers (Monitor.hpp moved there).
 
 #if __has_include(<hyprland/src/output/Monitor.hpp>)
 #define H3D_HYPRLAND_056 1
@@ -46,8 +42,7 @@ namespace h3d::hypr {
     namespace Cursor = ::Cursor;
 #endif
 
-    // how many flags CPointerManager::renderSoftwareCursorsFor takes after the cursor's position (the plugin hooks it):
-    // 0.56 added screencopy before forceRender
+    // renderSoftwareCursorsFor (hooked) flags after the position: 0.56 added screencopy before forceRender
 #ifdef H3D_HYPRLAND_056
     inline constexpr int SOFT_CURSOR_FLAGS = 2;
 #else
@@ -99,7 +94,7 @@ namespace h3d::hypr {
 #endif
     }
 
-    // the cursor to there, and the monitor there focused; force: even with cursor:no_warps (warpCursorTo)
+    // warps the cursor and focuses the monitor there; force: even with cursor:no_warps (warpCursorTo)
     inline void warpCursor(const Vector2D& to, bool force) {
 #ifdef H3D_HYPRLAND_056
         Pointer::pointerController()->warpTo(to, force);
@@ -108,7 +103,7 @@ namespace h3d::hypr {
 #endif
     }
 
-    // a frame asked for on the monitor (scheduleFrameForMonitor)
+    // schedules a frame on the monitor (scheduleFrameForMonitor)
     inline void scheduleFrame(const PHLMONITOR& mon) {
 #ifdef H3D_HYPRLAND_056
         mon->scheduleFrame();
@@ -117,7 +112,7 @@ namespace h3d::hypr {
 #endif
     }
 
-    // windows on workspaces that aren't shown told they're suspended, the others that they aren't (updateSuspendedStates)
+    // marks windows on hidden workspaces suspended and the rest not (updateSuspendedStates)
     inline void updateSuspendedStates() {
 #ifdef H3D_HYPRLAND_056
         Desktop::globalWindowController()->updateSuspendedStates();
@@ -135,7 +130,7 @@ namespace h3d::hypr {
 #endif
     }
 
-    // a window's or layer's position and size as they're animated (m_realPosition, m_realSize)
+    // animated position and size of a window or layer (m_realPosition, m_realSize)
     template <typename T>
     inline PHLANIMVAR<Vector2D>& realPosition(const T& v) {
 #ifdef H3D_HYPRLAND_056

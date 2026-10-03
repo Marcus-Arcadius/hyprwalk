@@ -1,32 +1,20 @@
 #!/usr/bin/env python3
-# fuzz.py: feeds hypr3d's loaders broken maps and avatars, and keeps whatever crashes them, trips a sanitizer, hangs
-# or runs away with memory. They run inside Hyprland, on its loader thread (and what they load is uploaded and drawn
-# on its main thread): any of that takes the compositor down. Plain python3.
+# fuzz.py: feeds hypr3d's loaders broken maps and avatars and keeps whatever crashes them, trips a sanitizer, hangs or
+# runs away with memory (inside Hyprland any of that takes the compositor down). Plain python3.
 #
 #   fuzz.py map OUTDIR [-n N] [--seed S] [--jobs J] [--timeout T] [--harness BIN]
 #   fuzz.py avatar OUTDIR --avatars DIR [the same]
 #   fuzz.py replay CASE [--harness BIN]      one case again (a .glb, or an avatar case's folder), with the output
 #
-# The harness is tools/test/harness's shot built with AddressSanitizer and UndefinedBehaviorSanitizer (`./build.sh -f
-# tools/test/fuzz/asan.mk` makes build-asan/shot), drawing on Mesa's llvmpipe. It loads each case as the plugin does
-# (an exception is a failed load, as on the loader thread), draws it, and for an avatar runs its physics, an emote
-# from its settings, one from a file, gestures, a face, the look-at, lip sync and the Action Menu.
+# The harness is shot built with ASan and UBSan (`./build.sh -f tools/test/fuzz/asan.mk` makes build-asan/shot) on
+# llvmpipe; it loads, draws and animates each case as the plugin would. Seeds: litmap.py's LitCourt.glb; BoothAccessories
+# from --avatars DIR as converted, as a VRM 0.x and as a VRM 1.0, with BoothGimmicks.hands.vrma as its emote file;
+# assets.py's ToonTest.glb; toonballs.py's ToonBalls.glb. A case is a seed with one to three mutations of its JSON, its
+# binary chunk, or an avatar's settings or emote file.
 #
-# Seeds: map: tools/test/vm/litmap.py's LitCourt.glb (everything tools/cs2map.py writes). avatar: BoothAccessories
-# (tools/unity2hypr3d.py's output: skins, morphs, variants, and its settings file) from --avatars DIR (as run.sh
-# --avatars takes it), as it is, as a VRM 0.x and as a VRM 1.0 (VRMC_vrm, VRMC_springBone with extended colliders and
-# limits, VRMC_node_constraint, VRMC_materials_mtoon), with BoothGimmicks.hands.vrma as its emote file; ToonTest.glb
-# (tools/test/vm/assets.py: outlines, stencils); and ToonBalls.glb (tools/test/harness/toonballs.py: MToon 1.0 and
-# 0.x shading, the converter's toon and matcap extras). A case is a seed with one to three mutations of its JSON (numbers
-# made negative, zero, NaN, infinite or huge, indices out of range or pointing back up the tree, wrong types, keys
-# gone, arrays emptied or grown, strings made long) or of its binary chunk (indices, joints and floats in the
-# accessors' data, images' bytes, the chunk or the whole file cut short, the GLB header's lengths), or, for an avatar,
-# of its settings file or its emote file.
-#
-# OUTDIR gets seeds/, cases/ (every case, and what the harness printed), findings/<kind>-<where>/ (the first case of
-# each distinct problem: the input and the log) and summary.txt. Kinds: asan, ubsan, alloc (a runaway allocation:
-# over 2 GB asked for, or 4 GB resident), crash (a signal with no report), hang (over the timeout), error (any other
-# exit). A clean load, or a load that fails with a message, is fine.
+# OUTDIR gets seeds/, cases/, findings/<kind>-<where>/ (the first case of each distinct problem) and summary.txt.
+# Kinds: asan, ubsan, alloc (over 2 GB asked for, or 4 GB resident), crash (a signal, no report), hang, error (any other
+# exit). A clean load, or one that fails with a message, is fine.
 import argparse
 import concurrent.futures
 import copy
@@ -86,9 +74,9 @@ def map_seeds(out):
     return {'LitCourt': os.path.join(out, 'LitCourt.glb')}
 
 
-LIMITS = [{'cone': {'angle': 0.8, 'rotation': [-0.70711, 0, 0, 0.70711]}}, {'hinge': {'angle': 1.2}},  # (VRMC_springBone_limit's)
+LIMITS = [{'cone': {'angle': 0.8, 'rotation': [-0.70711, 0, 0, 0.70711]}}, {'hinge': {'angle': 1.2}},
           {'spherical': {'pitch': 0.6, 'yaw': 0.9, 'rotation': [0, 0.38268, 0, 0.92388]}}]
-VRM0_BONES = {  # the settings file's humanoid names (Unity's) as VRM 0.x's
+VRM0_BONES = {  # settings humanoid names (Unity's) -> VRM 0.x
     'Hips': 'hips', 'Spine': 'spine', 'Chest': 'chest', 'UpperChest': 'upperChest', 'Neck': 'neck', 'Head': 'head',
     'LeftEye': 'leftEye', 'RightEye': 'rightEye', 'Jaw': 'jaw', 'LeftShoulder': 'leftShoulder', 'LeftUpperArm': 'leftUpperArm',
     'LeftLowerArm': 'leftLowerArm', 'LeftHand': 'leftHand', 'RightShoulder': 'rightShoulder', 'RightUpperArm': 'rightUpperArm',
@@ -102,7 +90,7 @@ for side, s in (('Left', 'left'), ('Right', 'right')):
 
 
 def chains(js, names):
-    """spring chains: each named node and its descendants down its first children"""
+    """spring chains: each named node down its first children (up to 6)"""
     idx = {n.get('name'): i for i, n in enumerate(js['nodes'])}
     out = []
     for name in names:
@@ -122,7 +110,7 @@ def avatar_seeds(out, avatars):
     src = os.path.join(avatars, 'BoothAccessories.glb')
     shutil.copy(src, os.path.join(out, 'plain.glb'))
     settings = json.load(open(os.path.join(avatars, 'BoothAccessories.hypr3d.json'), encoding='utf-8'))
-    # an emote from the settings file too, from the emote file every case has next to it
+    # a settings emote too, playing the dance.vrma every case has
     settings['emotes'] = settings.get('emotes', []) + [{'name': 'Fuzz', 'file': 'dance.vrma', 'speed': 1.5, 'loop': True}]
     json.dump(settings, open(os.path.join(out, 'plain.hypr3d.json'), 'w', encoding='utf-8'), ensure_ascii=False)
     emote = os.path.join(out, 'dance.vrma')
@@ -212,7 +200,7 @@ def avatar_seeds(out, avatars):
     open(os.path.join(out, 'vrm1.glb'), 'wb').write(glb_bytes(v1, bin_))
 
     subprocess.run([sys.executable, os.path.join(REPO, 'tools', 'test', 'vm', 'assets.py'), out], check=True, stdout=subprocess.DEVNULL)
-    # (the VRMs' own humanoid, faces and springs, not the settings file's, which would come first)
+    # the VRMs' own humanoid, faces and springs: the settings file's would take precedence
     mine = {k: v for k, v in settings.items() if k not in ('humanoid', 'expressions', 'springs', 'colliders', 'gestures')}
     for name in ('vrm0', 'vrm1'):
         json.dump(mine, open(os.path.join(out, f'{name}.hypr3d.json'), 'w', encoding='utf-8'), ensure_ascii=False)
@@ -247,7 +235,7 @@ def paths(v, at=()):
         for k, x in v.items():
             yield from paths(x, at + (k,))
     elif isinstance(v, list):
-        for i, x in enumerate(v[:64]):  # (big arrays: their first elements)
+        for i, x in enumerate(v[:64]):  # big arrays: the first 64 only
             yield from paths(x, at + (i,))
 
 
@@ -286,7 +274,6 @@ def mutate_json(js, rng, roots, desc):
     if parent is None:
         return
     if op < 0.12:
-        # gone
         if isinstance(parent, dict):
             del parent[key]
         else:
@@ -333,7 +320,7 @@ NCOMP = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'MAT2': 4, 'MAT3': 9, 'MA
 
 
 def dicts(v):
-    """the dicts in what should be a list of them (a mutation may have left anything there)"""
+    """the dicts in what should be a list of dicts (mutations may leave anything)"""
     return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
 
 
@@ -363,7 +350,7 @@ def mutate_bin(js, bin_, rng, desc):
     try:
         return mutate_bin_(js, bin_, rng, desc)
     except (KeyError, IndexError, TypeError, ValueError, AttributeError, struct.error):
-        return js, bin_, None  # (earlier mutations left nothing sensible to change there)
+        return js, bin_, None  # earlier mutations left nothing to change
 
 
 def mutate_bin_(js, bin_, rng, desc):
@@ -398,13 +385,13 @@ def mutate_bin_(js, bin_, rng, desc):
         o, n = bv.get('byteOffset', 0), bv.get('byteLength', 0)
         k = rng.random()
         if k < 0.4:
-            for _ in range(rng.choice([1, 4, 32])):  # (a PNG's header, its chunks, the data)
+            for _ in range(rng.choice([1, 4, 32])):  # mostly the PNG's header and first chunks
                 at = o + min(n - 1, int(rng.expovariate(1 / 64))) if n else o
                 if at < len(b):
                     b[at] = rng.randrange(256)
             desc.append(f'bin: image {i} bytes')
         elif k < 0.7:
-            # its size in the header: huge
+            # the IHDR width and height: 0 to huge
             if n > 24 and b[o:o + 8] == b'\x89PNG\r\n\x1a\n':
                 struct.pack_into('>II', b, o + 16, rng.choice([0, 1, 65535, 1 << 24, 0x7fffffff]), rng.choice([0, 1, 65535, 1 << 24, 0x7fffffff]))
             desc.append(f'bin: image {i} header size')
@@ -531,7 +518,7 @@ def classify(code, out, timed_out):
     if m or 'hard rss limit' in out:
         kind = 'alloc' if (m and m.group(1) in ('allocation-size-too-big', 'out-of-memory', 'requested-allocation-size-exceeds-maximum-supported-size'))\
             or 'hard rss limit' in out or 'allocation-size-too-big' in out else 'asan'
-        # (the access's stack: the first, before where the memory was allocated or freed)
+        # the faulting access's stack: the first, before the alloc/free stacks
         stack = re.split(r'\n(?:0x[0-9a-f]+ is located|freed by|previously allocated|allocated by)', out[m.start() if m else 0:])[0]
         frames = re.findall(r'#\d+ 0x[0-9a-f]+ in .*? (?:\S*/)?((?:src|tools)/[\w/.]+:\d+)', stack)
         where = next((f.split('/')[-1] for f in frames if 'third_party' not in f and 'harness' not in f), frames[0].split('/')[-1] if frames else '')
@@ -570,7 +557,7 @@ def fuzz(args):
     out = os.path.abspath(args.out)
     for d in ('seeds', 'cases', 'findings'):
         os.makedirs(os.path.join(out, d), exist_ok=True)
-    wav = os.path.join(out, 'seeds', 'wav', 'woman_a.wav')  # (a vowel for lip sync to open the mouth with)
+    wav = os.path.join(out, 'seeds', 'wav', 'woman_a.wav')  # a vowel for lip sync
     if not os.path.exists(wav):
         subprocess.run([sys.executable, os.path.join(REPO, 'tools', 'test', 'synth', 'vowels.py'), os.path.dirname(wav)], check=True,
                        stdout=subprocess.DEVNULL)

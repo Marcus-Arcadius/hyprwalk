@@ -1,10 +1,8 @@
-# attenuate.py OUT.wav DB PART... [--noise DBFS] [--seed N]: a recording as a quieter microphone would give it, for lip
-# sync's tests: the parts one after the other (WAVs, mono or their channels mixed, and silence:SECONDS), DB decibels
-# down, as a 32-bit float WAV (no rounding to 16 bits, however far down). --noise adds white noise all along at that
-# level (dBFS RMS, a full scale sine 0 dBFS as lip sync measures it): a microphone's own hiss and the room's, which
-# don't get quieter with the voice. Put silence:1 first for what lip sync hears before you speak.
+# attenuate.py OUT.wav DB PART... [--noise DBFS] [--seed N]: lip sync test audio as a quieter microphone gives it: the
+# parts in turn (WAVs, channels mixed, or silence:SECONDS), DB decibels down, as a 32-bit float WAV (no 16-bit rounding).
+# --noise adds white noise throughout at that RMS level: the mic's and room's hiss, which doesn't drop with the voice.
+# Start with silence:1 for what lip sync hears before you speak.
 #   python3 attenuate.py a-30.wav 30 silence:1 man_a.wav --noise -75
-#   python3 attenuate.py whisper.wav 0 silence:1 man_a.wav quiet_a.wav
 import random, struct, sys
 
 
@@ -55,7 +53,7 @@ def main(argv):
             i += 1
     dst, db, parts = args[0], float(args[1]), args[2:]
     xs, rate, pending = [], None, 0.0
-    for p in parts:  # (silence waits for the rate of the first WAV)
+    for p in parts:  # leading silence waits for the first WAV's rate
         if p.startswith('silence:'):
             if rate:
                 xs += [0.0] * int(float(p[8:]) * rate)
@@ -76,7 +74,7 @@ def main(argv):
     xs = [x * g for x in xs]
     if opts['noise'] is not None:
         rnd = random.Random(int(opts['seed']))
-        sd = 10 ** ((opts['noise'] - 3.01) / 20)  # (RMS: the level lip sync gives a full scale sine as 0 dBFS)
+        sd = 10 ** ((opts['noise'] - 3.01) / 20)  # dBFS as lip sync has it: full scale sine = 0
         xs = [x + rnd.gauss(0.0, sd) for x in xs]
     write(dst, xs, rate)
 

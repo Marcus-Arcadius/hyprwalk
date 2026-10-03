@@ -21,7 +21,7 @@ namespace h3d {
                 continue;
             }
 
-            // walk up small ledges (stairs, the platform step)
+            // walk up small ledges (stairs)
             if (axis != 1 && onGround && !fly) {
                 V3 up = p;
                 up.y += STEP_HEIGHT;
@@ -71,8 +71,7 @@ namespace h3d {
             vel.y    = 0;
         } else if (!fly) {
             onGround = false;
-            // walking off a stair or down a slope, down onto it (else it falls off every step, the legs in the air, and
-            // hops down a slope), as far as a ledge it would walk up
+            // snap down onto a lower stair or slope, up to STEP_HEIGHT, instead of falling off every step
             if (wasGround && vy <= 0) {
                 const V3 at   = feet;
                 bool     down = false;
@@ -84,13 +83,11 @@ namespace h3d {
             }
         }
 
-        // as it's seen (exactly critically damped toward where it goes on at the climb's speed: as far from where it
-        // was a frame ago as the climb takes it, where it is now)
-        if (!(std::abs(feet.y - seenY) <= 1.f)) // (the first time, or it was put somewhere else)
+        // visible height: an exact critically damped step toward the feet moving on at the climb rate
+        if (!(std::abs(feet.y - seenY) <= 1.f)) // first time, or put somewhere else
             seenY = feet.y, seenV = climb = 0;
         const bool  walking = onGround && !fly;
-        // (landing: the climb starts again from none, the fall's speed isn't a slope's, else what's seen goes on down
-        // under the ground; and it stops with the body but for a little give, LAND_SEEN of how fast it came down)
+        // landing: reset the climb (a fall isn't a slope; the view would sink) and keep LAND_SEEN of the fall speed
         if (walking && !wasGround)
             climb = 0, seenV *= LAND_SEEN;
         const float rdt     = std::max(dt, 1e-4f);

@@ -1,7 +1,6 @@
 # runs inside Blender: blender -b --factory-startup --python-exit-code 1 -P lighttool.py -- job.json
-# Converts CS2's decompiled lightmaps and probe atlases into the PNGs hypr3d reads: HDR data as RGBE
-# (8-bit mantissas, a shared exponent in alpha), single channels as greyscale, 3D atlases as their
-# slices laid out in a grid. Rows are written top first, the way the textures are addressed.
+# converts CS2's decompiled lightmaps and probe atlases to the PNGs hypr3d reads: HDR as RGBE (8-bit mantissas, shared
+# exponent in alpha), single channels as grey, 3D atlases as a grid of slices; rows top first
 import bpy, sys, json, zlib, struct, time
 import numpy as np
 

@@ -1,14 +1,14 @@
-# sound_check.py: sound_check.sh's comparisons, in Blender for numpy:
+# sound_check.py: sound_check.sh's comparisons, run in Blender for its numpy:
 #   blender -b --factory-startup --python-exit-code 1 -P sound_check.py -- CASES.jsonl
-# A case a line (sound_check.sh writes them): "decode" (our decoding against ffmpeg's or libvorbis's), "exact" (what
-# PipeWire got from the speaker, sample by sample, against what it should have), "level" (resampled: its loudness and
-# length) and "unlinked" (never heard: no clock). Prints a line a check ("ok ..." or "FAIL ..."), then "done".
+# A case a line: "decode" (ours against ffmpeg's or libvorbis's decoding), "exact" (what PipeWire got from the speaker,
+# sample by sample), "level" (resampled: loudness and length), "unlinked" (never heard: no clock).
+# Prints "ok ..." or "FAIL ..." per check, then "done".
 import json, sys
 
 import numpy as np
 
 RATE = 48000
-RAMP = 0.02  # src/speaker.cpp's: seconds the gain takes from 0 to 1
+RAMP = 0.02  # as in src/speaker.cpp: s for gain 0 to 1
 fails = 0
 
 
@@ -51,8 +51,7 @@ def clock_checks(c, rows):
     at = np.array([r[1] for r in heard])
     back = np.diff(at).min()
     check('%s: the clock never goes back' % name, back >= 0, 'its least step %.6f s' % back)
-    # it keeps time: the dance's own time, from where it started (sound_test's time starts as play() returns, a moment
-    # after play() asked; a log line can be late)
+    # clock = the dance's time since its start; sound_test's t starts as play() returns, and log lines can be late
     lead = at - (c['from'] + t)
     check('%s: the clock is where the dance is by its own time' % name, -0.005 < lead.min() and lead.max() < 0.03,
           'ahead by %.1f to %.1f ms' % (lead.min() * 1000, lead.max() * 1000))
@@ -80,7 +79,7 @@ def exact_case(c):
     check('%s: came in where the dance was by then' % name, want_first <= first < want_first + 0.25 * RATE,
           '%.4f s in (asked from %.2f s)' % (first / RATE, c['from']))
 
-    # what should have come: the gain going up by a step a frame (as the speaker does it, in floats) to the volume
+    # expected: the gain rising a step a frame to the volume, in floats as the speaker does it
     n = len(rec) + RATE
     idx = first + np.arange(n)
     if c['loop']:
@@ -97,7 +96,7 @@ def exact_case(c):
     want = np.zeros((n, ch), np.float32)
     want[inside] = dec[idx[inside]].astype(np.float32) * (gain[inside] / np.float32(32768))[:, None]
 
-    # where it starts in the recording: its first sound, near where it should be
+    # find the start in the recording: the best match within 64 frames of its first sound
     nz = np.flatnonzero(np.abs(rec).max(axis=1) > 0)
     if not len(nz):
         check('%s: something but silence recorded' % name, False)
@@ -113,7 +112,7 @@ def exact_case(c):
     m = min(len(got), len(want))
     err = np.abs(got[:m] - want[:m]).max(axis=1)
     bad = np.flatnonzero(err > 1e-6)
-    same = bad[0] if len(bad) else m  # (where it fades out, ends or stops)
+    same = bad[0] if len(bad) else m  # where it fades out, ends or stops
     played = same / RATE
     if not c['loop'] and first + same >= F:
         check('%s: exactly what it should be, to the sound\'s end' % name, first + same == F or (len(bad) == 0),

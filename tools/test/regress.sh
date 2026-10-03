@@ -1,39 +1,26 @@
 #!/usr/bin/env bash
-# regress.sh: converts the test avatars with the working copy's tools/unity2hypr3d.py and with
-# another version of it (HEAD's by default), and compares what the two write.
+# regress.sh: convert the test avatars with the working copy's tools/unity2hypr3d.py and another version (HEAD's by
+# default), and compare check.py's report, the settings (less the date) and the GLB bytes.
 #
 #   tools/test/regress.sh [--base REV|FILE] [--robot PATH] [--items DIR] [--proj DIR] [--booth DIR]
 #                         [--out DIR] [--keep] [--shots] [CASE...]
 #
 #   --base REV|FILE  the converter to compare against: a git revision (default HEAD) or a file
-#   --robot PATH     also convert the VRChat SDK's robot sample, "Avatar Dynamics Robot Avatar
-#                    PC.unity" in the SDK's Samples/Dynamics/Robot Avatar (or set HYPR3D_ROBOT).
-#                    It is VRChat's, so it isn't in this repo; it's in com.vrchat.avatars-*.zip
-#                    from https://github.com/vrchat/packages/releases
-#   --items DIR      also convert free Booth items, as downloaded into DIR (or set
-#                    HYPR3D_ITEMS): 止丸式初音ミクNT_ver1.1.2.zip (booth.pm/items/3226395) alone
-#                    (MikuNT) and with VRSuya's dances set up with MA,
-#                    VRSuya_Doodle_Dance_Released_260709.zip (booth.pm/items/6249275),
-#                    VRSuya_Loli_Kami_Requiem_Released_260709.zip (booth.pm/items/5157852),
-#                    VRSuya_INTERNET_YAMERO_Released_260709.zip and
-#                    VRSuya_Reino_Dance_Released_260709.zip, as emotes (MikuDances), and the
-#                    dances on SynthChan (SynthDances); pHMToothlessDance.zip, bare clips, with
-#                    --emote (MikuClips, SynthClips). They are their makers' under their terms, so
-#                    they aren't in this repo; a missing one leaves out its cases
-#   --proj DIR       the synthetic Unity project to use; synth/make.py makes it there if it's missing
-#   --booth DIR      the Booth-style test packages to use; synth/booth.py makes them there if missing
-#   --out DIR        where everything goes (default: a new temporary directory, removed when
-#                    nothing differs)
+#   --robot PATH     also the VRChat SDK's Samples/Dynamics/Robot Avatar/"Avatar Dynamics Robot Avatar PC.unity" (or
+#                    HYPR3D_ROBOT), from com.vrchat.avatars-*.zip at https://github.com/vrchat/packages/releases
+#   --items DIR      also free Booth items downloaded into DIR (or HYPR3D_ITEMS): 止丸式初音ミクNT
+#                    (booth.pm/items/3226395) alone and with VRSuya's dances (Doodle Dance: booth.pm/items/6249275,
+#                    Loli Kami Requiem: booth.pm/items/5157852, ...) and pHMToothlessDance.zip's clips; a missing one
+#                    leaves out its cases
+#   --proj DIR       the synthetic Unity project; synth/make.py makes it there if missing
+#   --booth DIR      the Booth-style test packages; synth/booth.py makes them there if missing
+#   --out DIR        where everything goes (default: a new temporary directory, removed when nothing differs)
 #   --keep           keep the outputs even when nothing differs
-#   --shots          render each new GLB (front, side, and walking with physics) into OUT/shots with
-#                    build/test/shot (tools/test/harness/build.sh builds it); implies --keep
+#   --shots          render each new GLB (front, side, walking) into OUT/shots with build/test/shot; implies --keep
 #   CASE...          only these cases (see "cases" below)
 #
-# Each case is converted twice, and check.py's report, the settings file (less its date) and the
-# GLB's bytes are compared. Avatars with no Modular Avatar or VRCFury setup (the "strict" cases)
-# must come out byte for byte the same; the others are reported, with skincmp.py's comparison of
-# the skinned vertices when their GLBs differ.
-# Exit status: 0 when every strict case is the same and nothing failed, 1 otherwise.
+# Cases without Modular Avatar or VRCFury ("strict") must be byte-identical; other GLB differences come with
+# skincmp.py's comparison of the skinned vertices. Exit status 0 when every strict case is the same and nothing failed.
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -91,8 +78,7 @@ if [[ ! -f "$BOOTH/SynthChan_Gimmicks_VRCFury_v1.0.unitypackage" ]]; then
 fi
 B="$(cd "$BOOTH" && pwd)"
 
-# cases: name, kind (strict = no MA or VRCFury: must stay byte-identical; MA; VRCF; emote = --emote's clips), converter
-# arguments
+# cases: name, kind (strict = no MA/VRCFury, must stay byte-identical; MA; VRCF; emote = --emote clips), arguments
 CASES=()
 add() { CASES+=("$(printf '%s\x1f' "$@")"); }
 add SynthAvatar strict "$A/SynthAvatar.prefab"
@@ -138,7 +124,7 @@ if [[ -n "$ITEMS" ]]; then
         add MikuNT strict "$MIKU"
         ((${#DANCES[@]})) && add MikuDances MA "$MIKU" "${DANCES[@]}"
         ((${#CLIPS[@]})) && add MikuClips emote "$MIKU" "${CLIPS[@]}"
-        SAME+=("MikuClips MikuNT")  # (clips add emote files, never change the GLB)
+        SAME+=("MikuClips MikuNT")  # clips add emote files, never change the GLB
     else
         echo "note: no ${MIKU##*/} in $I"
     fi

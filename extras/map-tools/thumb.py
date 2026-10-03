@@ -1,4 +1,4 @@
-# usage: blender -b --factory-startup -P thumb.py -- out.png size in1.png in2.png ...  (contact sheet: rgb on top, alpha below)
+# usage: blender -b --factory-startup -P thumb.py -- out.png size in1.png ... (contact sheet: rgb over alpha)
 import bpy, sys, numpy as np
 argv = sys.argv[sys.argv.index("--") + 1:]
 out, size, files = argv[0], int(argv[1]), argv[2:]

@@ -12,8 +12,7 @@ namespace h3d {
         V3    normal; // facing the ray origin
     };
 
-    // Static collision geometry: a handful of boxes (the built-in courtyard)
-    // plus any number of triangles (loaded maps) in a BVH.
+    // static collision geometry: boxes (the built-in courtyard) plus triangles (loaded maps) in a BVH
     class CCollision {
       public:
         void  clear();

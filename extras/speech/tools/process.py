@@ -59,7 +59,7 @@ def segment(x, sr, set_):
     FL = frame_matrix(xl, N, H)[:n]; FA = frame_matrix(xh, N, H)[:n]
     ratio = (FL ** 2).sum(1) / ((FA ** 2).sum(1) + 1e-20)
     peak, floor = db.max(), np.percentile(db, 10)
-    thr = max(peak - 25, min(floor + 15, peak - 12))  # short files have little silence: the floor estimate runs high
+    thr = max(peak - 25, min(floor + 15, peak - 12))  # short files: the floor estimate runs high
     cand = (db > thr) & (ratio > 0.3) & (per > 0.3)
     rs = runs(cand)
     if set_ == 'word':
@@ -67,7 +67,7 @@ def segment(x, sr, set_):
     else:
         rs = [r for r in rs if (r[1] - r[0] + 1) * HOP >= 0.05]
     segs = []
-    # trim the edges: onsets/offsets; a word's vowel loses more at its end (the move into the stop closure)
+    # trim onsets and offsets; a word's vowel loses more at its end (the move into the stop closure)
     trim0, trim1 = (0.010, 0.010) if set_ == 'isolated' else (0.005, 0.020)
     for a, b in rs:
         m = db[a:b + 1].max()

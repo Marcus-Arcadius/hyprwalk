@@ -1,6 +1,5 @@
-// overlay.qml: a shell's overlay over the whole screen, as quickshell shells have one (see-through, over everything,
-// taking input only where it has something: here a band down the middle, as a dock or a hot edge would). Where it
-// takes no input, clicks go through to what's behind it, on the 2D desktop and in 3D alike.
+// overlay.qml: a shell's full-screen see-through overlay, as quickshell shells have, taking input only in a band down
+// the middle (as a dock or a hot edge would); elsewhere clicks go through to what's behind, in 2D and 3D alike.
 //   quickshell -p overlay.qml
 import QtQuick
 import Quickshell

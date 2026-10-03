@@ -1,4 +1,4 @@
-# the user's Hyprland (zaneyos/modules/astroland/packages.nix, with its flake.lock's inputs), and extra patches
+# zaneyos's Hyprland (modules/astroland/packages.nix, its flake.lock inputs) with extra patches
 { patches ? [ ] }:
 let
   zaneyos = builtins.getFlake "git+file:///home/monero/zaneyos";

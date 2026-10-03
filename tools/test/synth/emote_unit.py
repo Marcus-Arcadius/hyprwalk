@@ -1,14 +1,9 @@
-# emote_unit.py: tools/unity2hypr3d.py's --emote on small hand-made clips: a motion sold as bare humanoid clips, with
-# no prefab, controller or menu, for the buyer to put in their Action layer. The same package is read as a
-# .unitypackage (twice, as when it is an --outfit too), inside a Booth-style .zip (twice), as a folder, clip by clip
-# as loose .anim files, and by a clip's name. A package's still poses are left out when it has clips that move, but
-# named on their own they are kept; a clip with no muscle or body curves is not an emote; each clip knows where it was
-# read from, so convert() adds none twice. The emotes are named as their clips with the words spaced out, a looping
-# clip without its "Loop" unless it is one of a set. A clip's song is the sound file of its name beside it, or its
-# folder's one when it is the folder's one clip, and it is copied for the settings file only when it is Ogg Vorbis.
+# emote_unit.py: tools/unity2hypr3d.py's --emote on small hand-made clips: a motion sold as bare humanoid clips (no
+# prefab, controller or menu), read as a .unitypackage, inside a Booth-style .zip, as a folder, as loose .anim files and
+# by a clip's name; then emote names and songs.
 #   blender -b --factory-startup --python-exit-code 1 -P emote_unit.py
 import sys, os, shutil, tempfile, zipfile
-sys.dont_write_bytecode = True  # (no __pycache__ left in tools/)
+sys.dont_write_bytecode = True  # no __pycache__ in tools/
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))  # tools/
 sys.path.insert(0, HERE)
@@ -105,11 +100,10 @@ check('its face curve', sorted(clip.faces), ['あ'])
 check('its length', round(clip.length, 3), 1.0)
 check('the pose does not move', u.find_emotes(db, 'Proxy_Stand')[0][1].moves, False)
 
-# names as a menu shows them: a clip's words spaced out, and a looping clip's "Loop" left off unless that name is
-# taken or the clip is one of a set
+# menu names: words spaced out; a looping clip drops its "Loop" unless that name is taken or it's one of a set
 NAMED = os.path.join(W, 'named')
 os.makedirs(os.path.join(NAMED, 'ProjectSettings'))
-NAMING = {  # name: (loops, the emote's name)
+NAMING = {  # name: (loops, emote name)
     'FreddyFazbearPumpItUp_Loop': (True, 'Freddy Fazbear Pump It Up'),
     'FallBackward2': (False, 'Fall Backward 2'),
     'Thumbs up Entry': (False, 'Thumbs up Entry'),
@@ -136,14 +130,14 @@ check('a loose clip\'s Loop is left off too',
 check('words spaced out', [u.spaced_words(n) for n in ('AloneRamp', 'SlowMoFlylBack', 'Dance2Loop', 'VRSuya Dance')],
       ['Alone Ramp', 'Slow Mo Flyl Back', 'Dance 2 Loop', 'VRSuya Dance'])
 
-# songs: a bare clip's sound file beside it goes with it (the one of its name, else its folder's one when it is the
-# folder's one clip), copied for the settings file's "sound" when it is Ogg Vorbis
+# songs: the sound file named as the clip, else the folder's only one when the clip is alone there; copied for the
+# settings file's "sound" only if Ogg Vorbis
 check('clips without sound files beside them have no song', [e[1].sound for e in first], [None, None])
 SONGS = os.path.join(W, 'songs')
 os.makedirs(os.path.join(SONGS, 'ProjectSettings'))
-VORBIS = b'OggS\x00\x02' + bytes(22) + b'\x01vorbis' + bytes(40)  # (an Ogg Vorbis file's start: all write_sound looks at)
+VORBIS = b'OggS\x00\x02' + bytes(22) + b'\x01vorbis' + bytes(40)  # Ogg Vorbis header: all write_sound reads
 WAV = b'RIFF\x24\x00\x00\x00WAVEfmt ' + bytes(40)
-SONG_FILES = {  # under Assets/pHM: a clip that loops, or a sound file's bytes
+SONG_FILES = {  # under Assets/pHM: True = looping clip, else bytes
     'Song Dance/SongDance_Loop.anim': True, 'Song Dance/SongDance_Loop.ogg': VORBIS,
     'Lone Dance/Lone.anim': True, 'Lone Dance/music.ogg': VORBIS,
     'Two Dances/A.anim': True, 'Two Dances/B.anim': True, 'Two Dances/music.ogg': VORBIS,

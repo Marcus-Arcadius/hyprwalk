@@ -50,17 +50,17 @@ namespace h3d {
         const std::vector<float>*     morphs = nullptr; // CAvatarAnimator::morphWeights(), null = at rest
         const std::vector<SMapMaterial>* materials = nullptr; // CAvatarAnimator::materials(), null = the model's
         const std::vector<uint8_t>*   shown = nullptr;  // CAvatarAnimator::partsShown(), null = all of it
-        const std::vector<int>*       batchMaterials = nullptr; // CAvatarAnimator::batchMaterials(), null = the batches' own
+        const std::vector<int>*       batchMaterials = nullptr; // CAvatarAnimator::batchMaterials(), null = own
         M4                            transform = M4::identity(); // avatar space -> world
-        bool                          visible = false;  // drawn (third person); it casts its shadow either way
-        bool                          firstPerson = false; // seen from inside, the camera in its eyes: its head isn't drawn
-        bool                          outlines = true;  // its materials' toon outlines (an inverted hull each)
+        bool                          visible = false;  // drawn (third person); casts a shadow either way
+        bool                          firstPerson = false; // camera in its eyes; the head isn't drawn
+        bool                          outlines = true;  // toon outlines (inverted hulls)
         float                         sky = 1, bounce = 0; // light around it, like the map's baked values
 
         bool                          drawn(const SAvatarBatch& b) const {
             return !shown || (size_t)b.part >= shown->size() || (*shown)[b.part];
         }
-        // the indices of it that are seen, first and count (in first person without the head's; its shadow: all of them)
+        // visible index range (first, count): in first person without the head; the shadow uses all
         std::pair<uint32_t, uint32_t> range(const SAvatarBatch& b) const {
             return !firstPerson || b.fpCount == UINT32_MAX || !b.count ? std::pair{b.first, b.count} : std::pair{b.fpFirst, b.fpCount};
         }
@@ -69,14 +69,14 @@ namespace h3d {
         }
     };
 
-    // a picture over everything: the Action Menu
+    // an overlay image (the Action Menu, the badge)
     struct SHudImage {
-        const std::vector<uint32_t>* pixels = nullptr; // premultiplied ARGB (cairo's), row 0 at the top; null = none
+        const std::vector<uint32_t>* pixels = nullptr; // cairo premultiplied ARGB, top row first; null = none
         int                          w = 0, h = 0;
         uint64_t                     serial = 0;   // changes with the pixels
-        float                        x = 0, y = 0; // where its middle goes, output pixels from the top left
+        float                        x = 0, y = 0; // center, output px from the top left
         float                        scale = 1, alpha = 1;
-        float                        cursor[3] = {}; // a dot over it: x, y in its pixels from its top left, radius (0 = none)
+        float                        cursor[3] = {}; // dot: x, y in its pixels, radius (0 = none)
     };
 
     struct SFrameParams {
@@ -94,13 +94,12 @@ namespace h3d {
         float                exposure  = 1; // brightens the world (not the windows) in dark places
         SAvatarFrame         avatar;
         SHudImage            menu;
-        SHudImage            badge; // in a corner: the microphone's, while lip sync listens
+        SHudImage            badge; // microphone badge while lip sync listens
     };
 
     class CRenderer {
       public:
-        // keeps the GPU copy of a loaded map when it's the same one as before
-        // (the map drops its CPU copy once uploaded)
+        // keeps the GPU copy of the map if it's the same one (the map drops its CPU copy once uploaded)
         bool init(const SWorld& world);
         void destroy();
         bool ready() const {
@@ -110,8 +109,8 @@ namespace h3d {
         // renders one frame into `outTex` (an immutable RGBA8 texture of the given size)
         void render(const SFrameParams& f, GLuint outTex);
 
-        // glass blends with a second source (per channel) where the context has one (EXT_blend_func_extended); off
-        // before init(), it doesn't (the harness's --no-dual)
+        // per-channel glass via dual-source blending (EXT_blend_func_extended) when available; false before init()
+        // disables it (harness --no-dual)
         bool dualSource = true;
 
       private:
@@ -131,7 +130,7 @@ namespace h3d {
         GLuint                                   m_worldVBO = 0, m_worldVAO = 0;
         GLsizei                                  m_worldCount = 0;
 
-        // the game's lighting of the map, or of its backdrop (SMapLightSet)
+        // baked lighting of the map or its backdrop (SMapLightSet)
         struct SLightSetGL {
             GLuint irradiance = 0, directional = 0, shadows = 0, probes = 0; // 0: none
             float  probeDims[3] = {1, 1, 1};
@@ -164,8 +163,7 @@ namespace h3d {
         SAvatarGL                                m_avatar;
         std::weak_ptr<SAvatarModel>              m_avatarFailed; // don't try that one again
 
-        // the world's shadow is baked once into the static map; each frame it is
-        // copied into the sampled one and whatever moves is drawn on top
+        // baked once into the static map, then copied to the sampled one each frame with moving things drawn on top
         GLuint                                   m_shadowTex = 0, m_shadowFBO = 0, m_shadowStaticTex = 0, m_shadowStaticFBO = 0;
         int                                      m_shadowSize = 2048;
         uint64_t                                 m_shadowCasterHash = 1;
@@ -216,7 +214,7 @@ namespace h3d {
             MAP_PASS_BLEND,
         };
         void                                     drawMap(const SFrameParams& f, const M4& viewProj, int lightCount, const float* lights, eMapPass pass);
-        // binds the game's lighting (set 0: the map, 1: its backdrop) and sets its uniforms, or turns it off
+        // binds baked lighting set 0 (map) or 1 (backdrop) and its uniforms, or turns it off
         void                                     setBakedLighting(GLuint prog, const SFrameParams& f, size_t set);
         void                                     drawBackdrop(const SFrameParams& f, int lightCount, const float* lights);
         void                                     drawAvatar(const SFrameParams& f, const M4& viewProj, int lightCount, const float* lights, bool late);

@@ -1,20 +1,13 @@
-# toonballs.py OUTDIR: ToonBalls.glb, an avatar of a sort (no skeleton, like tools/test/vm/assets.py's ToonTest) of
-# six balls in a row, for toon_check.sh. Plain python3. Along +X:
-#   Plain    the base color, lit as any material
-#   MToon    VRMC_materials_mtoon: shade color [0.1, 0.03, 0.01], toony 0.95, shift 0 (N·L from -0.05 to 0.05)
-#   Toon     unity2hypr3d's "hypr3d_toon" extras: the shade 0.3 of the base color, N·L from -0.05 to 0.05
-#   Matcap   the same, and a matcap added ("hypr3d_matcap"): white where the normal faces the eye, black at the rim
-#   Plain    again, with the matcap alone
-#   MToon0   VRM 0.x's MToon (extensions.VRM.materialProperties): _ShadeColor (0.1, 0.4, 0.1), _ShadeToony 0.95
-# All have the base color [0.25, 0.16, 0.1] (dark enough for the tone curve); the balls are 0.3 m across, 1.2 m up,
-# 0.4 m apart.
+# toonballs.py OUTDIR: ToonBalls.glb for toon_check.sh: six 0.3 m balls in a row along +X, no skeleton: Plain, MToon
+# (VRMC_materials_mtoon), Toon (unity2hypr3d's hypr3d_toon extras), Matcap (Toon plus an added hypr3d_matcap),
+# PlainMatcap and MToon0 (VRM 0.x MToon). The base color is dark enough for the tone curve.
 import math, os, struct, sys, zlib
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vm'))
 from assets import GLB, box  # noqa: E402
 
 BASE = (0.25, 0.16, 0.1, 1.0)
-X = (-1.0, -0.6, -0.2, 0.2, 0.6, 1.0)  # (the avatar's middle: the camera's)
+X = (-1.0, -0.6, -0.2, 0.2, 0.6, 1.0)  # centred on the avatar's middle, as the camera is
 
 
 def sphere(cx, cy, cz, r, rings=48, segs=64):
@@ -44,7 +37,7 @@ def png(w, h, px):
 
 
 def matcap_png(size=64):
-    """white in the middle (the normal towards the eye), black at the rim: a matcap's texture, v down"""
+    """matcap texture: white where the normal faces the eye, black at the rim, v down"""
     def px(x, y):
         u, v = (x + 0.5) / size * 2 - 1, (y + 0.5) / size * 2 - 1
         k = max(0.0, 1.0 - math.sqrt(u * u + v * v))

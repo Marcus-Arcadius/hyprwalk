@@ -88,7 +88,7 @@ namespace h3d {
             return emote(args, rest, loadEmote);
         if (sub == "parts" || sub == "toggle" || sub == "shape" || sub == "slider")
             return outfit(args);
-        if (sub == "attack") { // an arm swung at what's ahead, as a left click on nothing does: whichever's next, or that one
+        if (sub == "attack") { // a punch like a left click on nothing; arm: given or next
             if (!avatar)
                 return noAvatar();
             const std::string v = args.size() > 2 ? args[2] : "";
@@ -98,7 +98,7 @@ namespace h3d {
                 return "error: " + avatar->name + " has no arms to swing (not a humanoid)";
             return m_anim.attackStatus();
         }
-        if (sub == "physics") { // hair, skirts and the like swing (spring bones), or hang as the animation has them
+        if (sub == "physics") { // spring bones on or off (hair, skirts)
             const std::string v = args.size() > 2 ? args[2] : "";
             if (v == "on" || v == "off" || v == "toggle")
                 m_anim.setPhysics(v == "on" || (v == "toggle" && !m_anim.physics()));
@@ -126,7 +126,7 @@ namespace h3d {
                                                     jsonEscape(std::filesystem::path(s->file).filename().string()), s->duration(), s->rate, s->channels)
                                       : "null");
             }
-            // (and how far into the one playing it is: with a sound, where that's heard)
+            // and the playing emote's time (with a sound: the sound's position)
             const int e = m_anim.emote();
             return std::format(R"({{"playing": "{}", "time": {:.3f}, "loading": {}, "sound": {}, "emotes": [{}]}})", e >= 0 ? jsonEscape(all[e]->name) : "",
                                e >= 0 ? m_anim.emoteTime() : 0.f, emotesLoading, emoteSound, list);
@@ -135,7 +135,7 @@ namespace h3d {
             m_anim.stopEmote();
             return "ok";
         }
-        // once or over and over, else as the emote has it
+        // once or loop, else the emote's own setting
         int loop = -1;
         if (args.size() > 3 && (args.back() == "once" || args.back() == "loop")) {
             loop = args.back() == "loop";
@@ -240,7 +240,7 @@ namespace h3d {
                            m_anim.partsShown()[parts[0]] ? "shown" : "hidden", state < 0 ? " (as the toggles have it)" : "");
     }
 
-    // a slider set by hand (NaN: back where the settings file starts it), kept for when the avatar is loaded again
+    // sets a slider (NaN: the settings file's default), remembered for when the avatar reloads
     void CAvatarControl::changeSlider(const std::string& name, float value, float valueY) {
         if (!avatar)
             return;
@@ -255,7 +255,7 @@ namespace h3d {
 
     std::string CAvatarControl::changeOutfit(const std::string& name, int state) {
         const std::string r = setOutfit(name, state);
-        if (!r.starts_with("error")) { // for when the avatar is loaded again
+        if (!r.starts_with("error")) { // remembered for reloads
             const std::string low = gltf::lower(name);
             std::erase_if(outfitSet, [&](const auto& o) { return o.first == low; });
             outfitSet.emplace_back(low, state);
@@ -420,7 +420,7 @@ namespace h3d {
             return noAvatar();
         const auto& a = *avatar;
         switch (it.action) {
-            case MA_EMOTE: // again: it stops
+            case MA_EMOTE: // picking it again stops it
                 if (it.arg < 0 || it.arg >= (int)m_anim.emotes().size())
                     return "error: no such emote";
                 if (m_anim.emote() == it.arg) {
@@ -456,7 +456,7 @@ namespace h3d {
                 if (it.arg < 0 || it.arg >= (int)a.toggles.size())
                     return "error: no such toggle";
                 return changeOutfit(a.toggles[it.arg].name, 2);
-            case MA_PART: { // as the page shows it: on when any of that name is
+            case MA_PART: { // on when any part of that name is shown
                 if (it.arg < 0 || it.arg >= (int)a.parts.size())
                     return "error: no such part";
                 const std::string& name  = a.parts[it.arg].name;
@@ -465,8 +465,8 @@ namespace h3d {
                 for (size_t p = 0; p < a.parts.size(); ++p)
                     on |= (name.empty() ? (int)p == it.arg : a.parts[p].name == name) && (p >= shown.size() || shown[p]);
                 if (!name.empty() && a.findToggle(name) < 0)
-                    return changeOutfit(name, on ? 0 : 1); // and again when it's loaded again
-                // unnamed, or a toggle has its name (and "avatar toggle" would find that): just the parts
+                    return changeOutfit(name, on ? 0 : 1); // remembered for reloads
+                // unnamed, or a toggle shares its name (which "avatar toggle" would find): set just the parts
                 for (const int p : name.empty() ? std::vector<int>{it.arg} : a.findParts(name))
                     m_anim.setPart(p, on ? 0 : 1);
                 return on ? "hidden" : "shown";
@@ -499,9 +499,9 @@ namespace h3d {
             case K_KPENTER: pick(menu.pick()); return true;
             case K_E:
             case K_G:
-            case K_X: return true; // they're for what the crosshair points at, and it's hidden
+            case K_X: return true; // for what the crosshair points at, which is hidden
             default:
-                if (k >= K_1 && k <= K_9) { // (9: the root's ninth; nothing on a page of eight, or a dial)
+                if (k >= K_1 && k <= K_9) { // 9: the root's 9th; nothing elsewhere
                     pick(menu.pick((int)(k - K_1)));
                     return true;
                 }
@@ -583,7 +583,7 @@ namespace h3d {
             menu.back();
             return where();
         }
-        if (verb == "pick") { // pick n: slot n, 0 = the middle; pick: what the cursor points at
+        if (verb == "pick") { // pick [n]: slot n (0 = middle), else the cursor's
             const auto& items = menu.page().items;
             int         slot  = menu.highlighted();
             if (args.size() > 1) {

@@ -12,22 +12,22 @@ namespace h3d {
 
     // how a vertex of a map gets its light
     enum eMapLight : uint8_t {
-        LIGHT_OWN = 0, // hypr3d's: sky and sunlight bounce baked into SMapVertex::ao
-        LIGHT_MAP,     // the map's lightmap (HYPR3D_lighting): light holds the lightmap uv
-        LIGHT_PROBE,   // the map's light probes: light holds where the vertex is in the probe atlas (texels)
-        LIGHT_FLAT,    // a map with baked lighting, but none for this: its average light
+        LIGHT_OWN = 0, // own: sky and bounce baked into SMapVertex::ao
+        LIGHT_MAP,     // HYPR3D_lighting lightmap; light = lightmap uv
+        LIGHT_PROBE,   // light probes; light = probe atlas texel
+        LIGHT_FLAT,    // baked map, none for this: average light
     };
 
-    // a vertex of a loaded map, already in world space (meters, y up)
+    // map vertex in world space (meters, y up)
     struct SMapVertex {
         float   pos[3];
         float   normal[3];
         float   uv[2];
         float   uv1[2];
         float   light[3];    // see eMapLight
-        int16_t tangent[4];  // normalized: TANGENT's direction, then the bitangent's sign (0 0 0 0: none)
+        int16_t tangent[4];  // normalized TANGENT xyz, bitangent sign; 0 = none
         uint8_t color[4];    // COLOR_0, linear
-        uint8_t ao[4];       // baked: local occlusion, how much sky is visible, sunlight bounced off what's around; then the _BLEND weight
+        uint8_t ao[4];       // occlusion, sky visibility, sun bounce; _BLEND weight
         uint8_t lighting[4]; // eMapLight, then unused
     };
 
@@ -37,7 +37,7 @@ namespace h3d {
         ALPHA_BLEND,
     };
 
-    // how an image's pixels are kept: plain, or block compressed (S3TC and RGTC)
+    // pixel storage: plain, or block compressed (S3TC, RGTC)
     enum eTexFormat : uint8_t {
         TEX_RGBA8 = 0,
         TEX_BC1,   // rgb, 4 bits a texel
@@ -55,20 +55,20 @@ namespace h3d {
     struct SMapImage {
         std::string          name;
         int                  w = 0, h = 0;
-        std::vector<uint8_t> rgba;   // TEX_RGBA8: the pixels; compressed: every mip level, one after the other
+        std::vector<uint8_t> rgba;   // TEX_RGBA8: pixels; compressed: all mips in a row
         eTexFormat           format = TEX_RGBA8;
-        int                  levels = 1; // in rgba (compressed only; plain ones get theirs on the GPU)
+        int                  levels = 1; // in rgba; plain images get mips on the GPU
         // sampler of the first material that uses it
         int                  wrapS = 0x2901, wrapT = 0x2901; // GL_REPEAT
         bool                 nearest = false;
-        bool                 srgb    = false; // holds colors (base, emissive) rather than data (occlusion)
-        bool                 normal  = false; // a normal map: only x and y need keeping
-        bool                 plain   = false; // never compressed (the sky: blocks would band its gradients)
+        bool                 srgb    = false; // colors (base, emissive), not data
+        bool                 normal  = false; // normal map: only x and y kept
+        bool                 plain   = false; // never compressed (sky gradients would band)
     };
 
     enum eMapBlend : uint8_t {
         BLEND_NORMAL = 0, // by alpha (ALPHA_BLEND)
-        BLEND_MOD2X,      // multiplies what's under it by twice its colour (Source's decals)
+        BLEND_MOD2X,      // under it times twice its color (Source decals)
         BLEND_ADD,        // adds to it (glows)
     };
 
@@ -78,7 +78,7 @@ namespace h3d {
         DETAIL_OVERLAY, // Photoshop's overlay
     };
 
-    // Unity's stencil test and write (unity2hypr3d's "hypr3d_stencil": UnlitWF's stencil masks, lilToon's, Poiyomi's)
+    // Unity stencil test and write (unity2hypr3d's "hypr3d_stencil": UnlitWF, lilToon, Poiyomi masks)
     enum eStencilComp : uint8_t { SC_NEVER, SC_LESS, SC_EQUAL, SC_LEQUAL, SC_GREATER, SC_NOTEQUAL, SC_GEQUAL, SC_ALWAYS };
     enum eStencilOp : uint8_t { SO_KEEP, SO_ZERO, SO_REPLACE, SO_INCR, SO_DECR, SO_INVERT, SO_INCR_WRAP, SO_DECR_WRAP };
     struct SStencil {
@@ -86,8 +86,7 @@ namespace h3d {
         uint8_t      ref = 0, read = 255, write = 255;
         eStencilComp comp = SC_ALWAYS;
         eStencilOp   pass = SO_KEEP, fail = SO_KEEP, zfail = SO_KEEP;
-        // drawn again with another test, this much as opaque (UnlitWF's MaskOut_Blend: fainter where its mask is);
-        // < 0: not
+        // redrawn with againComp at this opacity (UnlitWF's MaskOut_Blend); < 0 = not
         eStencilComp againComp = SC_ALWAYS;
         float        again     = -1;
         bool         reads() const {
@@ -95,48 +94,47 @@ namespace h3d {
         }
     };
 
-    // a toon outline: the mesh drawn again pushed out along its normals, its front faces culled (an inverted hull)
+    // toon outline: inverted hull (the mesh pushed out along its normals, front faces culled)
     enum eOutlineSpace : uint8_t {
         OUTLINE_WORLD,  // width in metres
         OUTLINE_OBJECT, // metres at the model's scale
-        OUTLINE_SCREEN, // width in NDC units (2 = the screen's height) up to maxW away, then thinner
+        OUTLINE_SCREEN, // NDC width (2 = screen height) to maxW, then thinner
     };
     struct SOutline {
         float         width = 0; // 0: none
         eOutlineSpace space = OUTLINE_WORLD;
         float         color[4] = {0, 0, 0, 1}; // linear
-        float         base = 0, tint = 0;      // mixed towards the base color (UnlitWF), multiplied by it (Poiyomi)
+        float         base = 0, tint = 0;      // mix to base color (UnlitWF), times it (Poiyomi)
         int           maskTex     = -1; // width times one of its channels
         uint8_t       maskChannel = 0;
         bool          maskInvert  = false;
         float         shift = 0;              // metres towards the eye (< 0: away)
-        float         fix = 0, fixMax = 1;    // thinner up close: width * mix(1, min(distance, fixMax), fix)
-        float         lit = 1;                // how much it's shaded (0: its color as it is)
-        float         maxW = 1;               // screen space: the distance it stops staying as wide at
-        int           colorTex = -1;          // its color's texture (index into images): the color times it,
-        float         colorBlend = -1;        // or (>= 0) mixed this far towards it (UnlitWF's custom color)
+        float         fix = 0, fixMax = 1;    // width * mix(1, min(distance, fixMax), fix)
+        float         lit = 1;                // shading amount (0 = flat color)
+        float         maxW = 1;               // screen space: constant width up to here
+        int           colorTex = -1;          // color texture (images index): multiplies the color
+        float         colorBlend = -1;        // or, >= 0, mixed in this much (UnlitWF custom color)
         float         colorXf[6] = {1, 0, 0, 1, 0, 0}; // its uv: mat2 columns, then the offset
     };
 
-    // toon shading (MToon, lilToon, UnlitWF, Poiyomi): the sun lights a surface from its shade color to its lit one as
-    // N·L goes from lo to hi, not by N·L itself; and a matcap, looked up by the normal as the camera sees it
+    // toon shading (MToon, lilToon, UnlitWF, Poiyomi): shade to lit color as N·L goes lo to hi; matcap by view normal
     enum eMatcapMode : uint8_t {
-        MATCAP_ADD,      // added (MToon's, lilToon's Add and Screen, UnlitWF's light cap, Poiyomi's Add)
-        MATCAP_MULTIPLY, // the color times it (UnlitWF's shade cap, lilToon's and Poiyomi's Multiply)
-        MATCAP_MIX,      // in place of the color, this much (lilToon's Normal, Poiyomi's Replace)
-        MATCAP_MEDIAN,   // lighter where it's over mid grey, darker under (UnlitWF's median cap)
+        MATCAP_ADD,      // MToon, lilToon Add / Screen, UnlitWF light cap, Poiyomi Add
+        MATCAP_MULTIPLY, // UnlitWF shade cap, lilToon / Poiyomi Multiply
+        MATCAP_MIX,      // replaces the color (lilToon Normal, Poiyomi Replace)
+        MATCAP_MEDIAN,   // lighter above mid grey, darker below (UnlitWF)
     };
     struct SToon {
         bool        on = false; // the shading (a matcap: matcapTex)
         float       shade[3] = {1, 1, 1}; // linear
         bool        shadeBase = true;     // times the base color
         int         shadeTex  = -1;       // times this (index into images)
-        float       lo = -1, hi = -1;     // N·L where it's all shade, and all lit (lo = hi = -1: lit all round, flat)
+        float       lo = -1, hi = -1;     // N·L at full shade, full lit; -1, -1 = flat lit
         float       strength = 1;         // how much of the shade shows
         int         matcapTex = -1;
-        float       matcap[4] = {1, 1, 1, 1}; // color (the median's: how much lighter, 0 darker), and how much of it
+        float       matcap[4] = {1, 1, 1, 1}; // color (median: 1 lighter, 0 darker), amount
         eMatcapMode matcapMode = MATCAP_ADD;
-        float       matcapLit = 1; // how much it's lit as the surface is (0: as if in full light, wherever it is)
+        float       matcapLit = 1; // 0 = full light, 1 = lit like the surface
     };
 
     struct SMapMaterial {
@@ -144,36 +142,33 @@ namespace h3d {
         float       baseColor[4] = {1, 1, 1, 1};
         float       emissive[3]  = {0, 0, 0};
         int         baseTex = -1, emissiveTex = -1, occlusionTex = -1; // indices into images
-        float       baseXf[6]     = {1, 0, 0, 1, 0, 0}; // KHR_texture_transform: mat2 columns, then the offset
+        float       baseXf[6]     = {1, 0, 0, 1, 0, 0}; // KHR_texture_transform: mat2 columns, offset
         float       emissiveXf[6] = {1, 0, 0, 1, 0, 0};
-        int         emissiveUV = 0, occlusionUV = 0; // 0: the vertex uv (the base color's set), 1: uv1
+        int         emissiveUV = 0, occlusionUV = 0; // 0 vertex uv (the base color's set), 1 uv1
         float       occlusionStrength = 1;
         eAlphaMode  alphaMode   = ALPHA_OPAQUE;
         float       alphaCutoff = 0.5f;
         bool        unlit  = false;
-        // normal map (the base color's uvs), and roughness and metalness: the occlusion texture's g
-        // and b when it's the same image as the metallic-roughness one (glTF's usual ORM packing)
+        // normal map on the base color's uvs; roughness and metalness in the occlusion texture's g, b (ORM packing)
         int         normalTex = -1;
         float       normalScale = 1;
-        bool        normalYDown = false; // green points down the bitangent (Source), not up (glTF)
+        bool        normalYDown = false; // green down the bitangent (Source), not up
         float       roughness = 1, metalness = 0;
         bool        ormFromOcclusion = false;
-        bool        specular[2] = {true, true}; // from the sun, from the surroundings (HYPR3D_materials_source2)
-        float       selfIllumAlbedo = 0;         // the emissive color takes this much of the base color
-        bool        glass = false;               // blended, its reflections as strong as if it were opaque
-        uint8_t     vertexColor = 0;             // COLOR_0 is: 0 linear (glTF's), 1 sRGB, 2 not a color, 3 a tint as strong as its alpha,
-                                                 // 4 part of the tint (under the tint mask; all 0: none)
+        bool        specular[2] = {true, true}; // sun, environment (HYPR3D_materials_source2)
+        float       selfIllumAlbedo = 0;         // share of the base color in the emissive
+        bool        glass = false;               // blended; reflections at full strength
+        uint8_t     vertexColor = 0;             // COLOR_0: 0 linear, 1 sRGB, 2 none, 3 alpha tint, 4 tint
         eMapBlend   blend = BLEND_NORMAL;
-        bool        mod2xLinear = false;         // mod2x's color is linear (CS2's unlit shader), not as it's stored
-        bool        fog   = true;                // the game's fog covers it (CS2's g_bFogEnabled)
-        bool        doubleSided = false;         // glTF's (CS2's effect cards are seen from their front only without it)
-        float       scroll[2]   = {0, 0};        // the base color's uvs move by this much a second (CS2's scrolling textures)
-        // HYPR3D_materials_source2's tint mask: the base color's rgb (Source 2's tint) only as much as its r says; and
-        // its decal texture over the base color, mixed in by its alpha or multiplied; each on the vertex uv or uv1
+        bool        mod2xLinear = false;         // mod2x color is linear (CS2's unlit shader)
+        bool        fog   = true;                // game fog applies (CS2's g_bFogEnabled)
+        bool        doubleSided = false;         // without it CS2 effect cards show front only
+        float       scroll[2]   = {0, 0};        // base color uv scroll per second (CS2)
+        // HYPR3D_materials_source2 tint mask (the base color's rgb tints by its r) and decal, on the vertex uv or uv1
         int         tintMaskTex = -1, tintMaskUV = 0;
         int         decalTex = -1, decalUV = 0;
-        uint8_t     decal = 0; // 0 none, 1 mixed in by its alpha, 2 multiplied, 3 a second color texture (rgba) the first is multiplied by
-        float       decalXf[6] = {1, 0, 0, 1, 0, 0}; // the second color texture's, from the vertex uv
+        uint8_t     decal = 0; // 0 none, 1 alpha mix, 2 multiply, 3 rgba times base
+        float       decalXf[6] = {1, 0, 0, 1, 0, 0}; // decal 3's uv transform, from the vertex uv
         // HYPR3D_materials_source2's detail texture, over the base color
         eMapDetail  detail = DETAIL_NONE;
         int         detailTex = -1, detailMaskTex = -1;
@@ -181,46 +176,43 @@ namespace h3d {
         float       detailTint[3] = {1, 1, 1};
         float       detailBlend = 1, detailBlendToFull = 0;
         int         detailMaskUV = 0;
-        int         detailUV = 0; // the detail texture on the vertex uv, or uv1
-        // HYPR3D_materials_blend: a second base color painted over the first by
-        // the vertices' _BLEND weight, the way Source 2 blends its layers
-        int         layerTex = -1, layerMaskTex = -1; // the mask: g = where the layers meet, r = how soft the edge is
+        int         detailUV = 0; // 0 vertex uv, 1 uv1
+        // HYPR3D_materials_blend: a second base color painted over the first by vertex _BLEND weight (Source 2 layers)
+        int         layerTex = -1, layerMaskTex = -1; // mask: g = layer boundary, r = edge softness
         int         layerNormalTex = -1;              // its normal map, roughness in alpha
         float       layerColor[4] = {1, 1, 1, 1};
         float       layerXf[6]    = {1, 0, 0, 1, 0, 0}; // applied to the vertex uv, like baseXf
-        float       layerMaskXf[6] = {1, 0, 0, 1, 0, 0}; // the mask's (CS2's blend modulation can have its own)
+        float       layerMaskXf[6] = {1, 0, 0, 1, 0, 0}; // the mask's (CS2 blend modulation)
         float       layerSoftness = -1;                // < 0: the mask's red channel
         int         layerMaskChannel = 1;              // where the layers meet: g, or a
-        float       layer1Tint[3] = {1, 1, 1};         // the first layer's own tint (the base color's tints both)
-        // CS2's border tint: the first layer tinted in a band along the edge between the layers
+        float       layer1Tint[3] = {1, 1, 1};         // layer 1 tint (the base color tints both)
+        // CS2's border tint: layer 1 tinted in a band along the layer edge
         float       borderTint[3] = {1, 1, 1};
-        float       border[3]     = {0, 0.5f, 0};      // strength (0: none), softness, offset of the painted weight
-        // HYPR3D_materials_source2's effect (CS2's csgo_effects: clouds, dust, glows): unlit, its color
-        // times up to three masks scrolling over it, faded by distance and by how square on it's seen
+        float       border[3]     = {0, 0.5f, 0};      // strength (0 = none), softness, weight offset
+        // csgo_effects (HYPR3D_materials_source2): unlit color times up to 3 scrolling masks; distance, angle fades
         bool        effect = false;
         int         effectMaskTex[3] = {-1, -1, -1};
-        float       effectMask[3][4] = {{1, 1, 0, 0}, {1, 1, 0, 0}, {1, 1, 0, 0}}; // uv scale, then scroll speed a second
+        float       effectMask[3][4] = {{1, 1, 0, 0}, {1, 1, 0, 0}, {1, 1, 0, 0}}; // uv scale, scroll per second
         float       effectBoost = 1, effectOpacity = 1;
         float       effectFade[4]    = {1, 1, 0, 1};     // distance (m), falloff, min, max
         float       effectFresnel[4] = {0.001f, 1, 0, 1}; // exponent, falloff, min, max
         bool        effectFog = true;
-        // the avatar's (unity2hypr3d's "hypr3d_*" extras; MToon's outline and queue in VRMs): Unity's render queue,
-        // -1 its alpha mode's (2000, 2450, 3000); its stencil; an outline; UnlitWF's back faces and light clamp
+        // avatars (unity2hypr3d "hypr3d_*" extras, MToon outline and queue): Unity render queue, -1 = by alpha mode
         int         queue = -1;
         SStencil    stencil;
         SOutline    outline;
         SToon       toon;
-        int         back = 0; // 1: back faces take backColor, 2: backTex times backColor (in place of the base color's rgb)
+        int         back = 0; // back faces: 1 backColor, 2 backTex x backColor
         int         backTex      = -1;
         float       backColor[4] = {1, 1, 1, 1};
         float       backXf[6]    = {1, 0, 0, 1, 0, 0};
-        float       lightClamp[3] = {0, 0, 1}; // the light's brightness between min and max (0: not clamped), its chroma
+        float       lightClamp[3] = {0, 0, 1}; // UnlitWF light clamp: min, full at (0 = off), chroma
         int         renderQueue() const {
             return queue >= 0 ? queue : alphaMode == ALPHA_BLEND ? 3000 : alphaMode == ALPHA_MASK ? 2450 : 2000;
         }
     };
 
-    // HDR pixels, shared exponent (GL_RGB9_E5), each mip level after the other
+    // HDR texels (GL_RGB9_E5), mip levels back to back
     struct SHdrImage {
         int                   w = 0, h = 0, levels = 0;
         std::vector<uint32_t> texels;
@@ -232,15 +224,13 @@ namespace h3d {
     // a game's precomputed lighting (HYPR3D_lighting), for the map or its backdrop
     struct SMapLightSet {
         SHdrImage            irradiance;  // the lightmap: light arriving, linear
-        SMapImage            directional; // where most of it comes from, in tangent space (xy), how much (z), specular occlusion (a)
+        SMapImage            directional; // xy: direction (tangent space), z: directionality, a: spec AO
         SMapImage            shadows;     // the sun's baked shadow (r, 1 = in shadow)
-        // light probes: an atlas of 3D grids, six blocks deep (the light arriving along +x +y +z -x -y -z,
-        // Source's axes), the first with the sun's baked shadow in alpha; half floats
+        // probe atlas, half floats: six blocks deep (+x +y +z -x -y -z, Source axes); block 0 alpha: sun shadow
         std::vector<uint16_t> probes;
-        std::vector<uint8_t> probeLuma;                // per texel of one block, six of them: each block's luminance, log encoded
-                                                       // (probeLumaValue(); kept for the exposure meter)
+        std::vector<uint8_t> probeLuma;                // 6 log lumas per block texel (exposure meter)
         int                  probeDims[3] = {0, 0, 0}; // one block
-        float                average[3]   = {0, 0, 0}; // of the probes: light for what has no lightmap or probe
+        float                average[3]   = {0, 0, 0}; // probe average, for what has neither
         struct SVolume {
             M4    toBox = M4::identity(); // world -> 0..1 in the volume
             SAABB bounds;
@@ -268,18 +258,17 @@ namespace h3d {
         // the exposure range (post_processing_volume) and tone curve (its .vpost)
         float                     exposureMin = 1, exposureMax = 1, exposureSpeedUp = 1, exposureSpeedDown = 1;
         bool                      exposureAuto = false;
-        float                     curve[8] = {0.15f, 0.5f, 0.1f, 0.2f, 0.02f, 0.3f, 4.f, 0.f}; // shoulder, linear strength, linear angle, toe strength, toe num, toe denom, white point, exposure bias
+        float                     curve[8] = {0.15f, 0.5f, 0.1f, 0.2f, 0.02f, 0.3f, 4.f, 0.f}; // shoulder, linear strength / angle, toe strength / num / denom, white point, exposure bias
     };
 
     // one draw call: every triangle of a material
     struct SMapBatch {
         int      material = 0;
         uint32_t first = 0, count = 0; // in indices
-        bool     render     = true;  // false: only casts shadows (tool textures like nodraw)
+        bool     render     = true;  // false: shadow only (tool textures like nodraw)
         bool     castShadow = true;
-        bool     sky        = false; // a skybox/dome: unlit, no fog, drawn behind everything
-        bool     backdrop   = false; // under a hypr3d_backdrop node (a game's 3D skybox): scenery far
-                                     // out, drawn before the map with its own depth range
+        bool     sky        = false; // skybox / dome: unlit, unfogged, drawn behind
+        bool     backdrop   = false; // hypr3d_backdrop: drawn first, own depth range
     };
 
     struct SMapModel {
@@ -293,9 +282,9 @@ namespace h3d {
         SAABB                   backdropBounds = SAABB::empty();
         size_t                  triangles = 0;
         SMapLighting            lighting; // the game's own, when the file has it
-        M4                      backdropTransform = M4::identity(); // the hypr3d_backdrop node's: its own space -> world
+        M4                      backdropTransform = M4::identity(); // hypr3d_backdrop space -> world
 
-        // the renderer copied everything it needs to the GPU (the lighting's numbers stay)
+        // call after the renderer's GPU upload; the lighting numbers stay
         void releaseCpuData() {
             vertices      = {};
             indices       = {};
@@ -312,9 +301,9 @@ namespace h3d {
 
     struct SMapRequest {
         std::string path;
-        int         compress = 0; // eTexCompression: block compressed textures the GPU takes
+        int         compress = 0; // eTexCompression flags the GPU supports
         float       scale = 0;   // 0 = guess from the size
-        float       aspect = 16.f / 9.f; // of the monitor, for fitting the desktop on a wall
+        float       aspect = 16.f / 9.f; // monitor aspect, to fit the desktop on a wall
         float       desktopHeight = 2.4f;
     };
 
@@ -333,14 +322,11 @@ namespace h3d {
         return b ? std::exp2((b - 1) / 254.f * 14.f - 10.f) : 0.f;
     }
 
-    // the light probe volume CS2 lights something at p with: of the ones it's in, the highest
-    // priority (indoor_outdoor_level), nearest the middle among equals; else the nearest one
+    // CS2's probe volume for p: top priority (indoor_outdoor_level) containing it, most central on ties, else nearest
     const SMapLightSet::SVolume* chooseLightProbe(const SMapLightSet& set, const V3& p);
 
-    // The eyes adjusting to how bright it is (used by the plugin and its test harness alike).
-    // exposureSample() guesses how bright the world looks from `eye` along exposureDirection(i) (a
-    // ray to what's there, and whether the sun reaches it); exposureFor() is the exposure for a full
-    // set of samples, looking along `view`; exposureStep() moves the exposure towards it over dt.
+    // auto exposure (plugin and test harness): exposureSample() measures from `eye` along exposureDirection(i),
+    // exposureFor() gives the exposure for `view`, exposureStep() eases toward it
     constexpr int EXPOSURE_SAMPLES = 64;
     V3            exposureDirection(int i);
     float         exposureSample(const SWorld& world, const V3& eye, const V3& dir);

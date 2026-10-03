@@ -57,7 +57,7 @@ namespace h3d {
         int         e = 0;
         stb_vorbis* v = stb_vorbis_open_memory(bytes.data(), (int)bytes.size(), &e, nullptr);
         if (!v) {
-            // (an Ogg file of Opus, say, rather than Vorbis)
+            // e.g. an Ogg Opus file rather than Vorbis
             const bool opus = bytes.size() > 36 && std::string_view((const char*)bytes.data() + 28, 8) == "OpusHead";
             error = std::format("sound {}: {}", file, opus ? "it's Opus, and only Ogg Vorbis is played" : vorbisError(e));
             return nullptr;

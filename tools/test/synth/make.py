@@ -908,8 +908,8 @@ def walk(o):
 # ---------------------------------------------------------------- style A: a variant of the model
 
 def variant():
-    """the model's prefab with changes on top, the way Unity keeps a variant: a PrefabInstance, its
-    changes, stubs of the model's objects the added ones point at, and the added objects"""
+    """a prefab variant as Unity keeps it: a PrefabInstance, its modifications, stubs of the model's objects the added
+    ones point at, and the added objects"""
     imp = fbx_imp
     ids = {}
     for mid, cls, fid in u.fbx_ids(FBX_GUID, info, imp):
@@ -1010,15 +1010,11 @@ print('synth: wrote %s: SynthAvatar.prefab (unpacked), SynthVariant.prefab (a va
 
 # ---------------------------------------------------------------- Modular Avatar: an outfit that merges into the avatar
 #
-# Outfit.fbx: an "Armature" of its own with the avatar's bone names, at the avatar's places, and bones of its own
-# (Frill, a skirt flap under Hips; HairClip under Hair_1). Meshes: Dress (skinned), Bow on its Chest bone, HairTie on
-# HairClip, and Headband, Charm and Tag at the top of the file.
-# OutfitMA.prefab, a variant of it set up for MA: Merge Armature on Armature; a PhysBone on Frill; a copy of the
-# avatar's hair PhysBone on its Hair_1 (MA drops it); a collider on its Thigh_L (that bone stays); a script MA does
-# not know on its Neck (that bone stays too, but the Dress follows the avatar's Neck); Bone Proxies on Headband (to
-# Head, keeping its place) and Charm (to Chest by path, at the bone); Move To on Tag (to Neck); a menu toggle.
-# SynthMA.prefab, a variant of SynthAvatar.prefab: the hair PhysBone moved onto Hair_1, and OutfitMA inside.
-# Outfit.prefab: the outfit with no MA setup, for --outfit.
+# Outfit.fbx: its own Armature with the avatar's bone names at its places, plus bones of its own (Frill, HairClip).
+# OutfitMA.prefab: Merge Armature, PhysBones, a collider and a script MA doesn't know (their bones stay, though the
+# Dress follows the avatar's Neck), Bone Proxies, Move To and a menu toggle; MA drops its copy of the avatar's hair
+# PhysBone. SynthMA.prefab: SynthAvatar.prefab with the hair PhysBone on Hair_1 and OutfitMA inside. Outfit.prefab: no
+# MA setup, for --outfit.
 
 import copy as _copy
 MA_GUID = unitygen.MA_GUID
@@ -1305,13 +1301,9 @@ write('OutfitVRM.prefab', HEAD + v.text(), G('OutfitVRM.prefab'), 'PrefabImporte
 print('synth: wrote OutfitVRM.fbx and OutfitVRM.prefab')
 
 # ---------------------------------------------------------------- VRCFury: an outfit linked the VRCFury way, and toggles
-# OutfitVF.prefab, a variant of Outfit.fbx: a VRCFury Armature Link (its Hips to the avatar's, recursive, snapped on),
-# a Toggle for the Dress (on at first; it sets the Shrink shape key), and Bow and Headband toggles sharing an exclusive
-# tag (Bow the tag's off state); a PhysBone on Frill.
-# SynthVF.prefab, a variant of SynthAvatar.prefab with OutfitVF inside (its Bow toggle renamed by an override of the
-# [SerializeReference] field): a Toggle saved the old way (Unity 2019's references, config.features, a version-0
-# Toggle whose Object Toggle flips the Badge), Apply During Upload setting the Smile shape key to 30, and Delete During
-# Upload on the Glasses.
+# OutfitVF.prefab (Outfit.fbx): Armature Link, a Dress Toggle setting Shrink, Bow and Headband toggles sharing an
+# exclusive tag, a PhysBone. SynthVF.prefab: SynthAvatar.prefab with OutfitVF inside (Bow renamed by a
+# [SerializeReference] override), an old Unity 2019 version-0 Toggle, Apply During Upload and Delete During Upload.
 
 OVF = Variant(OUT_GUID)
 OVF.root(O_GO, O_TF, 'OutfitVF')
@@ -1323,7 +1315,7 @@ OVF.component(O_GO, 114, 'MonoBehaviour', unitygen.vrcfury(refs, refs.add('Toggl
     'Outfit/Dress', [refs.action('ObjectToggleAction', obj=R(OVF.stub(oid('Dress'), 1)), mode=0),
                      refs.action('BlendShapeAction', blendShape='Shrink', blendShapeValue=100, renderer=R(0),
                                  allRenderers=1)], on=1))))
-DECO = {}  # name -> (the component, its toggle's reference id), for SynthVF's override
+DECO = {}  # name -> (component, toggle reference id)
 for name, off in (('Bow', 1), ('Headband', 0)):
     refs = unitygen.Refs(newid)
     t = refs.add('Toggle', unitygen.vf_toggle(
@@ -1348,7 +1340,7 @@ SV.component(UOS[MESH_OF['Glasses']].go, 114, 'MonoBehaviour', unitygen.vrcfury(
     'DeleteDuringUpload', {'version': 0})))
 n = Variant(G('OutfitVF.prefab'), parent_tf=SV.stub(ROOT.tf, 4))
 n.root(OVF.own(O_GO), OVF.own(O_TF), 'OutfitVF')
-comp, rid = DECO['Bow']  # an override of a [SerializeReference] field: the Bow toggle renamed
+comp, rid = DECO['Bow']  # rename the Bow toggle via a [SerializeReference] override
 n.mod(comp, 'managedReferences[%d].name' % rid, 'Outfit/Deco/Ribbon Bow')
 SV.added_go.append({'targetCorrespondingSourceObject': SV.src(ROOT.tf), 'insertIndex': -1,
                     'addedObject': R(n.stub(OVF.own(O_TF), 4))})

@@ -19,11 +19,8 @@
 #include <tuple>
 #include <unordered_map>
 
-// Loading user supplied maps: glTF 2.0 (.gltf with its files, or .glb).
-// Everything is flattened into world space once, then split into one draw
-// call per material; the same triangles feed the collision BVH, which is also
-// used to bake some ambient occlusion and to find a spawn point and a wall
-// for the desktop when the map doesn't say where they go.
+// Map loading (glTF 2.0), flattened into world space with one draw call per material. The collision BVH built from the
+// same triangles also bakes AO and finds a spawn point and desktop wall when the map doesn't mark them.
 
 namespace h3d {
 
@@ -48,8 +45,7 @@ namespace h3d {
             return b;
         }
 
-        // what to do with a surface, going by its names: maps converted from
-        // games keep their tool textures (clip brushes, triggers, the sky shell)
+        // per-surface rules by name: converted game maps keep their tool textures (clips, triggers, sky shell)
         struct SRules {
             bool render = true, collide = true, shadow = true, sky = false;
         };
@@ -123,7 +119,7 @@ namespace h3d {
             std::optional<V3>                         spawnNode, desktopNode;
             V3                                        spawnForward{0, 0, -1}, desktopNormal{0, 0, 1};
             bool                                      spawnNamed = false; // hypr3d_spawn rather than a game's player start
-            std::optional<V3>                         sunNode;            // a directional light (KHR_lights_punctual), towards it
+            std::optional<V3>                         sunNode;            // KHR_lights_punctual sun, direction towards it
 
             void materials() {
                 auto m          = gltf::readMaterials(data);
@@ -134,7 +130,7 @@ namespace h3d {
                 defaultMaterial = m.defaultMaterial;
             }
 
-            // the game's lighting for the map, or for its backdrop (its own when it has one)
+            // baked lighting set: 0 for the map, 1 for the backdrop (null without one)
             const SMapLightSet* lightSet(bool backdrop) const {
                 const auto& sets = model.lighting.sets;
                 if (!model.lighting.present || sets.empty())
@@ -170,7 +166,7 @@ namespace h3d {
                             // how much of the material's second layer shows (HYPR3D_materials_blend)
                             if (at.name && !std::strcmp(at.name, "_BLEND"))
                                 aBlend = at.data;
-                            // where in the lightmap (HYPR3D_lighting)
+                            // lightmap uvs (HYPR3D_lighting)
                             if (at.name && !std::strcmp(at.name, "_LIGHTMAP_UV"))
                                 aLight = at.data;
                             break;
@@ -185,7 +181,7 @@ namespace h3d {
                 const int     mat = prim.material ? (int)cgltf_material_index(data, prim.material) : defaultMaterial;
                 const auto&   mm  = model.materials[mat];
                 SRules        rules = rulesFor(mm.name, object);
-                if (backdrop) // scenery far out: only seen, never reached, and its shadows wouldn't reach the map
+                if (backdrop) // distant scenery: render only
                     rules = {rules.render, false, false, false};
                 if (mm.effect) // dust and clouds: only seen
                     rules = {rules.render, false, false, rules.sky};
@@ -194,7 +190,6 @@ namespace h3d {
 
                 const size_t n = aPos->count;
 
-                // triangle list
                 std::vector<uint32_t> idx;
                 if (prim.indices) {
                     idx.resize(prim.indices->count);
@@ -217,8 +212,7 @@ namespace h3d {
                     idx = std::move(list);
                 }
 
-                // only the vertices its triangles use: exporters often give every primitive of a
-                // mesh the mesh's whole vertex buffer, which would be copied once per primitive
+                // only the used vertices: exporters often give each primitive the mesh's whole vertex buffer
                 std::vector<uint32_t> tris, used, remap(n, UINT32_MAX); // tris index into used
                 tris.reserve(idx.size());
                 for (size_t t = 0; t + 2 < idx.size(); t += 3) {
@@ -261,7 +255,6 @@ namespace h3d {
                         blend[i] = blend[i * comps];
                 }
 
-                // to world space
                 const M4        nm = xf.inverse().transposed();
                 std::vector<V3> P(m), N(m, V3{0, 0, 0});
                 for (size_t i = 0; i < m; ++i)
@@ -292,8 +285,7 @@ namespace h3d {
                     handedness = dot(cross(X, Y), Z) < 0.f ? -1.f : 1.f;
                 }
 
-                // the game's lighting: its lightmap, or the light probe volume the object is in (by its
-                // middle). Merged props are many objects in one: each connected piece gets its own.
+                // baked lighting: lightmap, else the probe volume at each connected piece's center (merged props)
                 eMapLight                                 mode = model.lighting.present ? LIGHT_FLAT : LIGHT_OWN;
                 std::vector<const SMapLightSet::SVolume*> vol;
                 if (mode != LIGHT_OWN && !rules.sky && !mm.unlit) {
@@ -385,8 +377,7 @@ namespace h3d {
                         v.light[0] = lmuv[i * 2];
                         v.light[1] = lmuv[i * 2 + 1];
                     } else if (mode == LIGHT_PROBE) {
-                        // texels of the atlas, kept half a texel inside the volume's own block so filtering
-                        // never reaches into its neighbours'
+                        // atlas texels, half a texel inside the volume's block so filtering can't reach its neighbours
                         const auto&  vl    = *vol[i];
                         const V3     q     = vl.toBox.point(P[i]);
                         const float  qc[3] = {q.x, q.y, q.z};
@@ -464,9 +455,7 @@ namespace h3d {
             }
         };
 
-        // The map's own sun if it has one. Otherwise high in the sky and along
-        // the map's longest side, so light reaches down into courtyards and
-        // streets rather than only the rooftops.
+        // the map's sun, else a high one along the map's longest side so light reaches into streets, not only rooftops
         V3 mapSun(const SAABB& bounds, const std::optional<V3>& fromMap) {
             V3 sun = fromMap.value_or(V3{});
             if (!fromMap) {
@@ -479,8 +468,7 @@ namespace h3d {
             return normalize(sun);
         }
 
-        // per vertex: how enclosed it is nearby, how much of the sky it sees, and
-        // how much sunlight the surroundings bounce onto it
+        // per vertex: nearby enclosure, sky visibility and sunlight bounced from the surroundings (ao[0..2])
         void bakeAO(SMapModel& model, const CCollision& occ, const V3& sun, const std::atomic<bool>& cancel) {
             const size_t n = model.vertices.size();
             if (n == 0 || n > 3'000'000)
@@ -502,8 +490,7 @@ namespace h3d {
                         SRayHit  h;
                         if (occ.raycast(p, d, SKY, h)) {
                             local += smoothstep01(h.t / RANGE);
-                            // one bounce: is the surface this ray hit in the sun?
-                            // (the directions are cosine weighted, so a plain average is the irradiance)
+                            // one bounce off sunlit hits; cosine-weighted directions, so the mean is the irradiance
                             const float lit = dot(h.normal, sun);
                             if (SRayHit sh; lit > 0.f && !occ.raycast(p + d * h.t + h.normal * 0.02f, sun, 300.f, sh))
                                 bounce += lit;
@@ -525,7 +512,6 @@ namespace h3d {
             return !col.overlaps({{feet.x - PLAYER_RADIUS, feet.y + 0.05f, feet.z - PLAYER_RADIUS}, {feet.x + PLAYER_RADIUS, feet.y + PLAYER_HEIGHT, feet.z + PLAYER_RADIUS}});
         }
 
-        // the floor under a point, if there is one within `depth`
         std::optional<V3> floorBelow(const CCollision& col, const V3& p, float depth) {
             std::vector<SRayHit> hits;
             col.raycastAll(p, {0, -1, 0}, depth, hits);
@@ -540,9 +526,7 @@ namespace h3d {
             float score = 0;
         };
 
-        // good places to stand, best first: on a floor, inside the map (walls
-        // around at eye height rather than open void, which is where roofs are),
-        // with some room, and a few meters apart
+        // good places to stand, best first: on a floor, enclosed at eye height (roofs see open void), roomy, 3 m apart
         std::vector<SSpot> findSpawns(const CCollision& col, const CCollision& occ, const SAABB& bounds, size_t count) {
             const int            G    = 32;
             const V3             size = bounds.size();
@@ -570,8 +554,7 @@ namespace h3d {
                                 dist[k] = std::min(w.t, 15.f);
                             }
                         }
-                        // how much room there is: the narrowest way through tells an alley
-                        // from a courtyard, the median distance a hall from a corridor
+                        // narrowest width: alley vs courtyard; median distance: hall vs corridor
                         float width = 30.f;
                         for (int k = 0; k < 8; ++k)
                             width = std::min(width, dist[k] + dist[k + 8]);
@@ -623,9 +606,7 @@ namespace h3d {
             float          score = 0;
         };
 
-        // a flat stretch of wall the desktop fits on, seen from `feet`: every part
-        // of it on the wall, nothing in front of it (pillars, planters, shelves,
-        // an arch) and all of it in sight from where the player will stand
+        // a flat stretch of wall the desktop fits on, unobstructed and fully visible from where the player will stand
         std::optional<SWallFit> findWall(const CCollision& col, const CCollision& occ, const V3& feet, float aspect, float height) {
             const V3                eye = feet + V3{0, PLAYER_EYE, 0};
             const V3                up{0, 1, 0};
@@ -662,7 +643,7 @@ namespace h3d {
                     });
                     if (!onWall)
                         continue;
-                    // room to stand back and see all of it (not the back of a curtain in a corridor)
+                    // room to stand back and see all of it
                     SRayHit     front;
                     const float room = col.raycast(c + n * 0.05f, n, 14.f, front) ? front.t : 14.f;
                     if (room < 2.6f)
@@ -759,7 +740,7 @@ namespace h3d {
             return world.model && world.model->lighting.present ? &world.model->lighting : nullptr;
         }
 
-        // the most hypr3d's own lighting brightens a dark place
+        // max exposure hypr3d's own lighting gives a dark place
         constexpr float OWN_MAX_EXPOSURE = 1.6f;
     }
 
@@ -774,9 +755,7 @@ namespace h3d {
         const bool  lit = ndl > 0.f && !world.collision.raycast(p, world.sunDir, 300.f, s);
         if (!L)
             return 0.45f * ((lit ? 2.78f * ndl : 0.f) + 0.3f);
-        // the game's lighting: its sun on a surface of middling albedo, and the rest as its light
-        // probes have it there
-        // (half a meter out: a probe right at the wall may be inside it)
+        // baked: the sun on a mid-albedo surface plus probe ambient 0.5 m out (a probe at the wall may be inside it)
         const auto& set     = L->sets[0];
         float       ambient = luma(V3{set.average[0], set.average[1], set.average[2]});
         const V3    at      = p + h.normal * 0.5f;
@@ -809,7 +788,7 @@ namespace h3d {
     float exposureFor(const SWorld& world, const float* samples, const V3& view) {
         const SMapLighting* L = bakedLighting(world);
         if (!L) {
-            // hypr3d's own lighting: all around, as eyes adjust to a place
+            // hypr3d's own lighting: average all directions, as eyes adapt to a place
             float sum = 0;
             for (int i = 0; i < EXPOSURE_SAMPLES; ++i)
                 sum += samples[i];
@@ -817,8 +796,7 @@ namespace h3d {
         }
         if (!L->exposureAuto)
             return 1.f;
-        // CS2 meters the log average of what's on screen: mostly what's in front, then
-        // aims what its tone curve shows as middle grey at it, within the map's range
+        // like CS2: aim the tone curve's middle grey at the view-weighted log average, within the map's range
         float sum = 0, weights = 0;
         for (int i = 0; i < EXPOSURE_SAMPLES; ++i) {
             const float w = 0.05f + smoothstep01(std::clamp((dot(exposureDirection(i), view) - 0.5f) / 0.45f, 0.f, 1.f));
@@ -847,7 +825,7 @@ namespace h3d {
         current               = std::max(current, 1e-3f);
         if (!L)
             return std::exp(std::lerp(std::log(current), std::log(target), 1.f - std::exp(-dt / 0.6f)));
-        // CS2's: so many stops a second
+        // CS2's: a fixed number of stops a second
         const float from = std::log2(current), to = std::log2(target);
         const float rate = (to > from ? L->exposureSpeedUp : L->exposureSpeedDown) * dt;
         return std::exp2(to > from ? std::min(from + rate, to) : std::max(from - rate, to));
@@ -882,10 +860,9 @@ namespace h3d {
 
         SBuild b{req, cancel, data, model, log};
         b.materials();
-        // the game's own lighting, when the file has it (cs2map's HYPR3D_lighting): before the
-        // geometry, which gets its lightmap uvs and light probe coordinates as it's read
+        // HYPR3D_lighting (cs2map) comes before the geometry, which needs it for lightmap uvs and probe coordinates
         const bool lit = gltf::readLighting(data, abs.parent_path().string(), model.lighting, cancel, log);
-        // (the sky's image as the model has them, lighting or not: it counts the materials' images only)
+        // skyImage: file image index -> model image index (model images are only the materials')
         auto& L    = model.lighting;
         L.skyImage = L.skyImage >= 0 && (size_t)L.skyImage < b.imageSlot.size() ? b.imageSlot[L.skyImage] : -1;
         if (lit) {
@@ -896,8 +873,7 @@ namespace h3d {
                                       L.exposureAuto ? std::format(", exposure {}-{}", L.exposureMin, L.exposureMax) : ""));
         }
 
-        // each node with whether it's in the backdrop and its parent's world transform (worked out on the way down:
-        // cgltf_node_transform_world walks up to the root for each node, and a file can nest them 100000 deep)
+        // nodes with backdrop flag and parent transform, done top-down (cgltf_node_transform_world walks to the root)
         struct SVisit {
             const cgltf_node* nd;
             bool              backdrop;
@@ -938,14 +914,13 @@ namespace h3d {
             return res;
         }
 
-        // units: glTF is meters, but converted game maps often come in their
-        // own units (inches for Source and GoldSrc maps)
+        // glTF is in meters, but converted game maps often keep their units (inches for Source and GoldSrc)
         const SState st      = readState(path);
         const V3     rawSize = model.geometryBounds.size();
         const float  extent  = std::max(rawSize.x, rawSize.z);
         float        scale   = req.scale;
         if (scale <= 0.f && st.scale && *st.scale > 0.f)
-            scale = *st.scale; // what it was last used at
+            scale = *st.scale; // last used scale
         if (scale <= 0.f) {
             scale = extent > 600.f ? 0.0254f : 1.f;
             if (scale != 1.f)
@@ -1014,7 +989,7 @@ namespace h3d {
         world->sunDir = mapSun(model.geometryBounds, b.sunNode);
         if (b.sunNode)
             log.push_back("using the map's sun");
-        // the game's lightmaps have all of that and more
+        // baked lightmaps already include AO and bounce
         if (!model.lighting.present)
             bakeAO(model, occ, world->sunDir, cancel);
         else if (auto& L = model.lighting; L.skyImage >= 0 && (size_t)L.skyImage < model.images.size() && !model.images[L.skyImage].rgba.empty()) {
@@ -1035,8 +1010,7 @@ namespace h3d {
                 L.skyAverage = {(float)(sum[0] / wsum) * L.skyColor.x, (float)(sum[1] / wsum) * L.skyColor.y, (float)(sum[2] / wsum) * L.skyColor.z};
         }
 
-        // where to stand and where the desktop hangs: saved by hand, marked
-        // in the map, or guessed
+        // spawn and desktop: from the state file, marked in the map, or guessed
         const SAABB& bounds = model.geometryBounds;
         const float  fixState = st.scale ? scale / *st.scale : 1.f;
         std::optional<V3> spawn;
@@ -1081,7 +1055,6 @@ namespace h3d {
         check(cancel);
 
         if (!desktop) {
-            // look for a wall from each good spot, and take the best wall
             std::optional<SWallFit> wall;
             if (spots.empty())
                 wall = findWall(world->collision, occ, *spawn, req.aspect, req.desktopHeight);
@@ -1096,12 +1069,11 @@ namespace h3d {
             }
             if (wall) {
                 desktop = wall->desktop;
-                // step back in front of it, if nothing says where to start
+                // start in front of it unless a spawn is set
                 if (!st.spawn && !b.spawnNode)
                     spawn = wall->stand;
             } else {
-                // no wall in sight: hang it in the air in front of the start,
-                // towards the most open side if nothing says which way to look
+                // no wall: float it in front of the start, toward the most open side unless the spawn yaw is known
                 const V3 eye = *spawn + V3{0, PLAYER_EYE, 0};
                 V3       fwd = yawKnown ? V3{std::sin(spawnYaw), 0, -std::cos(spawnYaw)} : V3{0, 0, -1};
                 if (!yawKnown) {

@@ -6,7 +6,7 @@ namespace h3d {
 
     namespace {
         constexpr float PI       = std::numbers::pi_v<float>;
-        constexpr float LOOK_TAN = 1.f; // ringLook: the most a view's pitch goes up or down, as its tangent (45 degrees)
+        constexpr float LOOK_TAN = 1.f; // ringLook's pitch limit as a tangent (45°)
 
         float wrap(float a) {
             a = std::fmod(a + PI, 2.f * PI);
@@ -15,30 +15,26 @@ namespace h3d {
             return a - PI;
         }
 
-        // how far up or down from its middle a window may reach: `fit` of the view's half height, where the view sees
-        // it when you face it (back + radius out)
+        // how far a window may reach up or down from its middle: `fit` of the half view height at back + radius
         float reach(const STileRing& ring) {
             return ring.fit * (ring.back + ring.radius) * ring.tanHalfFov;
         }
 
-        // a window played in the row: one with its own fit and a size (one with none yet takes no room, as the others)
+        // a window played in the row: has its own fit and a size
         bool played(const STileIn& w) {
             return w.fit > 0.f && w.w >= 1.f && w.h >= 1.f;
         }
 
-        // how tall and wide the view is (metres) where the window played is, as the view sees it: lookDist out along it,
-        // pitched lookPitch up or down, an upright window shows cos of its height there (and is cos as far again along the
-        // view) and all of its width
+        // view size in metres at the played window, lookDist out and pitched lookPitch: the view is 1/cos further along
+        // there, and an upright window shows cos of its height
         void playedView(const STileRing& ring, float& viewH, float& viewW) {
             const float d = std::isnan(ring.lookDist) ? ring.back + ring.radius : ring.lookDist, c = std::cos(std::clamp(ring.lookPitch, -1.2f, 1.2f));
             viewH = 2.f * d * ring.tanHalfFov / (c * c);
             viewW = 2.f * d * ring.tanHalfFov * ring.aspect / c;
         }
 
-        // metres per px, before the row is made to fit round you: as big as on your screen, made smaller to fit `fit` of
-        // the view's height and width, and short enough to stand on the ground within the view's reach; the one played,
-        // just its own fit of the view's height or width, whichever it fills first (bigger than on your screen, too), the
-        // view as you see it
+        // metres per px before fitting the row: monitor size, shrunk to `fit` of the view and to stand on the ground
+        // within reach; the played one gets exactly its own fit, even if bigger than on the monitor
         float fullScale(const STileRing& ring, const STileIn& w) {
             const float ahead = ring.back + ring.radius;
             float       viewH = 2.f * ahead * ring.tanHalfFov, viewW = viewH * ring.aspect;
@@ -69,7 +65,7 @@ namespace h3d {
         const float disc = b * b - c;
         if (!(disc >= 0.f))
             return false;
-        const float s = -b + std::sqrt(disc); // (how far out, level: the far crossing, from inside the ring the one ahead)
+        const float s = -b + std::sqrt(disc); // the far crossing: the one ahead from inside the ring
         if (!(s > 0.f))
             return false;
         at   = eye + d * s;
@@ -86,16 +82,14 @@ namespace h3d {
         std::vector<float> full(n);
         for (size_t i = 0; i < n; ++i)
             full[i] = fullScale(ring, windows[i]);
-        // how far round the row goes with every window f times as big, the one played g times (a flat window w wide, R
-        // out, takes 2 atan(w / 2R))
+        // row angle with windows scaled by f, the played one by g (a flat window w wide at R takes 2 atan(w / 2R))
         const auto span = [&](float f, float g) {
             float a = ring.gap * (float)(n - 1);
             for (size_t i = 0; i < n; ++i)
                 a += 2.f * std::atan(std::max(windows[i].w, 0.f) * full[i] * (played(windows[i]) ? g : f) * 0.5f / R);
             return a;
         };
-        // too far round: the others all smaller alike, the one played as it is; only if even with them at nothing it
-        // would be (a hundred windows or so), it's made smaller too
+        // too wide: shrink the others alike, keeping the played one unless that's not enough (~100 windows)
         float f = 1.f, g = 1.f;
         if (span(1.f, 1.f) > ring.most) {
             const bool others = span(0.f, 1.f) <= ring.most;
@@ -120,8 +114,7 @@ namespace h3d {
             o.up     = {0, 1, 0};
             o.right  = cross(o.up, o.normal);
             o.center = ring.center + dir * R;
-            // level with the center, or standing on the ground; the one played where you look (not on the ground: it's
-            // drawn over the world while it's played)
+            // level with the center or standing on the ground; the played one at lookY (it's drawn over the world)
             const float hh = std::max(windows[i].h, 0.f) * o.scale * 0.5f;
             if (played(windows[i]))
                 o.center.y = std::isnan(ring.lookY) ? ring.center.y : ring.lookY;
@@ -145,14 +138,14 @@ namespace h3d {
 
     void STileFloor::step(const V3& feet, bool onGround, bool fly, float dt) {
         const float before  = to;
-        const bool  walking = ground && onGround && !fly; // (on the ground since the step before)
+        const bool  walking = ground && onGround && !fly; // on the ground since the previous step
         to                  = fly || onGround ? feet.y : std::min(to, feet.y);
         if (!(length(feet - was) <= PUT))
             y = to = feet.y;
         else if (fly || to < y)
             y = to;
         else {
-            if (walking) // (up stairs and slopes with you, what's left of a landing going on)
+            if (walking) // follow stairs and slopes; a landing keeps easing
                 y += to - before;
             y += (to - y) * (1.f - std::exp(-dt * RISE));
         }
@@ -164,7 +157,7 @@ namespace h3d {
         const float rel = wrap(at - ring.yaw);
         int         k   = 0;
         for (const auto& o : laid)
-            if (wrap(o.angle - ring.yaw) < rel + 1e-4f) // (a window whose middle is right there, rounded either side of it: after it)
+            if (wrap(o.angle - ring.yaw) < rel + 1e-4f) // a middle right at `at` counts as left of it
                 ++k;
         return k;
     }

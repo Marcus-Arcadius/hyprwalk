@@ -1,6 +1,5 @@
-# anim_unit.py: the animation side of tools/unity2hypr3d.py on small hand-made cases: Transform curves and where they
-# put the GLB's nodes, VRCFury's Scale, Smooth Loop and World Drop, 2D blend trees and puppets, avatar masks and the
-# Gesture layer's hand poses
+# anim_unit.py: the animation side of tools/unity2hypr3d.py on small hand-made cases: Transform curves, VRCFury's Scale,
+# Smooth Loop and World Drop, 2D blend trees, puppets, avatar masks and the Gesture layer's hand poses
 #   blender -b --factory-startup --python-exit-code 1 -P anim_unit.py
 import sys, os, math
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/

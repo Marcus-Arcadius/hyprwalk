@@ -1,15 +1,12 @@
-# util.py: what tools/test/live/check.sh needs that bash doesn't do (plain python3, no numpy):
-#   util.py png IN.ppm OUT.png            a grim PPM as a PNG
+# util.py: helpers for tools/test/live/check.sh that bash can't do (plain python3, no numpy):
+#   util.py png IN.ppm OUT.png   a grim PPM as a PNG
 #   util.py diff A.ppm B.ppm [OUT.png] [--same X.ppm Y.ppm]... [--mask X Y W H]...
-#                                         the fraction of pixels that differ (any channel by more than 32), then the
-#                                         fraction left out, and a picture of where: red where they differ, blue
-#                                         what's left out, the rest dimmed. --same: two frames of one moment, a second
-#                                         apart; what differs between them changes on its own (a clock, an animated
-#                                         wallpaper) and is left out, in blocks of 16 px and those next to them.
-#                                         --mask: a box left out (pixels)
-#   util.py count IN.ppm COLOUR X0 Y0 X1 Y1  how many pixels in the box are that colour (orange: a notification's
-#                                         bar; red: the lip sync badge's dot); fractions of the width and height
-#   util.py json PATH < JSON               a value out of hyprctl's JSON: "mode", "aimed.kind", "visemes.aa", "0.name"
+#       prints the fraction of pixels that differ (a channel by > 32) and the fraction left out; OUT.png shows them red
+#       and blue. --same: two frames of one moment, a second apart: 16 px blocks that change on their own (a clock, an
+#       animated wallpaper) and their neighbours are left out. --mask: a box left out, in pixels
+#   util.py count IN.ppm COLOUR X0 Y0 X1 Y1   pixels of COLOUR (orange: notification bar, red: lip sync badge dot) in
+#       a box of frame fractions
+#   util.py json PATH < JSON     a value from hyprctl's JSON ("mode", "aimed.kind", "visemes.aa", "0.name")
 import json
 import re
 import struct
@@ -44,7 +41,7 @@ BLOCK = 16
 
 
 def live_blocks(pairs, w, h, step=2, thresh=32):
-    """the blocks (bx, by) where two frames of one moment differ, and the blocks next to them"""
+    """blocks (bx, by) where two frames of one moment differ, plus their neighbours"""
     live = set()
     for a, b in pairs:
         wa, ha, pa = read_ppm(a)

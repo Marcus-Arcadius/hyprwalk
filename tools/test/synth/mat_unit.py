@@ -1,10 +1,7 @@
-# mat_unit.py: the material reader of tools/unity2hypr3d.py on hand-made UnlitWF, lilToon, Poiyomi and MToon
-# materials: the alpha of UnlitWF's alpha sources and power (an empty mask is Unity's default white) and its inverted
-# alpha, the faces its shaders draw, its emission, the stencils and render queues of its Mask/MaskOut shaders (from
-# their passes, or by GUID), lilToon's and Poiyomi's stencil settings, the four shaders' outlines, UnlitWF's back
-# faces and light clamp, the four shaders' toon shading and matcaps. Then a GLB exported and read back: a mask's
-# channel or an inverted alpha baked into the base texture's alpha, and the material extras with the textures they
-# add.
+# mat_unit.py: tools/unity2hypr3d.py's material reader on hand-made UnlitWF, lilToon, Poiyomi and MToon materials: alpha
+# sources, faces drawn, emission, stencils and render queues, outlines, back faces, light clamp, toon shading and
+# matcaps; then a GLB exported and read back (masks and inverted alpha baked into the base texture's alpha, the
+# material extras and their textures).
 #   blender -b --factory-startup --python-exit-code 1 -P mat_unit.py
 import sys, os, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
@@ -124,7 +121,7 @@ print('== stencil masks: from the shaders\' Stencil blocks (outline passes aside
 
 
 def stencil_shader(name, blocks, extra=''):
-    """a shader with passes that each test or write the stencil as blocks has it: [(pass name, Stencil body)]"""
+    """a shader whose passes have these Stencil blocks: [(pass name, Stencil body lines)]"""
     return asset('Assets/Shaders/%s.shader' % name.split('/')[-1], (
         'Shader "%s" {\n    Properties {\n        _StencilMaskID ("ID", int) = 8\n'
         '        _AL_StencilPower ("Alpha Power", Range(0, 1)) = 0.5\n    }\n    SubShader {\n'

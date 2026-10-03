@@ -1,4 +1,4 @@
-# joins tools/cands.json (sources, licences) and tools/results.json (analysis) into manifest.json and LICENSES.md
+# joins tools/cands.json (sources, licences) and tools/results.json (analysis) into manifest.json
 import json, os, math
 SP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 C = json.load(open(f'{SP}/tools/cands.json'))

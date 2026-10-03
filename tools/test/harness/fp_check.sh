@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# fp_check.sh: first person with the avatar's body (the harness's --fpbody, the plugin's code): the camera in its eyes,
-# nothing of its head in the view, its hands up low in it (ready); still, standing; walking they stay in the view,
-# running they pump; looking far down they let go; touching (a window pressed) the right hand's wrist goes in toward the
-# crosshair; typing they come nearer together, holding up and out; let down, gone; a gesture is held up where it shows;
-# a wall just ahead keeps them back; out of first person (V) they go down to the sides from where they were, smoothly,
-# its camera gone (as the plugin's motion has none then). From the harness's --fpstatus and --wrists lines (where each
-# wrist is in the view, 0..1 across and down; from the feet) and two frames.
-#   tools/test/harness/fp_check.sh AVATAR [DIR]   (a humanoid: a VRM, or regress.sh --keep's OUT/new/BoothAccessories.glb;
-#                                                  DIR: where the frames and logs go, a temporary one by default)
+# fp_check.sh: first person with the avatar's body (the harness's --fpbody, the plugin's code): the camera in its
+# eyes, the head out of view, the hands in each mode and move, and leaving first person (V) smoothly; from the
+# harness's --fpstatus and --wrists lines (wrists in the view, 0..1 across and down) and two frames.
+#
+#   tools/test/harness/fp_check.sh AVATAR [DIR]
+#
+#   AVATAR  a humanoid: a VRM, or regress.sh --keep's OUT/new/BoothAccessories.glb
+#   DIR     where the frames and logs go (default: a temporary one)
+#
 # Needs build/test/shot (tools/test/harness/build.sh).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -19,7 +19,7 @@ DIR="${2:-}"
 [[ -n "$DIR" ]] || { DIR="$(mktemp -d)"; trap 'rm -rf "$DIR"' EXIT; }
 mkdir -p "$DIR"
 
-run() { # name, then the harness's options (after the avatar, 640x360 as a 16:10-ish monitor's view)
+run() { # NAME OPTIONS... (640x360, a monitor's aspect)
     local name="$1"
     shift
     "$SHOT" --size 640x360 --avatar "$AVATAR" "$@" > "$DIR/$name.log" 2>&1 || { echo "FAIL the harness ($name): $(tail -3 "$DIR/$name.log")"; exit 1; }
@@ -33,7 +33,7 @@ run run --fpbody 0 0 --frames 30 --accel 10 --decel 14 --run 1 --move 0 -4.5 --f
 run down --fpbody 0 -80 --frames 60 "${st[@]}" --fpbody 0 0 --frames 60 "${st[@]}"
 fade=()
 for i in $(seq 20); do fade+=(--frames 1 --wrists); done
-# (the world's middle behind it: going by a camera that's gone, the arms would reach back there)
+# the world's middle is behind it: arms still aiming by the gone camera would reach back there
 run fade --pos 0 0 -6 --fpbody 0 0 --frames 60 --fphands touch --fppress --frames 30 --wrists --fpoff "${fade[@]}" --frames 60 --wrists
 run modes --fpbody 0 0 --frames 60 --fphands touch --fppress --frames 40 "${st[@]}" --fphands type --frames 40 "${st[@]}" --fptap left --frames 2 \
     --fphands hold --frames 40 "${st[@]}" --fphands down --frames 40 "${st[@]}" --fphands ready --frames 40 --gesture right thumbsup --frames 40 "${st[@]}" \

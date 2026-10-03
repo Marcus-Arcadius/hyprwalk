@@ -18,11 +18,11 @@
 namespace h3d {
 
     namespace {
-        constexpr float HALF_TURN = std::numbers::pi_v<float>, TAU = 2 * HALF_TURN; // (not PI: Hyprland has a macro of that name)
+        constexpr float HALF_TURN = std::numbers::pi_v<float>, TAU = 2 * HALF_TURN; // not PI: Hyprland defines a PI macro
         constexpr float INNER      = 0.34f; // the middle's radius, in the ring's
-        constexpr float CURSOR_MAX = 0.97f; // how far out the cursor goes, in the ring's radius
+        constexpr float CURSOR_MAX = 0.97f; // max cursor distance, in ring radii
         constexpr float OPEN_TIME = 0.12f, CLOSE_TIME = 0.1f, FLASH_TIME = 0.25f; // seconds
-        constexpr auto  MORE = "\x01more"; // the page of the "More" slot: the next part of this one
+        constexpr auto  MORE = "\x01more"; // "More" slot's page: the next part of this one
 
         float           cursorRadius(int R) {
             return std::max(4.f, 0.026f * R);
@@ -39,15 +39,13 @@ namespace h3d {
             }
         };
 
-        // a block of text, laid out
         struct SBlock {
             std::unique_ptr<PangoLayout, SUnref> layout; // null = none
             double                               width = 0, height = 0;
-            PangoRectangle                       ink{}; // where it draws, from its top left
+            PangoRectangle                       ink{}; // ink extents from its top left
         };
 
-        // in lines `width` wide at most, centered; none when it's empty, or when `whole` and the font lacks some of
-        // it (an emoji it doesn't have)
+        // centered lines at most `width` wide; none when empty, or with `whole` when the font lacks a glyph (an emoji)
         SBlock block(PangoContext* ctx, std::string_view text, const char* family, double px, bool bold, double width, int lines, bool whole = false) {
             SBlock b;
             if (text.empty())
@@ -141,7 +139,7 @@ namespace h3d {
     void CActionMenu::setDial(float value, float value2) {
         if (!m_dial)
             return;
-        if (m_dial->axes == 2) { // a stick: in the circle
+        if (m_dial->axes == 2) { // stick: clamp into the circle
             const float r = std::hypot(value, value2);
             m_dial->value  = r > 1 ? value / r : value;
             m_dial->value2 = r > 1 ? value2 / r : value2;
@@ -178,8 +176,7 @@ namespace h3d {
             m_cx *= CURSOR_MAX / r;
             m_cy *= CURSOR_MAX / r;
         }
-        // a stick is where the cursor is, all the way out at the edge; a dial follows the cursor round from the top,
-        // clockwise, and stops at the ends rather than jump across the top
+        // a stick follows the cursor; a dial follows its angle clockwise from the top, stopping at the ends
         if (m_dial && m_dial->axes == 2) {
             const float x = m_cx / CURSOR_MAX, y = -m_cy / CURSOR_MAX;
             if (x != m_dial->value || y != m_dial->value2)
@@ -263,7 +260,7 @@ namespace h3d {
             back();
             return std::nullopt;
         }
-        if (m_dial) { // the keys set it in steps: the first 0%, the last 100%; a stick all the way out, round from the top
+        if (m_dial) { // keys: first 0% .. last 100%; a stick: edge points
             if (slot >= 0 && slot < SLOTS) {
                 if (m_dial->axes == 2) {
                     const float t = slot * TAU / SLOTS;
@@ -278,7 +275,7 @@ namespace h3d {
         if (slot < 0 || slot >= (int)m_page.items.size() || m_page.items[slot].disabled)
             return std::nullopt;
         const SMenuItem item = m_page.items[slot];
-        if (item.dial) { // its dial, the cursor where its value is
+        if (item.dial) { // open its dial, cursor at its value
             m_dial = item;
             if (item.axes == 2) {
                 m_cx = CURSOR_MAX * item.value;
@@ -298,7 +295,7 @@ namespace h3d {
                 return std::nullopt;
             m_stack.push_back({item.page});
         } else {
-            // it stays open: the cursor goes to it (a key picked it), and it lights up
+            // the menu stays open: aim at the slot (a key may have picked it) and flash it
             if (slot != highlighted())
                 aimAt(slot);
             m_flash     = 1;
@@ -312,7 +309,7 @@ namespace h3d {
     }
 
     void CActionMenu::refresh() {
-        // a page that's gone (the owner doesn't have it any more) goes back
+        // pop pages the owner no longer has
         SMenuPage page;
         while (!m_stack.empty() && (page = m_pages(m_stack.back().id)).title.empty())
             m_stack.pop_back();
@@ -321,7 +318,7 @@ namespace h3d {
             m_dial.reset();
             return;
         }
-        if (m_dial) { // the slider as the owner has it now; gone, the dial goes
+        if (m_dial) { // refresh the slider; close the dial if it's gone
             const auto it = std::ranges::find_if(page.items, [&](const SMenuItem& i) { return i.dial && i.action == m_dial->action && i.arg == m_dial->arg; });
             if (it == page.items.end())
                 m_dial.reset();
@@ -377,7 +374,7 @@ namespace h3d {
         dt      = std::max(dt, 0.f);
         m_fade  = open() ? std::min(1.f, m_fade + dt / OPEN_TIME) : std::max(0.f, m_fade - dt / CLOSE_TIME);
         m_flash = std::max(0.f, m_flash - dt / FLASH_TIME);
-        // closed too, so the mouse moves the cursor by the right amount from the moment it opens
+        // even when closed, so cursor moves are scaled right as soon as it opens
         layout(outW, outH, scale);
         if (!visible() || outW < 1 || outH < 1)
             return;
@@ -442,7 +439,7 @@ namespace h3d {
             cairo_fill(cr);
             cairo_pattern_destroy(shadow);
 
-            // the wedges, clockwise from the top, with gaps as wide all the way out
+            // wedges clockwise from the top, with constant-width gaps
             auto wedge = [&](int i) {
                 cairo_new_path(cr);
                 if (n <= 1) {
@@ -477,7 +474,7 @@ namespace h3d {
                     cairo_set_source_rgba(cr, 1, 1, 1, 0.25 * flash / 4);
                     cairo_fill_preserve(cr);
                 }
-                // a rim inside it: thick on what's on, thin where the cursor is
+                // inner rim: thick when on, thin under the cursor
                 if (on || hover) {
                     cairo_save(cr);
                     cairo_clip_preserve(cr);
@@ -489,7 +486,7 @@ namespace h3d {
                 cairo_new_path(cr);
             }
 
-            // a stick: a cross through the middle, the circle it goes out to, and a knob where it is
+            // a stick: a cross through the middle and the circle it moves in
             if (m_dial && m_dial->axes == 2) {
                 const double rs = CURSOR_MAX * Ro, kx = C + rs * m_dial->value, ky = C - rs * m_dial->value2;
                 cairo_set_line_width(cr, std::max(1.0, 0.008 * R));
@@ -507,7 +504,7 @@ namespace h3d {
                 cairo_set_source_rgba(cr, ACCENT.r, ACCENT.g, ACCENT.b, 0.8);
                 cairo_set_line_width(cr, std::max(1.5, 0.014 * R));
                 cairo_stroke(cr);
-            } else if (m_dial) { // a slider's dial: filled clockwise from the top as far as its value, with a knob there and a tick a quarter
+            } else if (m_dial) { // slider dial: filled clockwise to its value
                 const double v = std::clamp(m_dial->value, 0.f, 1.f), top = -HALF_TURN / 2, end = top + v * TAU;
                 if (v > 0) {
                     cairo_new_path(cr);
@@ -534,7 +531,7 @@ namespace h3d {
                 cairo_stroke(cr);
             }
 
-            // the middle: where it is, and back
+            // the middle: the page title and Back (Close on the root)
             cairo_arc(cr, C, C, Ri, 0, TAU);
             cairo_set_source_rgba(cr, 0.04, 0.05, 0.06, 0.90);
             cairo_fill_preserve(cr);
@@ -569,8 +566,7 @@ namespace h3d {
                 cairo_stroke(cr);
             }
 
-            // the items: an icon, the label and what it's set to, in the middle of the wedge. The root's nine (narrower
-            // wedges) have a little more of their width and a little smaller text: what fits in one of eight fits
+            // items centred in their wedge; the root's nine narrower wedges use more of their width and smaller text
             const double rm      = Rin + (Ro - Rin) * 0.52;
             const bool   crowded = n > SLOTS;
             for (int i = 0; i < n; ++i) {
@@ -641,7 +637,7 @@ namespace h3d {
     // --- the plugin's pages
 
     namespace {
-        // "sad_kick" -> "Sad kick": the names are the avatar maker's, so no more than that
+        // "sad_kick" -> "Sad kick"; the names are the avatar maker's, so no more than that
         std::string pretty(std::string_view name) {
             std::string out;
             for (char c : name) {
@@ -739,7 +735,7 @@ namespace h3d {
             return x.preset >= 0 ? presetLabel(x.preset) : pretty(x.name);
         }
 
-        // by name: those of a name go together (the unnamed ones don't), on when any of them is shown
+        // parts sharing a name are one item (unnamed ones aren't), on when any of them is shown
         void addParts(SMenuPage& p, const SAvatarModel& m, const CAvatarAnimator& a) {
             const auto& shown = a.partsShown();
             for (size_t i = 0; i < m.parts.size(); ++i) {
@@ -793,7 +789,7 @@ namespace h3d {
                     outfit.disabled = true;
                 }
             }
-            // (Apps, Windows, Maps and Avatars: main.cpp's pages. Avatars last, ninth, so the others keep their numbers)
+            // Apps, Windows, Maps and Avatars are main.cpp's pages; Avatars is ninth so the others keep their numbers
             p.items = {emotes, faces, hands, outfit, {.label = "Apps", .icon = "🚀", .page = "apps"}, {.label = "Windows", .icon = "🪟", .page = "windows"},
                        {.label = "Options", .icon = "⚙️", .page = "options"}, {.label = "Maps", .hint = s.map, .icon = "🗺️", .page = "maps"},
                        {.label = "Avatars", .hint = !s.loading && m ? m->name : none, .icon = "🧍", .page = "avatars"}};
@@ -809,7 +805,7 @@ namespace h3d {
                                    .on     = a->emote() == (int)i});
             }
         } else if (id == "expressions") {
-            // the emotions it has (not the mouth's, the eyes'), then its own
+            // the emotion presets it has (not mouth or eye ones), then its own expressions
             p.title   = "Expressions";
             auto face = [&](int e, std::string label, std::string icon) {
                 p.items.push_back({.label = std::move(label), .icon = std::move(icon), .action = MA_EXPRESSION, .arg = e, .on = a->expression() == e});
@@ -897,7 +893,7 @@ namespace h3d {
                  .action   = MA_LIPSYNC,
                  .on       = s.lipsync,
                  .disabled = !s.microphone && !s.lipsync},
-                // (its dial: at the start automatic, going by your voice; round from there, a fixed gain up to 60 dB)
+                // dial: 0 = automatic (follows your voice), then a fixed gain up to 60 dB
                 {.label    = "Mic gain",
                  .hint     = std::isnan(s.micGain) ? std::format("auto: {:+.0f} dB", s.micGainNow) : std::format("{:+.0f} dB", s.micGain),
                  .icon     = "🎚️",
@@ -918,7 +914,7 @@ namespace h3d {
         // measured first, on a scratch surface
         cairo_surface_t* scratch = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
         cairo_t*         mcr     = cairo_create(scratch);
-        double           tw = 0, th = 0, lw = 0; // its ink's width and height, and its layout's width (wider: a ")" at the end)
+        double           tw = 0, th = 0, lw = 0; // ink w/h; layout width (wider for a final ")")
         {
             std::unique_ptr<PangoContext, SUnref> ctx(pango_cairo_create_context(mcr));
             const SBlock                          b = block(ctx.get(), text, "sans", px, true, 4000, 1);
@@ -954,7 +950,7 @@ namespace h3d {
             cairo_arc(cr, pad + dot, h / 2.0, dot, 0, TAU);
             cairo_set_source_rgb(cr, 0.93, 0.22, 0.2);
             cairo_fill(cr);
-            const SBlock b = block(ctx.get(), text, "sans", px, true, std::max(tw, lw) + 2, 1); // (narrower, it would be cut short)
+            const SBlock b = block(ctx.get(), text, "sans", px, true, std::max(tw, lw) + 2, 1); // narrower would cut it short
             if (b.layout) {
                 cairo_set_source_rgb(cr, WHITE.r, WHITE.g, WHITE.b);
                 cairo_move_to(cr, pad * 2 + dot * 2 - b.ink.x, (h - b.height) / 2.0);

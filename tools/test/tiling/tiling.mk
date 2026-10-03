@@ -1,6 +1,5 @@
-# Tiling mode's ring (src/tiling.cpp) on its own: build/test/tile_unit, from tile_unit.cpp and the plugin's own
-# build/tiling.o (and walker.o and collision.o: the body the ring goes with). Don't run make on this directly; run.sh
-# next to it builds it through the repo's build.sh (in the build shell of the Hyprland you are running) and runs it.
+# build/test/tile_unit: tiling mode's ring (src/tiling.cpp) on its own, with walker.o and collision.o for the body the
+# ring goes with. run.sh next to it builds it through the repo's build.sh and runs it; don't run make on this directly.
 include Makefile
 
 TESTDIR := build/test

@@ -1,12 +1,12 @@
-"""h3d_shots: renders of the attack from a few cameras round her and from the plugin's third person camera (Workbench:
-quick, the shapes clear): render(folder, views, frames)"""
+"""h3d_shots: Workbench renders of the attack from cameras round her and the plugin's third person camera:
+render(folder, views, frames)"""
 import math
 import os
 
 import bpy
 from mathutils import Euler, Vector
 
-VIEWS = {  # name: (degrees round her from straight ahead, to her right > 0; height of the camera; distance; looking at; lens)
+VIEWS = {  # (deg round, right > 0; height; dist; target; lens)
     "front": (0, 1.35, 2.4, (0, -0.15, 1.15), 70),
     "frontR": (40, 1.4, 2.4, (0, -0.15, 1.15), 70),
     "frontL": (-40, 1.4, 2.4, (0, -0.15, 1.15), 70),
@@ -15,8 +15,8 @@ VIEWS = {  # name: (degrees round her from straight ahead, to her right > 0; hei
     "behind": (180, 1.6, 2.6, (0.0, -0.1, 1.15), 70),
     "top": (20, 3.2, 1.4, (0, -0.2, 1.1), 50),
 }
-# the plugin's third person camera: 2.6 m behind her head's height plus 15 cm (0.95 of her height), 0.4 m to her right,
-# looking level ahead; 70 degrees of view up and down
+# the plugin's third person camera: 2.6 m behind, 0.4 m to her right, 15 cm above head height (0.95 of hers), looking
+# level; 70 degrees vertical fov
 TP = ((-0.4, 2.6, 1.66), 70)
 
 

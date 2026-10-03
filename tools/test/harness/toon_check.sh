@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # toon_check.sh: toon shading and matcaps (MToon's, and unity2hypr3d's "hypr3d_toon" and "hypr3d_matcap" extras) on
-# toonballs.py's six balls, drawn by the harness in the courtyard: side on to the sun, so N·L goes from 1 to -1
-# across each (the lit side up and to the right). Along that line, 35 and 75% of the way out on each side:
-#   the plain ball's light falls off with N·L; a toon ball's is flat on each side of a sharp step (its shade color on
-#   the far side: MToon's own, redder than the base's; VRM 0.x MToon's, greener); a matcap brightens where it's white (the middle); and in a
-#   wall's shadow a toon ball is all shade, as its shade side is in the sun.
+# toonballs.py's six balls, side on to the sun so N·L goes from 1 to -1 across each: a plain ball falls off with N·L,
+# a toon ball is flat either side of a sharp step, a matcap brightens where white, toon in shadow is all shade.
+#
 #   tools/test/harness/toon_check.sh [DIR]   (DIR: where the ball file and the frames go; a temporary one by default)
+#
 # Needs build/test/shot (tools/test/harness/build.sh).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -16,11 +15,10 @@ DIR="${1:-}"
 mkdir -p "$DIR"
 python3 "$REPO/tools/test/harness/toonballs.py" "$DIR" > /dev/null || exit 1
 
-# the sun (world.hpp's sunDirection()) is side on to a camera looking along (0.74, 0, 0.67): the body turned -47.6°
-# puts it in front of the row, whose +x is then (-0.674, 0, 0.739) (a VRM 0.x file, it's turned round to face +Z as
-# VRM 1.0 does, so the plain ball is on the right). Each ball in the middle of its own frame (on the
-# camera's axis, so N·L is 0 on the line through its middle): 200x200 at 40° high, 1.6 m away, 172 px a metre
-shots() { # output prefix, then the harness's options
+# a camera looking along (0.74, 0, 0.67) sees the sun (world.hpp's sunDirection()) side on; yaw -47.6° puts it in front
+# of the row, whose +x is then (-0.674, 0, 0.739) (VRM 0.x is turned to face +Z as VRM 1.0, so the plain ball is on the
+# right). Each ball is centred in its own 200x200 frame (N·L 0 through its middle): 40° high, 1.6 m away, 172 px a metre
+shots() { # PREFIX OPTIONS...: a frame per ball
     local out="$1" args=() k=0
     shift
     for x in -1.0 -0.6 -0.2 0.2 0.6 1.0; do

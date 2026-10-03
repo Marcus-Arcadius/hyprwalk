@@ -1,21 +1,17 @@
-"""h3d_walk: the walk and the run hypr3d's avatars go by, made in Blender: assets/walk.vrma and assets/run.vrma.
+"""h3d_walk: the walk and run cycles of hypr3d's avatars, made in Blender: assets/walk.vrma and assets/run.vrma.
 
-hypr3d steps a humanoid's feet itself (each planted where it lands, the stride and the cadence from its legs and
-speed: the main README's Walking), and these cycles give the rest of the body its motion in step with that: the hips'
-turns and sway, the spine, the head, the collarbones and the arms. Each is one stride in place, the left foot landing
-at its start (and again at its end), the right half way. Its legs step as hypr3d's do (the same foot roll, knee and
-lift curves), so a cycle reads as a whole here, but hypr3d keeps its own legs.
+hypr3d steps the feet itself; these cycles move the rest of the body in step. Each is one stride in place, the left
+heel landing at its start and the right half way; its legs step like hypr3d's, for previewing, but hypr3d keeps its own.
 
-In Blender, with a humanoid's armature in the scene (its bones named by its hypr3d settings file's "humanoid"):
+In Blender, with a humanoid armature in the scene (bones named by its hypr3d settings file's "humanoid"):
     import h3d_walk
-    h3d_walk.build(settings)        # the two actions, "Walk" and "Run", keyed on the armature (made again from here)
-    h3d_walk.show("Run")            # that one on the armature, the scene's frames its cycle's, looping
-    h3d_walk.export()               # both out as VRM animations into the repo's assets/ (then ./build.sh)
+    h3d_walk.build(settings)        # key the actions "Walk" and "Run" on the armature from CYCLES
+    h3d_walk.show("Run")            # that one on the armature, looping
+    h3d_walk.export()               # both as VRM animations into the repo's assets/ (then ./build.sh)
     h3d_walk.export(folder, prefix="Miku.")   # or next to an avatar, for its settings file's "walk" (no rebuild)
 
-Edit the keys (the Graph Editor: every channel loops) and export again, or change the numbers below and build again.
-The numbers are in her own terms: angles in degrees, distances in meters, phases as parts of the stride (0: the left
-heel lands, 0.5: the right). Her left is +X here, ahead -Y, up +Z.
+Edit the keys and export again, or change the numbers below and build again. Angles in degrees, distances in meters,
+phases in strides; her left is +X, ahead -Y.
 """
 import json
 import math
@@ -31,14 +27,11 @@ FPS = 60
 
 # ---------------------------------------------------------------- the cycles
 
-# frames: the stride's length here (the walk 0.9 s, the run 0.63 s: hypr3d plays them by its own steps' phase, at any
-# speed); duty: how much of it a foot is down; stride: how far a foot goes in it (meters, in place); drop: the hips'
-# mean under where they stand at rest; bob: up and down twice a stride (meters, highest at `bobTop`); sway: to the
-# standing foot's side; hips yaw (the hip of the leg ahead goes ahead), roll (dropping on the swinging leg's side,
-# most at `rollAt`), pitch (ahead); the trunk's lean and counter turn; the head's nod and tilt; the arms: hanging `out`
-# from the body, swung ahead and back (`ahead`, `back`) a little after the legs (`lag`), the elbow bent from `bend0` to
-# `bend1` as it comes ahead, the forearm after the upper arm (`follow`), the hand after that (`drag`); in toward the
-# middle as they come ahead (`inward`, running)
+# frames: stride length (hypr3d plays it by its own step phase, at any speed); duty: share of it a foot is down; stride:
+# foot travel (m); drop: mean hips drop; bob: twice a stride, highest at bobTop; sway: toward the standing foot; wide:
+# feet out from the middle; hips yaw (the leading leg's hip ahead), roll (down on the swing side, most at rollAt),
+# pitch; arms hang `out`, swing `ahead` and `back` `lag` after the legs, elbow `bend0` to `bend1` coming ahead, forearm
+# and hand trailing by `follow` and `drag`, `inward` toward the middle coming ahead (running)
 CYCLES = {
     "Walk": dict(
         frames=54, duty=0.6, stride=1.4, drop=0.028, bob=0.011, bobTop=0.3, sway=0.024, wide=0.064,
@@ -62,8 +55,7 @@ CYCLES = {
     ),
 }
 
-# The legs as hypr3d's stepping moves them (src/avatar.cpp's curves): the foot's pitch (radians, toes down > 0) on
-# the ground from landing to lifting and through the air, and how high the ankle goes through the air (legs)
+# hypr3d's step curves (src/avatar.cpp): foot pitch (radians, toes down > 0) in stance and swing; lift in leg lengths
 CURVES = {
     "walk": dict(
         stance=[(0, -0.26), (0.12, -0.03), (0.2, 0), (0.5, 0), (0.75, 0.24), (1, 0.9)],
@@ -76,12 +68,12 @@ CURVES = {
         lift=[(0, 0), (0.2, 0.2), (0.38, 0.27), (0.55, 0.22), (0.75, 0.11), (0.9, 0.04), (1, 0)],
     ),
 }
-KEYS = 16  # keys a stride, evenly (and its end, the same as its start)
+KEYS = 16  # keys per stride, plus the end (= the start)
 
 # ---------------------------------------------------------------- the frame above and Blender's
-# hypr3d poses in a frame of its own: +x the body's left, +y up, +z ahead. Blender's here: +X left, +Z up, -Y ahead.
+# hypr3d poses in its own frame: +x the body's left, +y up, +z ahead; Blender's here: +X left, +Z up, -Y ahead
 
-M_FB = Matrix(((1, 0, 0), (0, 0, -1), (0, 1, 0)))  # frame above -> Blender (columns: x -> X, y -> Z, z -> -Y)
+M_FB = Matrix(((1, 0, 0), (0, 0, -1), (0, 1, 0)))  # frame above -> Blender: x -> X, y -> Z, z -> -Y
 
 
 def fb(v):
@@ -99,7 +91,7 @@ def axis_angle(axis, a):
 
 
 def turn(yaw=0.0, pitch=0.0, roll=0.0):
-    """a turn in her terms (degrees; the frame above): yaw to her left, pitch bending ahead, roll leaning to her left"""
+    """a turn in degrees (frame above): yaw to her left, pitch bending ahead, roll leaning to her left"""
     r = math.radians
     return axis_angle((0, 1, 0), r(yaw)) @ axis_angle((1, 0, 0), r(pitch)) @ axis_angle((0, 0, -1), r(roll))
 
@@ -157,8 +149,8 @@ HUMAN = ["Hips", "Spine", "Chest", "UpperChest", "Neck", "Head"] + [
 
 
 class Body:
-    """an armature's humanoid bones (by a settings file's "humanoid"), where they are at rest in the frame above
-    (meters from the hips' joint), and its legs' and feet's measures"""
+    """an armature's humanoid bones (by a settings file's "humanoid"), their rest positions (frame above, meters from
+    the hips' joint) and leg and foot measures"""
 
     def __init__(self, armature, humanoid):
         self.ob = bpy.data.objects[armature]
@@ -179,8 +171,7 @@ class Body:
         L = lambda a, b: (self.at[b] - self.at[a]).length
         self.thigh = [L("LeftUpperLeg", "LeftLowerLeg"), L("RightUpperLeg", "RightLowerLeg")]
         self.shin = [L("LeftLowerLeg", "LeftFoot"), L("RightLowerLeg", "RightFoot")]
-        # the ground (the armature stands on z = 0), the ankles over it, the balls of the feet (the toes' joints, else
-        # the feet's ends) ahead of them and the heels a little behind
+        # ground (z = 0), ankle heights, foot balls (toe joints or foot ends) ahead of the ankles, heels 1 cm behind
         self.ground = -hips.z
         self.ankle_up, self.ball = [], []
         for s in ("Left", "Right"):
@@ -219,18 +210,17 @@ def up_chain(B, h):
 
 
 def pose_at(B, c, p, extra=(0.0, 0.0)):
-    """the body at phase p of cycle c: per bone its turn from rest in the frame above, and the hips' move; each arm
-    held `extra` radians further out (to clear the dress: see Dress)"""
+    """the body at phase p of cycle c: per-bone turns from rest (frame above) and the hips' move; `extra`: radians
+    further out per arm, to clear the dress"""
     r = math.radians
     T = {}
     sin, cos, tau = math.sin, math.cos, 2 * math.pi
     hp = c["hips"]
-    # hips: yaw (the hip of the leg ahead goes ahead: at 0 the left's, turned to her right), roll (dropping on the
-    # swinging leg's side), pitch ahead
+    # hips: yaw (the leading leg's hip ahead), roll (down on the swinging leg's side), pitch ahead
     T["Hips"] = turn(-hp["yaw"] * cos(tau * p), hp["pitch"], -hp["roll"] * sin(tau * (p + 0.25 - hp["rollAt"])))
     move = Vector((c["sway"] * sin(tau * p), -c["drop"] + c["bob"] * cos(2 * tau * (p - c["bobTop"])), 0))
-    # the trunk: each bone's whole turn; the chest turned against the hips (the shoulders square), leaning ahead, rolled
-    # against the hips' drop; the head level, nodding with the bob a little after it, tilted with the sway
+    # trunk: the chest counter-turns the hips (shoulders square), leans ahead and rolls against the hips' drop; the head
+    # nods just after the bob and tilts with the sway
     hy = -hp["yaw"] * cos(tau * p)
     T["Spine"] = turn(hy * c["spine"]["turn"], c["spine"]["pitch"], hp["roll"] * 0.3 * sin(tau * (p + 0.25 - hp["rollAt"])))
     T["Chest"] = turn(hy * c["chest"]["turn"], c["chest"]["pitch"], c["chest"]["roll"] * sin(tau * (p + 0.25 - hp["rollAt"])))
@@ -238,20 +228,19 @@ def pose_at(B, c, p, extra=(0.0, 0.0)):
     T["Neck"] = turn(hy * c["chest"]["turn"] * 0.3, c["neck"]["pitch"], 0)
     T["Head"] = turn(0, c["head"]["pitch"] + c["head"]["nod"] * cos(2 * tau * (p - c["bobTop"] - 0.04)),
                      c["head"]["tilt"] * sin(tau * (p - 0.05)))
-    # arms: hanging out from the body, swung ahead (the left ahead as the right foot lands) a little after the legs; the
-    # elbow bending as it comes ahead, the forearm and the hand following after
+    # arms swing just after the legs (left ahead as the right foot lands); elbows bend coming ahead; forearm, hand trail
     a = c["arm"]
     for s, side in enumerate(("Left", "Right")):
         sx = 1.0 if s == 0 else -1.0
         sw = lambda q: -cos(tau * (q + 0.5 * s - a["lag"]))  # 1: right ahead
         w = sw(p)
-        # (smooth all the way: further ahead than back as a line in w, not a kink where it passes the middle)
+        # linear in w, so further ahead than back without a kink at the middle
         ahead = r(0.5 * (a["ahead"] + a["back"]) * w + 0.5 * (a["ahead"] - a["back"]))
         out = r(a["out"]) * (1 - a["inward"] * 0.5 * (1 + w))
         u = axis_angle((1, 0, 0), -ahead) @ Vector((sx * sin(out), -cos(out), 0))
         wf = sw(p - a["follow"])
         bend = r(a["bend0"] + (a["bend1"] - a["bend0"]) * 0.5 * (1 + wf))
-        # the forearm bent ahead from the upper arm (running, in toward her middle as it comes ahead)
+        # forearm bent ahead from the upper arm (in toward her middle when running)
         v = Vector((0, 0, 1)) - u * u.z
         v.normalize()
         mid = Vector((-sx, 0, 0)) - u * (-sx * u.x)
@@ -259,27 +248,27 @@ def pose_at(B, c, p, extra=(0.0, 0.0)):
         tilt = a["inward"] * 0.5 * (1 + wf)
         v = (v * math.cos(tilt) + mid * math.sin(tilt)).normalized()
         f = (u * math.cos(bend) + v * math.sin(bend)).normalized()
-        # the hand: on from the forearm, flexed a little toward the palm (which faces her side), more as it trails
+        # hand flexed toward the palm (facing her side), more as it trails
         wd = sw(p - a["drag"])
         palm = Vector((-sx, 0, 0))
         palm = (palm - f * palm.dot(f)).normalized()
         flex = r(a["flex"] * (0.6 + 0.4 * wd))
         along = (f * math.cos(flex) + palm * math.sin(flex)).normalized()
-        if extra[s]:  # (out about the chest's ahead, the arm hanging from its shoulder as it was)
+        if extra[s]:  # rotate out about the ahead axis
             q = axis_angle((0, 0, 1), sx * extra[s])
             u, f, along, palm = q @ u, q @ f, q @ along, q @ palm
         T[side + "UpperArm"], T[side + "LowerArm"], T[side + "Hand"] = arm_turns(s, u, f, along, palm, T["Chest"])
         col = c["collar"]
         T[side + "Shoulder"] = T["Chest"] @ axis_angle((0, 1, 0), -sx * r(col["ahead"]) * w) @ \
             axis_angle((0, 0, 1), sx * r(col["up"]) * w * w)
-    # legs: the feet in place, as hypr3d steps them; the hips' joints from the pelvis as posed
+    # legs: feet placed as hypr3d steps them; hip joints from the posed pelvis
     curves = CURVES[c["legs"]]
     pelvis = move
     for s, side in enumerate(("Left", "Right")):
         sx = 1.0 if s == 0 else -1.0
         q = (p + 0.5 * s) % 1.0  # 0: this foot lands
         duty = c["duty"]
-        if q < duty:  # down: back under the body (which goes stride * duty over it)
+        if q < duty:  # stance: slides back stride * duty under the body
             u_ = q / duty
             z = c["stride"] * duty * (0.5 - u_)
             pitch = through(curves["stance"], u_)
@@ -293,18 +282,18 @@ def pose_at(B, c, p, extra=(0.0, 0.0)):
         spot = Vector((sx * c["wide"], B.ground, z))
         T[side + "UpperLeg"], T[side + "LowerLeg"], T[side + "Foot"] = leg_turns(B, s, spot, pitch, lift, pelvis, T["Hips"])
         if side + "Toes" in B.name:
-            # (on the ground as the heel rises: the toes stay flat, then go with the foot)
+            # toes stay flat as the heel rises, then go with the foot
             T[side + "Toes"] = axis_angle((1, 0, 0), min(pitch, max(0.0, pitch - 0.9))) if q < duty else T[side + "Foot"]
     return T, move
 
 
 def arm_turns(s, u, f, along, palm, chest):
-    """the upper arm, forearm and hand's turns from the T pose for directions in the frame above (as hypr3d's
-    CPoser: the forearm takes half the hand's twist); these are in the chest's frame: turned with it"""
+    """upper arm, forearm and hand turns from the T pose for directions in the chest's frame (as hypr3d's CPoser: the
+    forearm takes half the hand's twist)"""
     t0 = Vector((1.0 if s == 0 else -1.0, 0, 0))
     h0 = Vector((0, -1.0 if s == 0 else 1.0, 0))
     hinge = u.cross(f)
-    if hinge.length < 1e-6:  # (straight: where it would bend turned along with it)
+    if hinge.length < 1e-6:  # straight: the rest hinge turned with the arm
         hinge = arc(t0, u) @ h0
         hinge = hinge - u * hinge.dot(u)
     hinge.normalize()
@@ -320,13 +309,12 @@ def arm_turns(s, u, f, along, palm, chest):
 
 
 def leg_turns(B, s, spot, pitch, lift, pelvis, hipsT):
-    """the thigh, shin and foot's turns: the ankle over the foot's spot (on its heel or its ball as it's pitched), the
-    knee ahead"""
+    """thigh, shin and foot turns (two-bone IK): ankle over the foot's spot, pivoting on heel or ball, knee ahead"""
     side = "Left" if s == 0 else "Right"
     hip = pelvis + hipsT @ (B.at[side + "UpperLeg"])
     pivot = (B.heel[s] if pitch < 0 else B.ball[s]).copy()
     pivot.x = 0
-    foot = axis_angle((1, 0, 0), pitch)  # (toes down > 0: in the frame above, ahead is +z)
+    foot = axis_angle((1, 0, 0), pitch)  # toes down > 0 (ahead is +z)
     ankle = Vector((spot.x, spot.y + B.ankle_up[s] + lift, spot.z)) + pivot - foot @ pivot
     a, b = B.thigh[s], B.shin[s]
     d = ankle - hip
@@ -355,10 +343,8 @@ ARMS = ("Shoulder", "UpperArm", "LowerArm", "Hand", "Thumb", "Index", "Middle", 
 
 
 class Dress:
-    """how far out the body goes round the hips, at each height and bearing (meters from the hips' vertical line, in
-    the frame above): the meshes' vertices weighed most to the hips, spine, chest or legs (not the arms, the head,
-    the hair or what the hands hold), below the chest's joint. As hypr3d's SBodyClearance, so what clears it here
-    clears it there"""
+    """body radius round the hips' vertical line per height and bearing (frame above), from vertices weighted most to
+    hips, spine, chest or legs below the chest; matches hypr3d's SBodyClearance"""
 
     ROW, BINS = 0.02, 72
 
@@ -395,7 +381,7 @@ class Dress:
                 self.R[i][k] = max(self.R[i][k], math.hypot(p.x, p.z))
 
     def depth(self, points):
-        """how deep the deepest of these points (each with how far its skin goes round it) is in it, meters (< 0: clear)"""
+        """deepest penetration of (point, radius) pairs into the body, meters (< 0: clear)"""
         most = -1.0
         for p, r in points:
             rho = math.hypot(p.x, p.z)
@@ -412,7 +398,7 @@ class Dress:
 
 
 def joints_of(B, T, move):
-    """where each humanoid joint is, posed (the frame above, from the hips' joint at rest)"""
+    """posed joint positions (frame above, from the hips' rest joint)"""
     at = {"Hips": Vector(move)}
 
     def put(h):
@@ -431,7 +417,7 @@ def joints_of(B, T, move):
 
 
 def arm_points(B, T, move, s, forearm=0.035, hand=0.03):
-    """the arm's forearm and hand as points with how far their skin goes round them, in the hips' own frame"""
+    """forearm and hand as (point, radius) pairs in the hips' frame"""
     side = "Left" if s == 0 else "Right"
     J = joints_of(B, T, move)
     e, w = J[side + "LowerArm"], J[side + "Hand"]
@@ -445,7 +431,7 @@ def arm_points(B, T, move, s, forearm=0.035, hand=0.03):
 # ---------------------------------------------------------------- keying
 
 def basis(B, h, T, P):
-    """a pose bone's own rotation for a turn T from rest (frame above), its parent's being P"""
+    """pose bone rotation for turn T from rest (frame above), given the parent's turn P"""
     r = B.rest_m[h].to_quaternion()
     rp = B.rest_m[up_chain(B, h)].to_quaternion() if up_chain(B, h) else Quaternion()
     tb, tp = fbq(T), fbq(P)
@@ -465,8 +451,7 @@ def key_cycle(B, name, c, log=print):
     for h in B.name:
         pb = B.pose_bone(h)
         pb.rotation_mode = "QUATERNION"
-    # each arm held out as far as the whole stride needs to keep it clear of the dress (the same at every key: no in
-    # and out with each swing)
+    # each arm's extra outward angle: the most any key needs to clear the dress, so it doesn't move in and out per swing
     extra = [0.0, 0.0]
     dress = Dress(B)
     for s in (0, 1):
@@ -541,7 +526,7 @@ def build(settings, armature="Armature", log=print):
 
 
 def show(name, armature="Armature"):
-    """that cycle on the armature, the scene's frames its own"""
+    """puts that cycle on the armature, the scene's frame range set to it"""
     ob = bpy.data.objects[armature]
     act = bpy.data.actions[name]
     ob.animation_data_create()

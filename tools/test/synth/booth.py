@@ -2,24 +2,16 @@
 #   blender -b --factory-startup --python-exit-code 1 -P booth.py -- OUTDIR
 #
 # OUTDIR/proj: the shop's Unity project the packages are exported from
-# OUTDIR/SynthChan_v1.0.unitypackage: the avatar, laid out as Booth avatars are, under Assets/しんせ工房/シンセちゃん/:
-#   FBX/ (a humanoid model with Japanese shape keys and vrc.v_* visemes), Materials/ (lilToon materials; lilToon
-#   itself is not in the package, as on Booth), Textures/ (PNG and PSD), Animation/ (an FX controller with gesture
-#   faces, toggles and a face lock), Expressions/ (menus with Japanese labels) and Prefab/ (a PC prefab, a variant
-#   of the model with PhysBones on the hair, ears, tail and skirt, colliders and a head-pat contact; and a Quest
-#   prefab, a variant of that with Quest materials and fewer PhysBones)
-# OUTDIR/SynthChan_OnePiece_v1.0.unitypackage: a dress for her, set up for Modular Avatar (Merge Armature, a menu of
-#   MA toggles, a Shape Changer that shrinks her body under it)
-# OUTDIR/Parka_v1.0.unitypackage: a parka with no MA setup, for --outfit; its bones are named Hips_Parka and so on,
-#   and it is exported at the 100x bone scale many Blender exports have
-# OUTDIR/SynthChan_Cardigan_VRCFury_v1.0.unitypackage: a cardigan set up for VRCFury (Armature Link, toggles, one of
-#   them saved by an old VRCFury in Unity 2019, and a Full Controller with its own FX, menu and parameters)
-# OUTDIR/Hairpin_v1.0.unitypackage: a hair pin put on the head by an Armature Link from VRCFury 1.x (version 5)
-# OUTDIR/SynthChan_Accessories_MA_v1.0.unitypackage: accessories set up with MA's Material Setter and Swap, Blendshape
-#   Sync, Replace Object, a radial puppet, Visible Head Accessory and Mesh Settings
-# OUTDIR/SynthChan_Gimmicks_VRCFury_v1.0.unitypackage: gimmicks set up with VRCFury's material actions, a slider, a
-#   Puppet, a Gesture Driver, Blinking, Visemes, exclusive tags, an FX float, menu moves, and two it does not carry
-# OUTDIR/シンセちゃん_v1.0.zip: the avatar package as Booth hands it out: a zip with Shift-JIS names and no UTF-8 flag
+# OUTDIR/SynthChan_v1.0.unitypackage: the avatar under Assets/しんせ工房/シンセちゃん/ as Booth avatars lay it out: FBX/,
+#   Materials/ (lilToon, which isn't included, as on Booth), Textures/, Animation/, Expressions/, Prefab/ (PC, and a
+#   Quest variant with Quest materials and fewer PhysBones)
+# OUTDIR/SynthChan_OnePiece_v1.0.unitypackage: a dress set up for Modular Avatar
+# OUTDIR/Parka_v1.0.unitypackage: a parka with no MA setup, for --outfit (bones Hips_Parka..., 100x bone scale)
+# OUTDIR/SynthChan_Cardigan_VRCFury_v1.0.unitypackage: a cardigan set up for VRCFury
+# OUTDIR/Hairpin_v1.0.unitypackage: a hair pin put on the head by a VRCFury 1.x Armature Link (version 5)
+# OUTDIR/SynthChan_Accessories_MA_v1.0.unitypackage: accessories using MA's other components
+# OUTDIR/SynthChan_Gimmicks_VRCFury_v1.0.unitypackage: gimmicks using VRCFury's features beyond outfits
+# OUTDIR/シンセちゃん_v1.0.zip: the avatar package as Booth hands it out: Shift-JIS names, no UTF-8 flag
 import sys, os, math, shutil
 import numpy as np
 import bpy
@@ -59,7 +51,7 @@ def P_(rel):
 # lilToon's shaders, by their GUIDs (from lilToon's own .meta files); the packages do not include them
 LIL = {'opaque': 'df12117ecd77c31469c224178886498e', 'cutout': '85d6126cae43b6847aff4b13f4adb8ec',
        'trans': '165365ab7100a044ca85fc8c33548a62'}
-QUEST_TOON_LIT = '0b7113dea2069fc4e8943843eff19f70'  # stands in for VRChat/Mobile/Toon Lit (in the SDK, not here)
+QUEST_TOON_LIT = '0b7113dea2069fc4e8943843eff19f70'  # VRChat/Mobile/Toon Lit, an SDK shader not included
 
 # ---------------------------------------------------------------- the shape of her (Blender: Z up, facing -Y, her
 # left at +X), 1.45 m tall
@@ -73,7 +65,7 @@ PHAL = ('Proximal', 'Intermediate', 'Distal')
 TWIN = [(0.105, 0.045, 1.34), (0.14, 0.065, 1.24), (0.155, 0.075, 1.12), (0.16, 0.075, 1.0), (0.152, 0.068, 0.88)]
 TAIL = [(0, 0.085, 0.72), (0, 0.16, 0.68), (0, 0.23, 0.665), (0, 0.29, 0.70), (0, 0.325, 0.78), (0, 0.335, 0.87)]
 HAIRBACK = [(0, 0.1, 1.33), (0, 0.125, 1.22), (0, 0.13, 1.11), (0, 0.125, 1.02)]
-HAIRBACK_PITCH = 90  # its PhysBone limit's pitch: the hemisphere it may swing in turned to behind it, off her back
+HAIRBACK_PITCH = 90  # limit pitch: its swing hemisphere turned off her back
 EAR = [(0.07, 0.005, 1.37), (0.09, 0.005, 1.43), (0.103, 0.005, 1.475)]
 SKIRT = {'F': [(0, -0.1, 0.79), (0, -0.15, 0.67), (0, -0.19, 0.56)],
          'B': [(0, 0.09, 0.79), (0, 0.14, 0.67), (0, 0.18, 0.56)],
@@ -216,8 +208,8 @@ def blade(P, name, top, tip, width, facing, mi=0, bend=0.0):
 
 
 def decal(P, name, center, size, nx=6, nz=6, mi=0, lift=0.003, shape=None):
-    """a grid lying on the face, `size` (width, height) around center (x, z), lift in front of it; UVs 0..1 over
-    it. shape(s, t) -> (dx, dz) bends it (s, t in 0..1)"""
+    """a grid on the face, `size` (w, h) around center (x, z), `lift` in front, UVs 0..1; shape(s, t) -> (dx, dz) bends
+    it"""
     bm, uv = P.bm, P.uv
     cx, cz = center
     w, h = size
@@ -538,7 +530,7 @@ FACES = ['まばたき', 'ウィンク', '笑い', 'にっこり', '怒り', '�
 
 
 def face_keys(body, idx):
-    """the visemes, the faces (Japanese names, as Booth avatars have them) and a shrink key for outfits"""
+    """visemes, faces (Japanese names, as Booth avatars have them), a shrink key for outfits and Chest_Big"""
     V_ = {k: set(v) for k, v in idx.items()}
     verts = body.data.vertices
     MZ, EZ = 1.188, 1.262  # the mouth's and the eyes' heights
@@ -904,8 +896,8 @@ def avatar_assets():
     arms = [col('UpperArm_' + s, 1, 0.04, 0, (0.1 * x, 0, 1.05), (0.29 * x, 0, 1.05)) for s, x in SIDES]
     legs = [col('UpperLeg_' + s, 1, 0.065, 0, (0.07 * x, 0.0, 0.66), (0.07 * x, 0.005, 0.42)) for s, x in SIDES]
     hands = [col('Hand_' + s, 0, 0.045, 0, (0.54 * x, 0, 1.045)) for s, x in SIDES]
-    # a floor the twin tails keep above (a plane on her root) and a sphere her skirt keeps inside (ids of their own:
-    # the others' stay as they were)
+    # a floor plane the twin tails stay above and a sphere the skirt stays inside, with fileIDs of their own so the
+    # others' don't change
     keep_ids, v.ids = v.ids, g.Ids(2476)
     floor = v.gameobject('床のコライダー', ROOT_TF, [(114, 'MonoBehaviour', g.pb_collider(2, 0.5, 0, (0, 0, 0)))])[2][0]
     skirt_in = col('Hips', 0, 0.32, 0, (0, 0.0, 0.7), inside=1)
@@ -913,8 +905,8 @@ def avatar_assets():
     hair = [(114, 'MonoBehaviour', g.physbone(v.stub(model.fid('TwinTail_' + s, 4), 4), [head, chest, floor] + arms,
                                                radius=0.03, pull=0.15, spring=0.35, stiffness=0.1, gravity=0.15,
                                                immobile=0.3)) for s, x in SIDES]
-    # (the back hair keeps off her back, as the limits Booth avatars' hair and neckties have do it: the half of the turns
-    # behind the bone, a hemisphere turned off it; Immobile only of where she goes)
+    # the back hair keeps off her back as Booth avatars' hair and neckties do: a limit hemisphere turned behind the
+    # bone; World Immobile
     hair.append((114, 'MonoBehaviour', g.physbone(v.stub(model.fid('HairBack', 4), 4), [head, chest], radius=0.03,
                                                   pull=0.2, spring=0.3, stiffness=0.2, gravity=0.1, max_angle=90,
                                                   limit_rot=(HAIRBACK_PITCH, 15, 0), immobile=0.5, immobile_type=1)))
@@ -932,7 +924,7 @@ def avatar_assets():
     PC_GUID = G('prefab/pc')
     g.write_asset(P_(AV + '/Prefab/シンセちゃん_PC.prefab'), HEAD + v.text(), PC_GUID, 'PrefabImporter')
 
-    # the Quest prefab: a variant of the PC one, with Quest materials and without the ear and tail PhysBones
+    # the Quest prefab: a variant of the PC one with Quest materials and no ear and tail PhysBones
     q = g.Variant(ids, PC_GUID)
     q.root(v.own(ROOT_GO), v.own(ROOT_TF), Esc('シンセちゃん_Quest'))
     for mesh in ('Body', '髪', 'ネコミミ', 'しっぽ', '服', '靴', 'メガネ', 'リボン'):
@@ -1128,9 +1120,8 @@ def tex_knit():
 
 
 def cardigan_assets():
-    """a cardigan for her, with VRCFury: an Armature Link, a toggle (on at first; it also shrinks her body), a toggle
-    saved by an old VRCFury in Unity 2019 (rolled-up sleeves, a shape key), and a Full Controller whose FX shows a bow
-    at the back by a parameter called Ribbon, as hers is (VRCFury keeps them apart)"""
+    """a cardigan with VRCFury: Armature Link, a toggle that also shrinks her body, an old (Unity 2019) toggle for
+    rolled-up sleeves, and a Full Controller whose Ribbon parameter VRCFury must keep apart from hers"""
     g.clear_scene()
     rig = g.Rig('Armature')
     skeleton(rig, own=False)
@@ -1241,8 +1232,8 @@ PIN = SHOP + '/ヘアピン'
 
 
 def hairpin_assets():
-    """a hair pin: two meshes at the top of their FBX, where they go on her head, and a VRCFury Armature Link saved
-    by VRCFury 1.x (version 5: link mode Reparent Root to the Head, bone offsets kept)"""
+    """a hair pin: two top-level meshes placed on her head, and a VRCFury 1.x Armature Link (version 5: Reparent Root to
+    the Head, bone offsets kept)"""
     g.clear_scene()
     P = g.Parts()
     M, d = g.along((0.07, -0.075, 1.345), (0.115, -0.03, 1.325))
@@ -1281,21 +1272,10 @@ ACC = SHOP + '/シンセちゃん用アクセサリー'
 
 
 def accessory_assets():
-    """accessories for her, set up for Modular Avatar with its components that change materials, follow shape keys
-    and replace objects: a beret (a menu toggle, and a Material Setter giving it another colour), round glasses that
-    take the place of hers (Replace Object: her glasses toggle shows these), a festival mask on the side of her head
-    whose shape keys follow her face (Blendshape Sync, one through a remap curve) and a radial puppet that makes it
-    bigger (a Merge Animator), a Material Swap that dresses her in navy, and a Material Setter with no menu item that
-    tints her tail at rest. The beret has a Visible Head Accessory and the root Mesh Settings, which hypr3d has no
-    use for, and a Scale Adjuster, which changes nothing there (no mesh is weighted to the beret's own object); a
-    keyring for another platform (a Platform Filter) is left out.
-    Thigh socks come in a menu of their own that a Menu Install Target puts in the accessories' menu: a toggle, on at
-    first, whose Mesh Cutter hides her legs inside them (two vertex filters by axis, both at once), and a slider of
-    how loose they are (a Merge Motion's blend tree). Their cuffs are on bones of their own, which Scale Adjusters widen.
-    A Mesh Cutter with no menu item takes her feet inside her shoes away for good, a Floor Adjuster says where the
-    floor is, and a Global Collider on her right hand pushes her hair and skirt. A second Merge Animator (its paths
-    from her root) has a slider for the size of her tail, a toggle that lifts it and a two-axis puppet that turns it
-    (a 2D blend tree): clips that scale and turn it."""
+    """accessories set up with Modular Avatar's other components: Material Setter and Swap, Replace Object, Blendshape
+    Sync, Merge Animator and Merge Motion puppets, Menu Install Target, Mesh Cutter, Scale Adjuster, Floor Adjuster,
+    Global Collider and Platform Filter. The beret's Visible Head Accessory and Scale Adjuster (nothing is weighted
+    to it) and the root's Mesh Settings do nothing in hypr3d."""
     g.clear_scene()
     rig = g.Rig('Armature')
     skeleton(rig, own=False)
@@ -1330,7 +1310,7 @@ def accessory_assets():
     P.add('ring', 'sphere', Matrix.Translation((0.14, 0.02, 0.86)), r=0.02, us=10, vs=6)
     keyring, _ = P.make('キーホルダー', mats('ベレー帽'))
     rig.skin(keyring, ['Hips'])
-    P = g.Parts()  # thigh socks, a little wider than her legs, with a cuff each
+    P = g.Parts()  # thigh socks, a bit wider than her legs, with cuffs
     for s, x in SIDES:
         tube(P, 'sock_' + s, [(0.07 * x, 0.011, 0.20), (0.07 * x, 0.009, 0.30), (0.07 * x, 0.005, 0.39),
                               (0.07 * x, 0.003, 0.48), (0.07 * x, 0.002, 0.57)], [0.043, 0.049, 0.05, 0.055, 0.06],
@@ -1444,9 +1424,9 @@ def accessory_assets():
     v.gameobject('お面の大きさ', ROOT_TF, [
         (114, 'MonoBehaviour', g.ma_item('お面の大きさ', kind=203, auto=0, subparams=['MaskSize']))], own_parent=menu_tf)
 
-    # what follows has fileIDs of its own, so that the packages made after this one keep theirs
+    # fileIDs of their own from here, so the packages made later keep theirs
     v.ids, keep_ids = g.Ids(2471), v.ids
-    # how loose the socks are: a Merge Motion (Blend Tree) of their shape key, by a float a radial item sets
+    # sock looseness: a Merge Motion blend tree of their shape key, driven by a radial item's float
     for nm, w in (('ニーハイ_ぴったり', 0), ('ニーハイ_緩い', 100)):
         clips[nm] = G('acc/anim/' + nm)
         g.write_asset(P_(A + nm + '.anim'), g.clip_yaml(nm, [('ニーハイ', 137, 'blendShape.緩い', w)]), clips[nm],
@@ -1477,7 +1457,7 @@ def accessory_assets():
     Bw = avatar_model.world[body]
     at = lambda p: local(avatar_model, 'Body', p)
     along = lambda d: tuple(round(c, 6) for c in (Bw.to_3x3().inverted() @ unity_point(d)).normalized())
-    # her legs inside the socks: between their top and bottom, every corner of a triangle
+    # hide her legs inside the socks: triangles with every corner between their top and bottom
     v.gameobject('脚を隠す', ROOT_TF, [
         (114, 'MonoBehaviour', g.ma('MeshCutter', m_inverted=0, m_object=g.ma_ref('Body'), m_multiMode=1)),
         (114, 'MonoBehaviour', g.ma('VertexFilterByAxis', m_center=g.V(*at((0, 0, 0.565))),
@@ -1495,10 +1475,9 @@ def accessory_assets():
         (114, 'MonoBehaviour', g.ma('VertexFilterByAxis', m_center=g.V(*at((0, 0, 0.10))),
                                     m_axis=g.V(*along((0, 0, -1))), m_selectionMode=0))])
     v.gameobject('床', ROOT_TF, [(114, 'MonoBehaviour', g.ma('FloorAdjuster'))])
-    # her tail: a slider of its size, and a toggle that lifts it, by a Merge Animator (paths from her root) whose clips
-    # scale and turn it
+    # her tail: size slider, lift toggle and two-axis direction puppet, by a Merge Animator (paths from her root)
     tail = 'Armature/Hips/Tail'
-    # (a clip's angles are the tail's own, not a turn from them: from where it is at rest, in Unity's order)
+    # clip angles are the tail's own Euler angles, not a turn from them: start from its rest pose's, in Unity's order
     TL = avatar_model.world[avatar_model.node('Hips')].inverted() @ avatar_model.world[avatar_model.node('Tail')]
     tex = [round(math.degrees(a), 3) for a in TL.to_quaternion().to_matrix().to_euler('ZXY')]
     turned = lambda dx, dy: (tex[0] + dx, tex[1] + dy, tex[2])
@@ -1569,16 +1548,10 @@ GIM = SHOP + '/シンセちゃん用ギミック'
 
 
 def gimmick_assets():
-    """gimmicks for her, set up with VRCFury's features beyond outfits: a heart in her right hand (an Armature Link)
-    with a toggle, a Material Swap toggle (a golden heart) and a Material Property toggle (a pinker one); a slider
-    that sets her chest's size and a Puppet along one axis for her half-closed eyes; a Gesture Driver (her left hand
-    open winks, with blinking blocked; either thumb up smiles, with a lock toggle); Blinking and Visemes of her own
-    shape keys; three decorations whose toggles share exclusive tags (the star with both the moon and the sun); a
-    toggle that sets an FX float a Full Controller's FX shows an aura by; menu items moved and reordered; and a
-    toggle that scales the heart, one that leaves it in the world (World Drop) and an old Breathing (a Smooth Loop of
-    her chest's size). Both hands' victory signs make a face of their own (a Gesture Driver combo), and so do both fists
-    (an FX layer that tests both hands); a Full Controller brings a Gesture layer of hand poses, and a two-axis Puppet
-    mixes four faces."""
+    """gimmicks with VRCFury's features beyond outfits: a linked heart with toggles (Material Swap, Material Property,
+    scale, World Drop), a slider, Puppets, a Gesture Driver (blocked blinking, a lock, a combo), Blinking, Visemes,
+    exclusive tags, an FX float a Full Controller shows, menu moves, an old Breathing, a both-fists FX layer and a
+    Gesture layer of hand poses"""
     g.clear_scene()
     P = g.Parts()
     hc = Vector((-0.575, -0.035, 1.03))
@@ -1587,7 +1560,7 @@ def gimmick_assets():
     P.add('tip', 'sphere', Matrix.Translation(hc + Vector((0, 0, -0.008))) @ Matrix.Diagonal((1.2, 0.6, 1.4, 1)),
           r=0.014, us=12, vs=8)
     heart, _ = P.make('ハート', mats('ハート'))
-    heart.data.transform(Matrix.Translation(-hc))  # its pivot at its middle, so that it scales where it is
+    heart.data.transform(Matrix.Translation(-hc))  # pivot at its middle, so it scales in place
     heart.location = hc
     deco = {}
     for name, at, r in (('スター', (0.12, -0.05, 1.5), 0.02), ('ムーン', (-0.12, -0.05, 1.5), 0.02),
@@ -1633,8 +1606,8 @@ def gimmick_assets():
         fx.transition(idle, [(7, 'GestureLeft', 1)], 0), fx.transition(idle, [(7, 'GestureRight', 1)], 0)]))
     FXG = G('gim/fx')
     g.write_asset(P_(A + 'FX_ギミック.controller'), fx.yaml('FX_ギミック'), FXG, 'NativeFormatImporter', g.native(9100000))
-    # a Gesture layer of her own hand poses (a fist and a victory sign), each hand's layer masked to its fingers with
-    # VRChat's SDK masks (which the package does not hold)
+    # a Gesture layer of hand poses (fist, victory), each hand's layer masked to its fingers by VRChat SDK masks (not in
+    # the package)
     fingers = [('Thumb', 0.5), ('Index', 1.0), ('Middle', 1.0), ('Ring', 1.0), ('Little', 1.0)]
 
     def hand_clip(name, straight):

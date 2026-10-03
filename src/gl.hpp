@@ -9,16 +9,13 @@ namespace h3d::gl {
     // compiles and links a program, returns 0 on failure (and logs why)
     GLuint makeProgram(const char* name, const std::string& vs, const std::string& fs);
 
-    // the block compressed texture formats the current context takes (eTexCompression in map.hpp);
-    // 0 without a context
+    // block compressed formats the current context supports (eTexCompression in map.hpp); 0 without a context
     int textureCompression();
 
     // the current context has this extension (false without a context)
     bool hasExtension(const char* name);
 
-    // Hyprland caches parts of the GL state (current program, blend, viewport,
-    // bound framebuffer...). Everything we touch while rendering the 3D scene is
-    // saved here and put back afterwards, so Hyprland never notices.
+    // restores the GL state the 3D pass touches: Hyprland caches parts of it (program, blend, viewport, framebuffer)
     class CStateGuard {
       public:
         CStateGuard();
@@ -30,7 +27,7 @@ namespace h3d::gl {
       private:
         GLint     m_program = 0, m_vao = 0, m_arrayBuffer = 0, m_drawFb = 0, m_readFb = 0, m_renderbuffer = 0, m_activeTex = 0;
         GLint     m_viewport[4] = {}, m_scissorBox[4] = {};
-        static constexpr int UNITS = 18; // the texture units we use (see setMaterial() in renderer.cpp)
+        static constexpr int UNITS = 18; // texture units used (setMaterial() in renderer.cpp)
         GLint     m_tex2D[UNITS] = {}, m_texExt[UNITS] = {}, m_tex3D[UNITS] = {};
         GLint     m_blendSrcRGB = 0, m_blendDstRGB = 0, m_blendSrcA = 0, m_blendDstA = 0, m_blendEqRGB = 0, m_blendEqA = 0;
         GLint     m_depthFunc = 0, m_unpackAlign = 4, m_packAlign = 4;

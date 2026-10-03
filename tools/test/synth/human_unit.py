@@ -1,7 +1,6 @@
-# human_unit.py: the humanoid muscle maths of tools/unity2hypr3d.py (Unity's muscle clips as bone turns) on a small
-# T-posed skeleton: the swing-twist, left and right alike, Unity's own T pose muscle values back to the T pose, what the
-# muscles' signs do, the arm's twist shared with the forearm, the body placed by RootT and RootQ, Unity's curves (and
-# weighted keys, against the Bezier drawn), Foot IK to goals made from a pose, and a clip read (its goals too). Given Unity T pose clips (not in this repo; VRChat's SDK has proxy_tpose.anim), it also poses the
+# human_unit.py: tools/unity2hypr3d.py's humanoid muscle maths (Unity muscle clips as bone turns) on a small T-posed
+# skeleton: swing-twist, muscle signs, the arm's twist shared with the forearm, RootT/RootQ, Unity curves with weighted
+# keys, Foot IK to goals and a clip read. Given Unity T pose clips (VRChat's SDK has proxy_tpose.anim), it also poses the
 # skeleton with their muscle values.
 #   blender -b --factory-startup --python-exit-code 1 -P human_unit.py [-- T_POSE.anim...]
 import sys, os, math
@@ -149,8 +148,8 @@ w1, w2 = posed({'Left Upper Leg Front-Back': -1}), posed({'Left Upper Leg Front-
 check('Upper Leg Front-Back - lifts the leg forward, + swings it back', (
     at(w1, 'LeftLowerLeg').z > at(w1, 'LeftUpperLeg').z + 0.3, at(w2, 'LeftLowerLeg').z < at(w2, 'LeftUpperLeg').z - 0.1),
       (True, True))
-def bent(w):  # the chest's way from the spine, in the hips' frame (RootQ keeps the body's frame upright, so the
-    return w[IDX['Hips']].to_quaternion().inverted() @ along(w, 'Spine', 'Chest')  # hips lean the other way)
+def bent(w):  # chest direction in the hips' frame (RootQ keeps the body upright)
+    return w[IDX['Hips']].to_quaternion().inverted() @ along(w, 'Spine', 'Chest')
 
 
 check('Spine Front-Back - bends forward, + back', (bent(posed({'Spine Front-Back': -1})).z > 0.5,
@@ -198,7 +197,7 @@ print('== weighted keys: a cubic Bezier in time and value, its handles that shar
 
 
 def bezier_ref(k0, k1, t, a, b, n=20000):
-    """the span as Unity draws it, by sampling the Bezier densely: its value where its time is nearest t"""
+    """the span as Unity draws it: the densely sampled Bezier's value at the time nearest t"""
     t0, v0, o0, t1, v1, i1 = k0[0], k0[1], k0[3], k1[0], k1[1], k1[2]
     dt = t1 - t0
     P = [(t0, v0), (t0 + a * dt, v0 + a * dt * o0), (t1 - b * dt, v1 - b * dt * i1), (t1, v1)]

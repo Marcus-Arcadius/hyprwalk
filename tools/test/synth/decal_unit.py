@@ -1,12 +1,9 @@
 # decal_unit.py: tools/cs2map.py's decal fix on small hand-made glTF scenes. Source 2 Viewer lifts decals (overlay
-# materials) 1 cm off what they're on; since release 20 it lifts them 0.01 / 0.0254 m (39 cm) instead. cs2map measures
-# which it did and puts 39 cm ones back to 1 cm, along the same normals: a floor decal, a wall decal and one under a
-# 16x node (as the 3D skybox is), in place, with their accessors' min and max. A material that isn't a decal stays
-# where it is, as do decals already 1 cm off (Source 2 Viewer 19), decals with nothing behind them, and a lone 39 cm
-# decal among 1 cm ones. The result is written as a GLB and read back.
+# materials) 1 cm off their surface, or 39 cm (0.01 / 0.0254 m) since its release 20; cs2map measures which and puts
+# 39 cm ones back to 1 cm along the same normals.
 #   python3 tools/test/synth/decal_unit.py
 import sys, os, json, struct, tempfile
-sys.dont_write_bytecode = True  # (no __pycache__ left in tools/)
+sys.dont_write_bytecode = True  # no __pycache__ in tools/
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
 import cs2map
 
@@ -42,7 +39,7 @@ def material(doc, name, decal):
 
 
 def quad(doc, corners, normal, mat, normals=True):
-    """a mesh of one quad (two triangles), returns the mesh"""
+    """a one-quad mesh (two triangles)"""
     attrs = {'POSITION': doc.add_accessor('3f', corners, 'VEC3', 5126, minmax=True)}
     if normals:
         attrs['NORMAL'] = doc.add_accessor('3f', [normal] * 4, 'VEC3', 5126)
@@ -71,9 +68,8 @@ def node(doc, mesh, parent=None, name='n0_mesh', matrix=None):
 
 
 def scene(lift, extra=()):
-    """a floor and a wall (not decals) with a decal on each at `lift`, a sign that isn't a decal 39 cm off the wall,
-    and a floor with a decal under a node 16 times bigger; `extra` adds decals at other lifts (floor decals over
-    x = 10, 20, ...)"""
+    """floor and wall with a decal on each at `lift`, a non-decal sign 39 cm off the wall, a decal under a 16x node;
+    `extra`: more floor decals at those lifts, at x = 10, 20, ..."""
     doc = cs2map.Doc()
     stone, paint, sign = material(doc, 'stone', False), material(doc, 'paint', True), material(doc, 'sign', False)
     node(doc, quad(doc, floor_quad(0, 3), (0, 1, 0), stone), name='n0_floor')
@@ -163,8 +159,8 @@ before = {k: positions(doc, n) for k, n in parts.items()}
 EX.fix_decals(doc)
 same('one decal 39 cm off among three 1 cm off: all stay', {k: positions(doc, n) for k, n in parts.items()}, before)
 
-# Source 2 Viewer lifts every decal alike, so one with something else in the gap under it (a curb 5.7 cm high, as
-# under a parking stripe on de_mirage) goes down with the rest, to 1 cm off the floor it's painted on
+# Source 2 Viewer lifts every decal alike, so one with a curb in the gap under it (de_mirage's parking stripes) comes
+# down with the rest
 doc, parts = scene(WRONG)
 node(doc, quad(doc, floor_quad(0.057, 0.2), (0, 1, 0), 0), name='n0_curb')
 EX.fix_decals(doc)
@@ -172,8 +168,7 @@ near('a decal over a curb (measured 34 cm) goes down with the rest', column(posi
 near('as do the others', column(positions(doc, parts['wall decal']), 0) + column(positions(doc, parts['16x decal']), 1),
      [3 - RIGHT] * 4 + [RIGHT] * 4)
 
-# decals that stood 2 cm off their surfaces before the lift (de_dust2's window insets) count as lifted too, and keep
-# their 2 cm
+# decals 2 cm proud before the lift (de_dust2's window insets) count as lifted and keep their 2 cm
 doc, parts = scene(WRONG + 0.02)
 EX.fix_decals(doc)
 near('decals 2 cm proud and then lifted come down to 3 cm', column(positions(doc, parts['floor decal']), 1) +

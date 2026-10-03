@@ -1,31 +1,26 @@
-# The NixOS VMs that tools/test/vm/run.sh tests hypr3d in, the way Hyprland's own CI tests Hyprland
-# (nix/tests/default.nix in its repo): QEMU with KVM and a virtio GPU (Mesa's llvmpipe draws), the very
-# Hyprland hypr3d.so was built for, started as alice's login session on tty1 the way a display manager
-# would, and PipeWire with a virtual microphone. The driver starts QEMU with -nographic, and so does
-# virtualisation.graphics = false, so no window opens anywhere (with gpu = "virgl", QEMU's egl-headless display,
-# which draws on a render node and opens no window either).
+# NixOS VMs for tools/test/vm/run.sh, set up as Hyprland's own CI tests Hyprland (nix/tests/default.nix): QEMU with
+# KVM and a virtio GPU, the very Hyprland hypr3d.so was built for as alice's tty1 login session, and PipeWire with a
+# virtual microphone. No window opens (-nographic, or egl-headless with gpu = "virgl").
 #
 #   nix-build tools/test/vm/vm.nix -A driver --argstr hyprland /nix/store/...-hyprland-...
 #
-# There are two VMs, the same but for the screen: `machine` at 1280x800, and `hidpi` at 1920x1200 for scales 1.5
-# and 2. (virtio-gpu only takes the mode it prefers, the xres and yres it's given: any other one fails DRM's atomic
-# test, so a monitor can't change its resolution in a VM.) The checks are tools/test/vm/checks.py, which run.sh hands
-# the driver (--test-script), so changing them doesn't rebuild anything.
+# `machine` is 1280x800, `hidpi` 1920x1200 for scales 1.5 and 2: virtio-gpu only takes the xres and yres it's given
+# (other modes fail DRM's atomic test). run.sh hands the driver checks.py, so changing the checks rebuilds nothing.
 {
-  hyprland, # the Hyprland's store path (the one build.sh built against)
+  hyprland, # store path of the Hyprland build.sh built against
   nixpkgs ? <nixpkgs>,
   cores ? 8, # llvmpipe draws with all of them
-  # "llvmpipe": Mesa draws in software on a plain virtio GPU. "virgl": a GPU of the host's draws, through
-  # virglrenderer: QEMU's egl-headless display on its render node (it opens no window)
+  # "llvmpipe": Mesa's software rendering on a plain virtio GPU; "virgl": a host GPU through virglrenderer (QEMU's
+  # egl-headless display on its render node)
   gpu ? "llvmpipe",
-  rendernode ? "/dev/dri/renderD129", # the Intel iGPU here (renderD128 is the NVIDIA that runs the desktop)
+  rendernode ? "/dev/dri/renderD129", # the iGPU here; renderD128 drives the desktop
 }:
 let
   pkgs = import nixpkgs { };
-  # the one that's installed, with its closure (not in pure evaluation mode: nix-build is fine)
+  # the installed one with its closure (impure: fine with nix-build, not in pure evaluation)
   hypr = builtins.storePath hyprland;
 
-  # h3dgame.c: a tiny SDL2 game that prints what it gets (the mouse, relative motion, keys, controllers, focus)
+  # h3dgame.c: a tiny SDL2 game that prints the input it gets
   h3dgame = pkgs.runCommandCC "h3dgame" {
     nativeBuildInputs = [ pkgs.pkg-config ];
     buildInputs = [ pkgs.SDL2 ];
@@ -43,13 +38,12 @@ let
 
       virtualisation = {
         inherit cores;
-        memorySize = 6144; # (a browser and OBS on llvmpipe)
-        # (no -nographic with virgl: it would take the place of egl-headless, a display that opens no window either)
+        memorySize = 6144; # a browser and OBS on llvmpipe
+        # virgl needs a display: -nographic would replace egl-headless, which opens no window either
         graphics = gpu == "virgl";
-        diskSize = 8192; # (a sparse image) room for a core dump, so a crash's stack trace can be had
-        # no VGA, a virtio GPU without 3D: Mesa's llvmpipe draws, through GBM on its DRM device (or, with gpu =
-        # "virgl", one with 3D). No VMware port either: through it the PS/2 mouse turns into an absolute vmmouse, and
-        # there'd be no relative mouse (the USB tablet is the absolute one)
+        diskSize = 8192; # sparse; room for a core dump's stack trace
+        # no VGA; a virtio GPU without 3D (llvmpipe draws through GBM), or with 3D for virgl. No VMware port: it turns
+        # the PS/2 mouse into an absolute vmmouse, leaving no relative mouse
         qemu.options = [
           "-vga none"
           "-machine vmport=off"
@@ -72,12 +66,12 @@ let
         noto-fonts-cjk-sans
         noto-fonts-color-emoji
       ];
-      services.speechd.enable = false; # (Hyprland's CI turns it off too)
+      services.speechd.enable = false; # Hyprland's CI turns it off too
 
       users.users.alice = {
         isNormalUser = true;
         uid = 1000;
-        password = "h3d"; # (for swaylock, which play mode must give the keyboard to)
+        password = "h3d"; # for swaylock (play mode must yield the keyboard)
         extraGroups = [
           "video"
           "audio"
@@ -95,23 +89,23 @@ let
         grim
         jq
         pipewire
-        # wheel.py, touchpad.py and gamepad.py (a mouse, a touchpad and a game controller, through uinput), and
-        # tkapp.py (an X11 app with menus and a tooltip)
+        # for wheel.py, touchpad.py and gamepad.py (a uinput mouse, touchpad and game controller) and tkapp.py (an X11
+        # app with menus and a tooltip)
         (python3.withPackages (ps: [ ps.tkinter ]))
-        wev # prints the pointer and keyboard events its window gets
+        wev # prints its window's pointer and key events
         wireplumber
-        xwayland # (Hyprland starts it when it finds it)
+        xwayland # Hyprland starts it if found
         xev # wev for X11 windows
         xterm
-        swayidle # the screen blanking, to see that games and videos keep it from it
-        weston # its demo clients: weston-presentation-shm (presentation feedback), weston-dnd
-        # real open-source games: Chocolate Doom (mouse look, the pointer locked) with Freedoom's levels, and
-        # SuperTux (the keyboard, or a controller)
+        swayidle # screen blanking, which games and videos must inhibit
+        weston # weston-presentation-shm, weston-dnd demo clients
+        # real open-source games: Chocolate Doom with Freedoom's levels (mouse look, pointer locked) and SuperTux
+        # (keyboard or controller)
         chocolate-doom
         freedoom
         supertux
-        # everyday apps, open-source stand-ins: two browsers, Electron (Discord's stack), OBS, and what they need:
-        # a notification daemon, the clipboard's tools
+        # open-source stand-ins for everyday apps: two browsers, Electron (Discord's stack), OBS, a notification daemon,
+        # clipboard tools
         chromium
         firefox
         electron
@@ -119,21 +113,21 @@ let
         mako
         wl-clipboard
         fcitx5
-        dbus # (dbus-monitor)
+        dbus # dbus-monitor
         swaylock
-        swaybg # a wallpaper (a layer surface) for the live check's crosshair to start on
-        quickshell # a shell's see-through overlay over the whole screen (overlay.qml)
+        swaybg # a layer-surface wallpaper for the crosshair to start on
+        quickshell # full-screen see-through overlay (overlay.qml)
       ]);
       security.pam.services.swaylock = { };
-      # The portals' user services want graphical-session.target, which a desktop's session brings up: Hyprland
-      # started this way doesn't, so the checks start this (home-manager's hyprland-session.target is the same)
+      # the portals' user services want graphical-session.target, which Hyprland started this way doesn't bring up: the
+      # checks start this target (as home-manager's hyprland-session.target)
       systemd.user.targets.hyprland-session = {
         description = "Hyprland session (tools/test/vm)";
         bindsTo = [ "graphical-session.target" ];
         wants = [ "graphical-session-pre.target" ];
         after = [ "graphical-session-pre.target" ];
       };
-      # (what the portal decides, in the journal; xdph's log line by line: to the journal's pipe it'd come in blocks)
+      # portal decisions in the journal; xdph's log line-buffered (into the journal's pipe it would come in blocks)
       systemd.user.services.xdg-desktop-portal.environment.G_MESSAGES_DEBUG = "all";
       systemd.user.services.xdg-desktop-portal-hyprland.environment = {
         LD_PRELOAD = "${pkgs.coreutils}/libexec/coreutils/libstdbuf.so";
@@ -154,8 +148,8 @@ let
         ];
       };
 
-      # Hyprland on tty1 in a logind session of alice's, as a display manager starts it (the NixOS cage
-      # module's way); the checks start and stop it
+      # Hyprland on tty1 in alice's logind session, as a display manager starts it (like the NixOS cage module); the
+      # checks start and stop it
       systemd.services.hyprland = {
         description = "Hyprland on tty1 for tools/test/vm";
         after = [
@@ -175,7 +169,7 @@ let
           XDG_CURRENT_DESKTOP = "Hyprland";
         };
         serviceConfig = {
-          # the checks write the config, and which one it is (a .lua or a .conf) to /run/hyprland-test.env
+          # the checks write the config and put its path (.lua or .conf) in /run/hyprland-test.env
           EnvironmentFile = "/run/hyprland-test.env";
           ExecStart = "${hypr}/bin/start-hyprland --path ${hypr}/bin/Hyprland -- --config \${H3D_CONFIG}";
           User = "alice";
@@ -191,9 +185,9 @@ let
           StandardOutput = "journal";
           StandardError = "journal";
           PAMName = "hyprland-test";
-          # without it, Hyprland (and all it starts) had CAP_WAKE_ALARM here, which the portals, without it,
-          # may not look into (/proc/PID/root: EACCES), so they refused every app Hyprland started (OBS's screen
-          # capture). A desktop's Hyprland has at most CAP_SYS_NICE, which its apps don't inherit
+          # drop CAP_WAKE_ALARM: Hyprland's children would inherit it, and the portals, lacking it, can't read their
+          # /proc/PID/root (EACCES) and refuse them (OBS's screen capture). A desktop's Hyprland has at most
+          # CAP_SYS_NICE, which its apps don't inherit
           AmbientCapabilities = "";
           CapabilityBoundingSet = "~CAP_WAKE_ALARM";
         };
@@ -206,8 +200,8 @@ let
         session  required ${config.systemd.package}/lib/security/pam_systemd.so
       '';
 
-      # PipeWire, and a microphone to sing into: what's played into the "Test microphone in" sink comes out of
-      # the "Test microphone" source, the only source there is
+      # PipeWire with a microphone to sing into: what's played into the "Test microphone in" sink comes out of the "Test
+      # microphone" source, the only source
       security.rtkit.enable = true;
       services.pipewire = {
         enable = true;
@@ -243,9 +237,9 @@ pkgs.testers.runNixOSTest {
   testScript = "raise Exception('run tools/test/vm/run.sh: it gives the driver the test script')";
   skipLint = true;
   skipTypeCheck = true;
-  # (a full run on llvmpipe takes about an hour now: the driver's own 3600 s would end it in its last sections)
+  # a full llvmpipe run takes about an hour; the driver's default 3600 s would cut off its last sections
   globalTimeout = 7200;
-  # (the tests' own QEMU has no OpenGL)
+  # qemu_test has no OpenGL
   qemu.package = if gpu == "virgl" then pkgs.qemu else pkgs.qemu_test;
 
   nodes.machine = vm 1280 800;

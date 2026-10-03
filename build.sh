@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
-# Builds hypr3d.so against the exact Hyprland you are running.
-#
-# Hyprland plugins must be compiled against the headers of the very same
-# Hyprland build, with the same compiler. On NixOS we get both by asking Nix
-# for the derivation that produced the running binary, realising its `dev`
-# output (the headers) and compiling inside that derivation's build shell.
-# Elsewhere the headers are your distribution's (its Hyprland development
-# package) or hyprpm's (`hyprpm update`), as pkg-config finds them, and make
-# runs with the system's compiler.
+# Builds hypr3d.so against the exact Hyprland you are running: a plugin needs that build's own headers and compiler. On
+# NixOS it takes the `dev` output of the derivation that built the running binary and runs make in that derivation's
+# build shell; elsewhere, the headers pkg-config finds (the distribution's Hyprland development package, or hyprpm's
+# from hyprpm update) and the system's compiler.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -24,7 +19,7 @@ if [[ -z "$HYPR_BIN" ]]; then
     elif command -v nix-store > /dev/null; then
         die "Hyprland isn't running; set HYPR_BIN=/nix/store/...-hyprland-.../bin/Hyprland"
     else
-        HYPR_BIN="$(command -v Hyprland || true)" # not running: the installed one, to check the headers against
+        HYPR_BIN="$(command -v Hyprland || true)" # else the installed one, to check the headers against
     fi
 fi
 
@@ -44,8 +39,7 @@ build_nix() {
     DEV="$(nix build --no-link --print-out-paths "$DRV^dev")"
     echo ":: headers:  $DEV"
 
-    # PipeWire, for lip sync's microphone (src/mic.cpp): the headers of the one that runs, as for Hyprland. Without
-    # them hypr3d builds without a microphone
+    # PipeWire headers for lip sync's microphone (src/mic.cpp), from the running one; optional
     local PW_PC="" pw PW_BIN PW_DRV PW_DEV
     if pw="$(pgrep -x pipewire | head -n1)" && [[ -n "$pw" ]]; then
         PW_BIN="$(readlink -f "/proc/$pw/exe" 2>/dev/null || true)"
@@ -64,15 +58,13 @@ build_nix() {
     "
 }
 
-# Other distributions: the headers pkg-config finds (the distribution's Hyprland development package), else hyprpm's
-# (hyprpm update puts those of the Hyprland that runs in /var/cache/hyprpm), whichever is the running Hyprland's
-# version when both are there
+# other distributions: pkg-config's headers, else hyprpm's; with both, whichever matches the running version
 build_system() {
     command -v pkg-config > /dev/null || die "no pkg-config: install pkgconf (or pkg-config)"
     command -v make > /dev/null || die "no make: install your distribution's build tools (make and g++)"
     local running="" hyprpm_pc="/var/cache/hyprpm/${USER:-$(id -un)}/headersRoot/share/pkgconfig"
     local version='1s/^Hyprland ([0-9][0-9.]*).*/\1/p'
-    # the version of the one that runs (its binary may be a newer one by now), else of the one installed
+    # the running Hyprland's version (its binary may have been updated since), else the installed one's
     [[ -n "${pid:-}" ]] && command -v hyprctl > /dev/null && running="$(hyprctl version 2>/dev/null | sed -nE "$version" || true)"
     [[ -z "$running" && -n "$HYPR_BIN" ]] &&
         running="$(XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}" "$HYPR_BIN" --version 2>/dev/null | sed -nE "$version" || true)"
@@ -85,7 +77,7 @@ build_system() {
     pkg-config --exists hyprland ||
         die "Hyprland's headers aren't installed (pkg-config finds no hyprland.pc). Install your distribution's Hyprland
 development package (Arch: hyprland; Debian, Ubuntu: hyprland-dev; openSUSE, Fedora: hyprland-devel), or run
-'hyprpm update' for the headers of the Hyprland you run. See Building in README.md."
+'hyprpm update' for the headers of the Hyprland you run. See Install in README.md."
     local headers
     headers="$(pkg-config --modversion hyprland)"
     echo ":: Hyprland: ${HYPR_BIN:-not found}${running:+ ($running)}"

@@ -22,10 +22,10 @@ namespace h3d {
 
         constexpr float TAU = 6.28318530718f;
         constexpr V3    UP{0, 1, 0};
-        constexpr float MAX_CLIP = 900.f; // seconds: the longest clip (an emote) taken
-        constexpr int   DROP_FIXED = 1 << 30; // CAvatarAnimator::m_dropBy of a node held in the world by no toggle
+        constexpr float MAX_CLIP = 900.f; // seconds
+        constexpr int   DROP_FIXED = 1 << 30; // m_dropBy: dropped by no toggle
 
-        // --- a small JSON reader, for the VRM extensions (cgltf leaves them as text)
+        // --- JSON reader (cgltf leaves the VRM extensions as text)
 
         struct SJson {
             enum eType : uint8_t {
@@ -61,7 +61,6 @@ namespace h3d {
                 return m_p == m_end;
             }
 
-            // the line it got to, for saying where it went wrong
             int line() const {
                 return 1 + (int)std::count(m_begin, m_p, '\n');
             }
@@ -212,7 +211,7 @@ namespace h3d {
 
         // --- math
 
-        // shortest rotation taking direction a to b
+        // shortest rotation from a to b
         Quat arc(const V3& a, const V3& b) {
             const float d = dot(a, b);
             if (d < -0.9999f)
@@ -221,7 +220,7 @@ namespace h3d {
             return Quat{c.x, c.y, c.z, 1.f + d}.normalized();
         }
 
-        // rotation of a transform that may carry scale (and a mirror)
+        // rotation part, ignoring scale and mirroring
         Quat rotationOf(const M4& m) {
             V3 x{m.m[0], m.m[1], m.m[2]};
             const V3 y{m.m[4], m.m[5], m.m[6]}, z{m.m[8], m.m[9], m.m[10]};
@@ -230,22 +229,21 @@ namespace h3d {
             return Quat::fromBasis(normalize(x), normalize(y), normalize(z));
         }
 
-        // where a spring's bone at O points at p, turned back within its limit (frame L: its limitFrame in the world), as
-        // far from O; VRMC_springBone_limit's reference implementations
+        // p turned into J's VRMC_springBone_limit about O (L: limitFrame, world space)
         V3 springLimit(const SSpringJoint& J, const Quat& L, const V3& O, const V3& p) {
             V3 d = L.conj().rotate(normalize(p - O));
             switch (J.limit) {
                 case LIMIT_NONE: return p;
                 case LIMIT_CONE: {
-                    // no further from y than the angle
+                    // within limitA of +y
                     if (const float c = std::cos(J.limitA); d.y < c) {
                         const float side = d.x * d.x + d.z * d.z, s = std::sqrt(std::max(0.f, 1.f - c * c));
-                        d                = side <= 1e-8f ? V3{0, c, s} : V3{d.x * s / std::sqrt(side), c, d.z * s / std::sqrt(side)}; // (straight back: to +z)
+                        d                = side <= 1e-8f ? V3{0, c, s} : V3{d.x * s / std::sqrt(side), c, d.z * s / std::sqrt(side)}; // opposite y: toward +z
                     }
                     break;
                 }
                 case LIMIT_HINGE: {
-                    // in the yz plane, no further from y than the angle
+                    // yz plane, within limitA of +y
                     const float l = std::sqrt(d.y * d.y + d.z * d.z);
                     d             = l <= 1e-4f ? V3{0, 1, 0} : V3{0, d.y / l, d.z / l};
                     if (const float c = std::cos(J.limitA); d.y < c)
@@ -253,7 +251,7 @@ namespace h3d {
                     break;
                 }
                 case LIMIT_SPHERICAL: {
-                    // a pitch round x (in the yz plane) and a yaw toward x, each within its own
+                    // pitch round x, yaw toward x, each clamped
                     const float pitch = d.y <= -1.f + 1e-6f ? TAU * 0.5f : std::abs(d.x) >= 1.f - 1e-6f ? 0.f : std::atan2(d.z, d.y);
                     const float yaw = std::clamp(std::asin(std::clamp(d.x, -1.f, 1.f)), -J.limitB, J.limitB), p2 = std::clamp(pitch, -J.limitA, J.limitA);
                     d               = {std::sin(yaw), std::cos(yaw) * std::cos(p2), std::cos(yaw) * std::sin(p2)};
@@ -282,7 +280,7 @@ namespace h3d {
             return r;
         }
 
-        // --- which bone is which, from the names
+        // --- humanoid bones from names
 
         std::vector<std::string> tokens(const std::string& name) {
             std::vector<std::string> out;
@@ -317,7 +315,7 @@ namespace h3d {
 
         struct SBoneName {
             int         side = 0; // 1 left, 2 right
-            std::string key;      // what's left once sides, numbers and rig prefixes are gone
+            std::string key;      // no sides, numbers, rig prefixes
         };
 
         SBoneName boneName(const std::string& name) {
@@ -335,7 +333,6 @@ namespace h3d {
             return out;
         }
 
-        // bone of a key: centre bones directly, sided ones as an offset from the left upper leg / shoulder
         enum eKeyKind : uint8_t {
             K_NONE,
             K_CENTER,
@@ -347,7 +344,7 @@ namespace h3d {
         };
         struct SKey {
             eKeyKind kind;
-            int      bone; // eHumanBone for K_CENTER, else 0.. along the limb
+            int      bone; // K_CENTER: eHumanBone, else index in the limb
         };
         SKey keyOf(const std::string& k, int side) {
             static const std::map<std::string_view, SKey> KEYS = {
@@ -373,8 +370,7 @@ namespace h3d {
             return r;
         }
 
-        // a humanoid bone by its VRM name ("leftUpperArm") or Unity's ("Left Thumb Proximal"). VRM 1.0's thumb
-        // starts at its metacarpal; VRM 0.x's and Unity's call that one the proximal
+        // VRM or Unity bone name; VRM 1.0 thumbs start at the metacarpal
         int humanBoneOf(std::string_view name, bool vrm1) {
             std::string n;
             for (const char c : name)
@@ -426,7 +422,7 @@ namespace h3d {
             return -1;
         }
 
-        // which finger a bone's name says: eFinger, -1 = none, -2 = the palm (a metacarpal, not the thumb's)
+        // eFinger, -1 none, -2 palm (non-thumb metacarpal)
         int fingerOf(const std::string& name) {
             const std::string key = boneName(name).key;
             auto              has = [&](std::initializer_list<std::string_view> words) {
@@ -447,7 +443,6 @@ namespace h3d {
             return -1;
         }
 
-        // clip names: which one is which
         int clipKind(const std::string& name) {
             const auto toks = tokens(name);
             auto       has  = [&](std::initializer_list<std::string_view> words, bool exact = false) {
@@ -492,7 +487,7 @@ namespace h3d {
             return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
         }
 
-        // shape key and expression names, compared loosely: "vrc.v_aa" and "V_AA" are both "vaa"
+        // loose: "vrc.v_aa" and "V_AA" are both "vaa"
         std::string normName(std::string_view s) {
             if (const size_t dot = s.rfind('.');
                 dot != std::string_view::npos && s.size() - dot > 2 && !std::ranges::all_of(s.substr(dot + 1), [](char c) { return c >= '0' && c <= '9'; }))
@@ -507,7 +502,7 @@ namespace h3d {
         constexpr std::string_view PRESET_NAMES[EX_COUNT] = {"happy", "angry",    "sad",        "relaxed", "surprised", "aa",       "ih",       "ou",        "ee",
                                                              "oh",    "blink",    "blinkLeft",  "blinkRight", "lookUp",  "lookDown", "lookLeft", "lookRight", "neutral"};
 
-        // VRM 1.0's preset names, VRM 0.x's (joy, a, blink_l...), -1 = none of them
+        // VRM 1.0 / 0.x preset name, -1 = none
         int presetOf(std::string_view name) {
             const std::string n = normName(name);
             for (int p = 0; p < EX_COUNT; ++p)
@@ -521,9 +516,7 @@ namespace h3d {
             return it == OLD.end() ? -1 : it->second;
         }
 
-        // Shape keys that make a preset, for models that don't say (VRoid, VRChat, MMD, ARKit and plain
-        // names). Per preset the alternatives in order; each is the shape keys it's made of, as normName()
-        // has them, with their weights.
+        // per preset, shape key sets to try (space-separated, :weight)
         const std::array<std::vector<std::string_view>, EX_COUNT>& shapeKeyGuesses() {
             static const std::array<std::vector<std::string_view>, EX_COUNT> G = {{
                 /* happy */ {"fclalljoy", "joy", "happy", "smile", "笑い にっこり にこり",
@@ -555,7 +548,6 @@ namespace h3d {
 
         // --- clips
 
-        // a channel's value at t: 3 floats, or a rotation's 4
         void sampleChannel(const SAnimChannel& c, float t, float out[4]) {
             const size_t comps = c.path == PATH_R ? 4 : 3;
             const size_t keys  = c.times.size();
@@ -587,7 +579,7 @@ namespace h3d {
             }
         }
 
-        // a clip at t over a pose: what it doesn't move keeps its own
+        // unanimated nodes keep their pose
         void sampleClip(const SAnimClip& clip, float t, std::vector<STRS>& pose) {
             for (const auto& c : clip.channels) {
                 float out[4];
@@ -601,7 +593,7 @@ namespace h3d {
             }
         }
 
-        // a clip turns the fingers from rest (5 degrees or more)
+        // whether a finger turns 5 degrees or more
         bool movesFingers(const SAvatarModel& md, const SAnimClip& clip) {
             std::vector<bool> finger(md.nodes.size(), false);
             for (int b = HB_FINGERS; b < HB_COUNT; ++b)
@@ -621,7 +613,7 @@ namespace h3d {
             return false;
         }
 
-        // a clip by its name, or loosely; -1 = none
+        // exact, then loose name; -1 = none
         int clipNamed(const std::vector<SAnimClip>& clips, std::string_view name) {
             for (int loose = 0; loose < 2 && !name.empty(); ++loose) {
                 const std::string want = loose ? normName(name) : lower(std::string(name));
@@ -632,8 +624,7 @@ namespace h3d {
             return -1;
         }
 
-        // which way a model faces at rest (model space, level): a humanoid's front from its legs, else its arms;
-        // an animal's head is in front
+        // rest facing, model space: from legs or arms, else hips to head
         V3 facingOf(const SAvatarModel& model, const std::vector<M4>& restGlobal) {
             const auto& h   = model.human;
             auto        pos = [&](int b) { return origin(restGlobal[h[b]]); };
@@ -655,25 +646,22 @@ namespace h3d {
             return fwd;
         }
 
-        // --- emotes: clips on no one in particular, made for the avatar
-        //
-        // A humanoid's bones turn as a world turn from a T pose, in a frame of its own: +X its left, +Y up, +Z
-        // forward (VRM 1.0's). What one humanoid does, another does the same way: its T pose turned the same.
+        // --- emotes: humanoid clips as T pose turns in a body frame (+X left, +Y up, +Z forward)
 
         constexpr float PI = TAU * 0.5f;
 
-        // a humanoid at rest
+        // humanoid rest pose
         struct SRig {
             const SAvatarModel*        md = nullptr;
             std::vector<M4>            restGlobal;
             std::vector<Quat>          restRot; // per node
-            Quat                       facing;  // its frame -> model space
-            std::array<Quat, HB_COUNT> tpose{}; // per bone, in model space: rest -> a T pose
+            Quat                       facing;  // body frame -> model space
+            std::array<Quat, HB_COUNT> tpose{}; // rest -> T pose per bone, model space
             V3                         hips;    // at rest, model space
-            float                      height = 1; // of the hips over the ankles, model units
+            float                      height = 1; // hips above ankles, model units
         };
 
-        // the bone above one, as the limbs count (not the model's own)
+        // parent in the humanoid hierarchy
         constexpr int humanParent(int b) {
             switch (b) {
                 case HB_HIPS: return -1;
@@ -722,7 +710,7 @@ namespace h3d {
             }
             r.height = r.hips.y - feet > 0.1f * legs ? r.hips.y - feet : std::max(legs, 1e-4f);
 
-            // the limbs straight out: the arms to the sides, the legs down
+            // T pose: arms sideways, legs down
             auto along = [&](int b, int to) -> std::optional<V3> {
                 if (h[b] < 0 || h[to] < 0)
                     return std::nullopt;
@@ -733,7 +721,6 @@ namespace h3d {
             for (int s = 0; s < 2; ++s) {
                 const float sx = s ? -1.f : 1.f;
                 const int   ua = s ? HB_R_UPPER_ARM : HB_L_UPPER_ARM, ul = s ? HB_R_UPPER_LEG : HB_L_UPPER_LEG, hand = ua + 2;
-                // the hand toward its middle finger, else another
                 std::optional<V3> fingers;
                 for (int f : {FINGER_MIDDLE, FINGER_INDEX, FINGER_RING, FINGER_LITTLE})
                     if (!fingers)
@@ -746,15 +733,14 @@ namespace h3d {
                         own[b]     = true;
                     }
             }
-            // the rest as the bone above them (the torso's is none)
+            // others take their limb parent's turn, else none
             for (int b = 0; b < HB_COUNT; ++b)
                 if (!own[b])
                     r.tpose[b] = humanParent(b) >= 0 && b != HB_L_SHOULDER && b != HB_R_SHOULDER && humanParent(b) > HB_HEAD ? r.tpose[humanParent(b)] : Quat{};
             return r;
         }
 
-        // a clip in the frame above: per frame, every bone's turn from the T pose and the hips' move from rest (in
-        // hips heights); the faces by name (the value's x is the weight)
+        // per frame: bone turns from the T pose, hips offset in hips heights; faces' x = weight
         struct SNormClip {
             std::string                                       name;
             float                                             duration = 0;
@@ -766,7 +752,6 @@ namespace h3d {
             std::vector<std::pair<std::string, SAnimChannel>> faces;
         };
 
-        // the clip for a humanoid
         SAnimClip retarget(const SNormClip& nc, const SRig& rig) {
             const auto& md = *rig.md;
             const auto& h  = md.human;
@@ -820,14 +805,13 @@ namespace h3d {
             return clip;
         }
 
-        // a humanoid's clip in the frame above
         SNormClip canonical(const SAnimClip& clip, const SRig& rig, const std::atomic<bool>& cancel) {
             const auto& md = *rig.md;
             const auto& h  = md.human;
             SNormClip   nc;
             nc.name     = clip.name;
             nc.duration = clip.duration;
-            // at its keys if they're few and in straight lines between, else 60 a second
+            // sample at the keys if few and linear, else 60 Hz
             std::vector<float> keys;
             bool               linear = true;
             for (const auto& c : clip.channels) {
@@ -842,8 +826,7 @@ namespace h3d {
                 for (int i = 0, n = std::max(1, (int)std::ceil(clip.duration * 60.f)); i <= n; ++i)
                     nc.times.push_back(clip.duration * (float)i / (float)n);
 
-            // (a VRM animation's bones without curves are left as they are, as VRM animation players have it: one made
-            // for the upper body leaves the legs to the walking)
+            // VRMA bones without curves stay free (upper-body clips leave legs walking)
             std::vector<bool> turned(md.nodes.size(), md.humanFrom != "VRMA");
             for (const auto& c : clip.channels)
                 if (c.path == PATH_R)
@@ -853,7 +836,7 @@ namespace h3d {
             const Quat         Rc = rig.facing.conj();
             std::vector<STRS>  pose(md.nodes.size());
             std::vector<M4>    g(md.nodes.size());
-            std::array<Quat, HB_COUNT> undo; // rest -> T pose, undone: rest's inverse and the T pose's
+            std::array<Quat, HB_COUNT> undo; // inverse of rest -> T pose
             for (int b = 0; b < HB_COUNT; ++b)
                 if (nc.has[b])
                     undo[b] = rig.restRot[h[b]].conj() * rig.tpose[b].conj();
@@ -877,11 +860,11 @@ namespace h3d {
 
         // --- posing a humanoid, for the built in emotes
 
-        // a humanoid's measure, in the frame above and hips heights: the hips at (0, 1, 0), the ankles at y = 0
+        // body frame, hips heights: hips at (0, 1, 0), ankles at y = 0
         struct SBody {
             std::array<V3, HB_COUNT>   at{}; // at rest
             std::array<bool, HB_COUNT> has{};
-            float                      upper[2]{}, fore[2]{}, thigh[2]{}, shin[2]{}; // per side, 0 the left
+            float                      upper[2]{}, fore[2]{}, thigh[2]{}, shin[2]{}; // 0 = left
             float                      arm = 0.6f;                                   // shoulder to wrist
         };
 
@@ -905,7 +888,7 @@ namespace h3d {
             return b;
         }
 
-        // the turn taking t0 to t, and h0 (square to t0) as near to h as it goes
+        // turn taking t0 to t, and h0 (perpendicular to t0) nearest h
         Quat frameTo(const V3& t0, const V3& h0, const V3& t, const V3& h) {
             V3 hp = h - t * dot(h, t);
             if (length(hp) < 1e-5f)
@@ -914,14 +897,13 @@ namespace h3d {
             return (Quat::fromBasis(t, hp, cross(t, hp)) * Quat::fromBasis(t0, h0, cross(t0, h0)).conj()).normalized();
         }
 
-        // where a limb from t0 bends at u when turned there the shortest way: h0 turned along, square to u
+        // hinge axis after the shortest turn of a limb from t0 to u
         V3 hingeAt(const V3& t0, const V3& h0, const V3& u) {
             V3 a = arc(t0, u).rotate(h0);
             a    = a - u * dot(a, u);
             return length(a) > 1e-5f ? normalize(a) : perpendicular(u);
         }
 
-        // a direction partway round from a to b
         V3 towards(const V3& a, const V3& b, float w) {
             return slerp(Quat{}, arc(normalize(a), normalize(b)), w).rotate(normalize(a));
         }
@@ -930,8 +912,7 @@ namespace h3d {
             return smoothstep01((t - a) / (b - a));
         }
 
-        // an arm: the upper arm along u, the elbow bent, turned about u from where it'd bend (twist); the hand
-        // along `along` with the palm facing `palm`, or zero for straight on; in the frame of the chest
+        // chest frame; twist about u from the natural hinge; zero `along`: hand straight
         struct SArm {
             V3    u{0, -1, 0};
             float bend = 0, twist = 0;
@@ -940,9 +921,9 @@ namespace h3d {
 
         class CPoser {
           public:
-            std::array<Quat, HB_COUNT> turn; // the pose: bones turned from the T pose, in the frame above
-            std::array<bool, HB_COUNT> set;  // which it has
-            V3                         move; // the hips, from rest
+            std::array<Quat, HB_COUNT> turn; // turns from the T pose, body frame
+            std::array<bool, HB_COUNT> set;
+            V3                         move; // hips offset from rest
 
             explicit CPoser(const SBody& b) : m_b(b) {
                 start();
@@ -956,20 +937,19 @@ namespace h3d {
                 torso();
             }
 
-            // the whole body turned about the hips, and moved
             void body(const Quat& q, const V3& moved = {}) {
                 m_local[HB_HIPS] = q;
                 move             = moved;
                 torso();
             }
 
-            // a bone of the torso (spine to head) turned from the one below
+            // turn relative to the bone below
             void bend(int bone, const Quat& q) {
                 m_local[bone] = q;
                 torso();
             }
 
-            // the arm in the chest's frame from a direction and bend
+            // upper arm along u, forearm along f, chest frame
             SArm armOf(int side, const V3& u, const V3& f, const V3& along = {}, const V3& palm = {}) const {
                 const V3    t0{side ? -1.f : 1.f, 0, 0}, h0{0, side ? 1.f : -1.f, 0};
                 const V3    un = normalize(u), fn = normalize(f);
@@ -982,7 +962,7 @@ namespace h3d {
                 return a;
             }
 
-            // where a bone's joint is as posed so far (the frame above): from the hips, up through the bones above it
+            // posed joint position so far, body frame
             V3 jointAt(int bone) const {
                 int chain[8], n = 0;
                 for (int b = bone; b >= 0 && n < 8; b = humanParent(b))
@@ -994,7 +974,7 @@ namespace h3d {
                 return p;
             }
 
-            // a bone's turn as posed so far (one that isn't set turns with the one above)
+            // unset bones turn with their parent
             Quat turnAt(int b) const {
                 while (!set[b] && humanParent(b) >= 0)
                     b = humanParent(b);
@@ -1005,8 +985,7 @@ namespace h3d {
                 return m_b;
             }
 
-            // the arm reaching for a point from between the shoulders (arm lengths, the chest's frame), the
-            // elbow toward `elbow`
+            // target in arm lengths from mid-shoulders, chest frame; elbow toward `elbow`
             SArm reach(int side, const V3& target, const V3& elbow, const V3& along = {}, const V3& palm = {}) const {
                 const int ua     = side ? HB_R_UPPER_ARM : HB_L_UPPER_ARM;
                 const V3  mid    = (m_b.at[HB_L_UPPER_ARM] + m_b.at[HB_R_UPPER_ARM]) * 0.5f;
@@ -1019,8 +998,7 @@ namespace h3d {
                 apply(side, armFinish(side, ua, la, handOf(side, a, la)));
             }
 
-            // partway from one arm to another: its direction, bend and twist (turning the bones the short way
-            // round would swing the forearm through the body), the hand from the forearm
+            // blends direction, bend and twist: slerping would swing the forearm through the body
             void arm(int side, const SArm& a, const SArm& b, float w) {
                 float twist = b.twist - a.twist;
                 twist -= TAU * std::round(twist / TAU);
@@ -1030,7 +1008,7 @@ namespace h3d {
                 apply(side, armFinish(side, ua, la, slerp(ha, hb, w)));
             }
 
-            // a leg: the thigh along `thigh` in the hips' frame, the knee bent, the foot turned toes down (pitch)
+            // thigh along `thigh` (hips' frame), knee bend, foot pitch
             void leg(int side, const V3& thigh, float knee, float pitch = 0) {
                 const V3   t0{0, -1, 0}, h0{1, 0, 0};
                 const V3   u = normalize(thigh), a = hingeAt(t0, h0, u);
@@ -1038,7 +1016,7 @@ namespace h3d {
                 legTurns(side, {hips * ul, hips * ll, hips * ll * Quat::axisAngle(h0, pitch)});
             }
 
-            // a foot on a spot (the ankle, the frame above), the knee forward; flat unless pitched
+            // ankle at a point (body frame), knee forward, flat unless pitched
             void step(int side, const V3& ankle, float pitch = 0, float out = 0.15f) {
                 const int  ul  = side ? HB_R_UPPER_LEG : HB_L_UPPER_LEG;
                 const V3   t0{0, -1, 0}, h0{1, 0, 0};
@@ -1051,10 +1029,7 @@ namespace h3d {
                 legTurns(side, {t, l, Quat::axisAngle(h0, pitch)});
             }
 
-            // a leg reaching for an ankle (the frame above), bending in the plane toward `knee`; the foot turned as
-            // `foot` has it (in the frame above). Nearly straight, it straightens softly the last bit of the way (the
-            // ankle 2 mm short where a standing leg reaches furthest): as the ankle nears full reach the knee would
-            // otherwise straighten ever faster, and snap
+            // eases the target in near full reach (SOFT) so the knee doesn't snap
             void legTo(int side, const V3& ankle, const Quat& foot, const V3& knee) {
                 const int  ul  = side ? HB_R_UPPER_LEG : HB_L_UPPER_LEG;
                 const V3   t0{0, -1, 0}, h0{1, 0, 0};
@@ -1067,7 +1042,7 @@ namespace h3d {
                         to = hip + (ankle - hip) * ((soft + SOFT * full * (1.f - std::exp(-(d - soft) / (SOFT * full)))) / d);
                 }
                 const auto [u, f] = twoBone(hip, to, m_b.thigh[side], m_b.shin[side], knee);
-                // the knee's hinge: square to the plane the leg bends in (so it holds with the knee straight too)
+                // knee hinge normal to the bend plane, valid when straight
                 V3 d = ankle - hip;
                 d    = length(d) > 1e-6f ? normalize(d) : V3{0, -1, 0};
                 V3 n = knee - d * dot(knee, d);
@@ -1077,20 +1052,18 @@ namespace h3d {
                 legTurns(side, {t, l, foot});
             }
 
-            // the toes turned as `toes` has it (the frame above)
             void toes(int side, const Quat& toes) {
                 const int b = side ? HB_R_TOES : HB_L_TOES;
                 turn[b]     = toes.normalized();
                 set[b]      = true;
             }
 
-            // where the ankle is at rest
+            // rest ankle, on the ground
             V3 ankle(int side) const {
                 const int ul = side ? HB_R_UPPER_LEG : HB_L_UPPER_LEG;
                 return m_b.has[ul + 2] ? V3{m_b.at[ul + 2].x, 0, m_b.at[ul + 2].z} : V3{m_b.at[ul].x, 0, m_b.at[ul].z};
             }
 
-            // bones that aren't set turn with the one above
             void finish() {
                 for (int b = 0; b < HB_COUNT; ++b)
                     if (!set[b] && humanParent(b) >= 0)
@@ -1123,7 +1096,7 @@ namespace h3d {
                 return {normalize(mid - from), normalize(from + dir * dist - mid)};
             }
 
-            // in the chest's frame: the upper arm, and the forearm before the hand twists it
+            // chest frame; forearm before the hand's twist
             std::pair<Quat, Quat> armBones(int side, const SArm& a) const {
                 const V3   t0{side ? -1.f : 1.f, 0, 0}, h0{0, side ? 1.f : -1.f, 0};
                 const V3   u     = normalize(a.u);
@@ -1132,7 +1105,7 @@ namespace h3d {
                 return {ua, Quat::axisAngle(hinge, a.bend) * ua};
             }
 
-            // the hand turned from the forearm (straight on from it unless the arm says)
+            // relative to the forearm; straight unless `along` is set
             Quat handOf(int side, const SArm& a, const Quat& la) const {
                 if (length(a.along) <= 1e-6f)
                     return {};
@@ -1145,7 +1118,7 @@ namespace h3d {
                 return rel.normalized();
             }
 
-            // the upper arm, forearm and hand: the forearm takes half the hand's twist
+            // forearm takes half the hand's twist
             static std::array<Quat, 3> armFinish(int side, const Quat& ua, const Quat& la, const Quat& hand) {
                 const V3    t0{side ? -1.f : 1.f, 0, 0};
                 const float phi = 2.f * std::atan2(dot(V3{hand.x, hand.y, hand.z}, t0), hand.w);
@@ -1170,10 +1143,9 @@ namespace h3d {
             }
         };
 
-        // --- the built in emotes: look alikes of VRChat's (theirs aren't free to copy)
+        // --- built in emotes: look-alikes of VRChat's
 
-        // a face while the emote plays: faded in from `from` and out by `to` (seconds; to < 0 = the end, and it
-        // stays)
+        // seconds; to < 0 = held to the end
         struct SFaceKey {
             std::string_view name;
             float            weight = 1, from = 0, to = -1;
@@ -1184,17 +1156,15 @@ namespace h3d {
             float                   duration;
             bool                    loop, hold, grounded;
             std::array<int8_t, 2>   gesture; // left, right; -1 = the player's
-            std::array<SFaceKey, 2> faces;   // those without a name aren't
+            std::array<SFaceKey, 2> faces;   // unnamed = unused
             void (*pose)(CPoser&, float t);
         };
 
-        // the arm hanging at its side
         SArm restArm(int side) {
             const float sx = side ? -1.f : 1.f;
             return {normalize(V3{sx * 0.12f, -1, 0.03f}), 0.25f, 0, {}, {}};
         }
 
-        // an arm through poses, eased from one to the next
         struct SArmKey {
             float t;
             SArm  a;
@@ -1212,7 +1182,6 @@ namespace h3d {
             p.arm(side, prev->a);
         }
 
-        // the feet where they stand
         void stand(CPoser& p) {
             for (int s = 0; s < 2; ++s)
                 p.step(s, p.ankle(s));
@@ -1231,7 +1200,7 @@ namespace h3d {
         void poseClap(CPoser& p, float t) {
             stand(p);
             const float up   = ramp(t, 0, 0.35f) * (1 - ramp(t, 2.6f, 3.0f));
-            const float open = 0.5f + 0.5f * std::cos(TAU * 3 * (t - 0.35f)); // together three times a second
+            const float open = 0.5f + 0.5f * std::cos(TAU * 3 * (t - 0.35f)); // 3 claps a second
             const float half = 0.04f + 0.16f * open;
             for (int s = 0; s < 2; ++s) {
                 const float sx = s ? -1.f : 1.f;
@@ -1267,7 +1236,7 @@ namespace h3d {
             const float q    = phi * 4; // four beats
             const int   beat = std::min(3, (int)q);
             const float f    = smoothstep01(q - (float)beat);
-            // step touch: the right steps out, the left follows, the left steps back, the right follows
+            // step touch: right out, left follows, left back, right follows
             constexpr float S = 0.22f;
             float           off[2]{};
             const int       moving = beat == 0 || beat == 3 ? 1 : 0;
@@ -1277,7 +1246,7 @@ namespace h3d {
                 case 2: off[1] = -S, off[0] = -S * (1 - f); break;
                 default: off[1] = -S * (1 - f); break;
             }
-            // down on the beat, the hips over the foot that's down
+            // bob on the beat; hips between the feet
             const float bob  = 0.5f + 0.5f * std::cos(TAU * q);
             const float snap = smoothstep01(std::min(1.f, (q - (float)beat) / 0.35f)); // the arm's moves are quick
             const bool  high = beat % 2 == 0;                                      // pointing up, else down across
@@ -1286,7 +1255,7 @@ namespace h3d {
                    {(off[0] + off[1]) * 0.5f, -0.06f * bob, 0});
             for (int s = 0; s < 2; ++s)
                 p.step(s, p.ankle(s) + V3{off[s], s == moving ? 0.06f * std::sin(PI * f) : 0.f, 0});
-            // the right points up and out, then down across the body; the left hand on the hip
+            // right arm up-out, then down across; left hand on hip
             const SArm up   = p.armOf(1, {-0.55f, 0.8f, 0.25f}, {-0.5f, 0.85f, 0.2f}, {-0.5f, 0.85f, 0.2f}, {0, 0, 1});
             const SArm down = p.armOf(1, {0.1f, -0.75f, 0.6f}, {0.35f, -0.6f, 0.7f}, {0.35f, -0.6f, 0.7f}, {0, 0, 1});
             p.arm(1, high ? down : up, high ? up : down, snap);
@@ -1339,10 +1308,10 @@ namespace h3d {
             p.bend(HB_NECK, Quat::axisAngle({1, 0, 0}, 0.25f * down));
             p.bend(HB_HEAD, Quat::axisAngle({1, 0, 0}, 0.35f * down));
             p.step(0, p.ankle(0));
-            // the right foot scuffs the ground: back, forward along it, home
+            // right foot scuffs: back, forward, home
             struct SFootKey {
                 float t;
-                V3    at; // off the ankle's rest
+                V3    at; // from the rest ankle
                 float pitch;
             };
             static constexpr SFootKey KEYS[] = {{0.8f, {0, 0, 0}, 0},        {1.0f, {0, 0.06f, -0.12f}, 0.3f}, {1.3f, {0, 0.04f, 0.25f}, 0.5f},
@@ -1375,7 +1344,7 @@ namespace h3d {
             if (t < 0.15f)
                 stand(p);
             else {
-                // the knees give; on the ground, the soles on it
+                // knees give; lying down, soles on the ground
                 p.leg(0, {0, -std::cos(0.35f * sn), std::sin(0.35f * sn)}, 0.97f * sn);
                 p.leg(1, {0, -std::cos(0.15f * sn), std::sin(0.15f * sn)}, 0.5f * sn);
             }
@@ -1442,7 +1411,7 @@ namespace h3d {
             return nc;
         }
 
-        // an emote of a clip made for the avatar: the faces it names that the avatar has
+        // with the face channels the avatar has
         std::shared_ptr<SAvatarEmote> emoteOf(const SAvatarModel& md, SAnimClip anim, const std::vector<std::pair<std::string, SAnimChannel>>& faces) {
             auto e  = std::make_shared<SAvatarEmote>();
             e->name = anim.name;
@@ -1475,8 +1444,7 @@ namespace h3d {
             return out;
         }
 
-        // a clip of a model that isn't a humanoid (or onto one that isn't), by the names of the nodes: turns as they
-        // are, moves and sizes where the two are alike at rest
+        // by node name (non-humanoids): moves and scales only where rests match
         SAnimClip clipByNames(const SAnimClip& clip, const SAvatarModel& from, const SAvatarModel& to) {
             SAnimClip out;
             out.name     = clip.name;
@@ -1510,17 +1478,14 @@ namespace h3d {
             return out;
         }
 
-        // emotes from a file's clips (a VRM animation, or a glTF / VRM with clips), made for the avatar; `clip` picks
-        // one by name
+        // from a file or folder; `clip` picks one by name
         std::vector<std::shared_ptr<SAvatarEmote>> emotesFromFile(const std::string& file, const SAvatarModel& target, const std::atomic<bool>& cancel,
                                                                   std::vector<std::string>& log, std::string& error, std::string_view clip = {});
 
-        // an attack's swings, per arm, made for the avatar from a VRM animation in memory (see below)
         bool attackClips(const void* bytes, size_t size, const std::string& what, const SAvatarModel& target, const std::atomic<bool>& cancel,
                          std::array<SAvatarAttack, 2>& out, std::string& error);
 
-        // the built in attacks, punches made in Blender (tools/blend2vrma.py): as third person sees it, and as first
-        // person's eyes do
+        // built in punches (tools/blend2vrma.py)
         constexpr unsigned char ATTACK_VRMA[] = {
 #embed "../assets/attack.vrma"
         };
@@ -1528,10 +1493,9 @@ namespace h3d {
 #embed "../assets/attack-first-person.vrma"
         };
 
-        // a walk's or a run's body (see below)
         bool gaitClip(const void* bytes, size_t size, const std::string& what, const std::atomic<bool>& cancel, SGaitClip& out, std::string& error);
 
-        // the built in walk and run, made in Blender (tools/blender/h3d_walk.py, tools/blend2vrma.py)
+        // built in walk and run (tools/blender/h3d_walk.py)
         constexpr unsigned char WALK_VRMA[] = {
 #embed "../assets/walk.vrma"
         };
@@ -1548,22 +1512,22 @@ namespace h3d {
 
             gltf::SMaterials          mats;
             std::vector<int>          nodeIndex; // glTF node -> ours
-            std::vector<bool>         inScene;   // ours
+            std::vector<bool>         inScene;   // by our node
             std::vector<int>          depth;
-            std::vector<bool>         skinJoint; // ours: used by a skin
+            std::vector<bool>         skinJoint; // used by a skin
             std::vector<uint32_t>     skinBase;  // glTF skin -> first of its joints
             std::vector<M4>           restGlobal;
             std::map<std::tuple<int, int, int>, std::vector<uint32_t>> batches; // by material, part, variant map
-            int                       part = 0;                                    // of the mesh node being read
+            int                       part = 0;                                    // of the mesh being read
             bool                      vrm = false;
             size_t                    skippedDraco = 0, skippedOther = 0;
             SJson                     vrmJson;                  // the VRM extension
             int                       vrmVersion = 0;           // 0 none, 1 VRM 0.x, 2 VRM 1.0
-            std::vector<std::vector<SMorphDelta>> targets;      // per morph target of the mesh node being read
-            SJson                     settings;                 // the settings file's, {} = none
-            std::string               settingsName;             // its file name
-            bool                      emoteSource = false;      // read for its clips, to make emotes of (see emotesFromFile)
-            std::string               emotesMade;               // what emotes() made, for the log
+            std::vector<std::vector<SMorphDelta>> targets;      // current mesh's morph targets
+            SJson                     settings;                 // {} = none
+            std::string               settingsName;
+            bool                      emoteSource = false;      // read only for its clips
+            std::string               emotesMade;               // for the log
 
             void nodes() {
                 nodeIndex.assign(data->nodes_count, -1);
@@ -1592,7 +1556,7 @@ namespace h3d {
                             if (nd->has_scale)
                                 n.rest.s = {nd->scale[0], nd->scale[1], nd->scale[2]};
                         }
-                        // (a broken file's: what isn't a number would make the whole skeleton's, and the walk's, none)
+                        // a NaN would spread through the skeleton
                         auto finite = [](const V3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); };
                         if (!finite(n.rest.t) || !finite(n.rest.s) || !std::isfinite(n.rest.r.x + n.rest.r.y + n.rest.r.z + n.rest.r.w)) {
                             log.push_back(std::format("{}'s transform isn't all numbers: left at its parent's", n.name));
@@ -1613,7 +1577,7 @@ namespace h3d {
                 for (size_t i = 0; i < data->nodes_count; ++i)
                     if (!data->nodes[i].parent)
                         add(&data->nodes[i], !scene);
-                for (size_t i = 0; i < data->nodes_count; ++i) // only in a cycle
+                for (size_t i = 0; i < data->nodes_count; ++i) // left: nodes in a parent cycle
                     add(&data->nodes[i], false);
 
                 restGlobal.resize(model.nodes.size());
@@ -1677,7 +1641,7 @@ namespace h3d {
                     return;
                 }
                 const size_t n = aPos->count;
-                // (a skin with no joints: as if it had none, it would name joints past the end)
+                // a skin without joints would index out of range
                 if (!aJoints || !aWeights || aJoints->count != n || aWeights->count != n || (skin >= 0 && data->skins[skin].joints_count == 0))
                     skin = -1;
                 const int    mat       = prim.material ? (int)cgltf_material_index(data, prim.material) : mats.defaultMaterial;
@@ -1783,7 +1747,7 @@ namespace h3d {
                             if (q[k] > q[big])
                                 big = k;
                         }
-                        q[big] += 255 - total; // rounding: the weights must add up exactly
+                        q[big] += 255 - total; // sum exactly 255
                         for (int k = 0; k < 4; ++k) {
                             v.joints[k]  = (uint16_t)(skinBase[skin] + j[k]);
                             v.weights[k] = (uint8_t)std::clamp(q[k], 0, 255);
@@ -1791,7 +1755,7 @@ namespace h3d {
                     }
                     model.vertices.push_back(v);
                 }
-                // the materials it takes in material variants (KHR_materials_variants), shared by the primitives alike
+                // KHR_materials_variants map, shared when identical
                 std::vector<std::pair<int, int>> map;
                 for (size_t k = 0; k < prim.mappings_count; ++k)
                     if (prim.mappings[k].material && prim.mappings[k].variant < data->variants_count)
@@ -1842,7 +1806,7 @@ namespace h3d {
                 }
             }
 
-            // names of a mesh's morph targets: mesh.extras.targetNames, or (older UniVRM) the primitives'
+            // extras.targetNames, else the primitives' (older UniVRM)
             std::vector<std::string> targetNames(const cgltf_mesh& mesh) const {
                 std::vector<std::string> out;
                 for (size_t i = 0; i < mesh.target_names_count; ++i)
@@ -1882,8 +1846,7 @@ namespace h3d {
                 targets.clear();
             }
 
-            // the part a primitive belongs to: its mesh node's, or one of its own that its extras name ("hypr3d_part": what
-            // unity2hypr3d splits off a mesh for an MA Mesh Cutter that a toggle switches)
+            // own part from extras' "hypr3d_part" (unity2hypr3d's Mesh Cutter splits)
             int primitivePart(const cgltf_primitive& prim, int nodePart, int ni, size_t gi) {
                 SJson j;
                 if (!prim.extras.data || !CJsonReader(prim.extras.data).read(j))
@@ -1972,7 +1935,7 @@ namespace h3d {
                     if (!ext.name || !ext.data)
                         continue;
                     const std::string_view name = ext.name;
-                    // a VRM animation says which bone is which as VRM 1.0 does
+                    // VRMA names bones the VRM 1.0 way
                     const bool anim = name == "VRMC_vrm_animation";
                     if (name != "VRM" && name != "VRMC_vrm" && !anim)
                         continue;
@@ -2036,8 +1999,7 @@ namespace h3d {
                 model.humanFrom = "bone names";
             }
 
-            // the settings file's "humanoid": {"leftUpperArm": "Arm_L", "Left Thumb Proximal": "Thumb1_L", ...}, as the
-            // converter has it from the Unity avatar; over what the rig says
+            // settings "humanoid" overrides the rig
             void fromSettings() {
                 const SJson* map = settings.get("humanoid");
                 if (!map || map->type != SJson::J_OBJ)
@@ -2055,8 +2017,7 @@ namespace h3d {
                 model.humanFrom = model.humanFrom.empty() ? settingsName : model.humanFrom + ", " + settingsName;
             }
 
-            // fingers the rig doesn't say: by their names under each hand ("Index1_L", "LeftHandPinky2",
-            // "f_ring.01.L", "Bip01 L Finger21"), else by where they are
+            // unmapped fingers: by name under each hand, else by position
             void fingersFromNames() {
                 std::vector<std::vector<int>> kidsOf(model.nodes.size());
                 for (size_t i = 0; i < model.nodes.size(); ++i)
@@ -2080,7 +2041,7 @@ namespace h3d {
                         for (int c : kidsOf[i == 0 ? h : under[i - 1]])
                             under.push_back(c);
                     auto taken = [&](int n) { return std::ranges::find(human, n) != human.end() || (!model.joints.empty() && !skinJoint[n]); };
-                    // down a finger from its first bone: to the child that's the same finger, else the only child
+                    // next: the child named as this finger, else the only child
                     auto follow = [&](int n, int f, const std::function<int(int)>& which) {
                         for (int s = 0; s < 3 && n >= 0 && !taken(n); ++s) {
                             human[fingerBone(hand, f, s)] = n;
@@ -2115,8 +2076,7 @@ namespace h3d {
                     if (mapped())
                         continue;
 
-                    // by where they are: chains out of the hand; the thumb's starts nearest the wrist, then the one
-                    // furthest forward is the index (a T or A pose has the palms down)
+                    // by position: thumb nearest the wrist, then index the most forward
                     std::vector<int> chains;
                     for (int root = h, i = 0; i < 3 && root >= 0; ++i) { // through a "FingersBase" or two
                         chains.clear();
@@ -2146,7 +2106,7 @@ namespace h3d {
                 }
             }
 
-            // the fingers the rig doesn't say, then each only as far as it hangs together
+            // then cut fingers where their chain breaks
             void fingers() {
                 if (!model.joints.empty() || emoteSource)
                     fingersFromNames();
@@ -2175,7 +2135,7 @@ namespace h3d {
                               HB_R_LOWER_ARM})
                     if (h[b] < 0)
                         return;
-                // the chain has to hang together
+                // the limbs must be chains
                 for (auto [a, b] : {std::pair{HB_L_UPPER_LEG, HB_L_LOWER_LEG}, {HB_R_UPPER_LEG, HB_R_LOWER_LEG}, {HB_L_UPPER_ARM, HB_L_LOWER_ARM},
                                     {HB_R_UPPER_ARM, HB_R_LOWER_ARM}})
                     if (!isAncestor(h[a], h[b]))
@@ -2235,25 +2195,23 @@ namespace h3d {
                 if (model.humanoid)
                     pivot = restPos(h[HB_HIPS]);
                 const V3 p = turn.rotate(pivot) * s;
-                // on its lowest point, or where the settings file's "floor" says the ground is (MA's Floor Adjuster)
+                // lowest point, or settings "floor" (MA Floor Adjuster)
                 const float floor = (float)jnum(settings.get("floor"), b.min.y);
                 model.fix    = M4::trs({-p.x, -floor * s, -p.z}, turn, {s, s, s});
                 model.scale  = s;
                 model.height = height * s;
             }
 
-            // where each foot of a humanoid touches the ground at rest, from the skin that goes with the foot (a shoe,
-            // the toes): the back of its sole is the heel, the front the tips of the toes, the ball of the foot most of
-            // the way between (at the toes' bone, if it has one); a guess from the height when there's too little of it
+            // heel, ball, toe contacts from each foot's skinned mesh, else guessed
             void footShapes() {
                 const auto& h = model.human;
                 if (!model.humanoid)
                     return;
-                std::vector<int8_t> side(model.nodes.size(), -1); // the foot a node goes with
+                std::vector<int8_t> side(model.nodes.size(), -1); // -1 = none
                 for (int s = 0; s < 2; ++s)
                     if (const int f = h[s ? HB_R_FOOT : HB_L_FOOT]; f >= 0)
                         side[f] = (int8_t)s;
-                for (size_t i = 0; i < model.nodes.size(); ++i) // (parents come first)
+                for (size_t i = 0; i < model.nodes.size(); ++i) // parents come first
                     if (const int p = model.nodes[i].parent; side[i] < 0 && p >= 0)
                         side[i] = side[p];
                 std::vector<M4> skin(model.joints.size());
@@ -2261,7 +2219,7 @@ namespace h3d {
                     skin[j] = restGlobal[model.joints[j].node] * model.joints[j].inverseBind;
                 std::array<std::vector<V3>, 2> pts;
                 for (const auto& v : model.vertices) {
-                    int most = 0; // the joint it follows most
+                    int most = 0; // heaviest joint
                     for (int k = 1; k < 4; ++k)
                         if (v.weights[k] > v.weights[most])
                             most = k;
@@ -2278,7 +2236,7 @@ namespace h3d {
                     const int   foot  = h[s ? HB_R_FOOT : HB_L_FOOT] >= 0 ? h[s ? HB_R_FOOT : HB_L_FOOT] : h[s ? HB_R_LOWER_LEG : HB_L_LOWER_LEG];
                     const V3    ankle = model.fix.point(origin(restGlobal[foot]));
                     SFootShape& fs    = model.feet[s];
-                    // a foot as long as a sixth of the height, the ankle a quarter of the way from the heel
+                    // default: foot 0.15 x height, ankle 1/4 from the heel
                     const float len = 0.15f * std::max(model.height, 0.3f), up = std::max(ankle.y, 0.02f);
                     fs.heel = {0, -up, 0.25f * len};
                     fs.ball = {0, -up, -0.5f * len};
@@ -2288,7 +2246,7 @@ namespace h3d {
                     float low = 1e30f;
                     for (const V3& p : pts[s])
                         low = std::min(low, p.y);
-                    // the sole: its lowest centimetre or two, from back (+z) to front
+                    // sole: lowest 1-2 cm, back (+z) to front
                     const float band = std::max(0.015f, 0.01f * model.height);
                     float       back = -1e30f, front = 1e30f;
                     for (const V3& p : pts[s])
@@ -2303,7 +2261,7 @@ namespace h3d {
                     if (toes >= 0)
                         if (const float z = model.fix.point(origin(restGlobal[toes])).z; z < back && z > front)
                             ballZ = z;
-                    // how low the sole is at the heel and at the ball (a high heel stands on both)
+                    // sole height at heel and ball (high heels stand on both)
                     auto lowNear = [&](float z, float reach) {
                         float y = 1e30f;
                         for (const V3& p : pts[s])
@@ -2319,21 +2277,18 @@ namespace h3d {
                 }
             }
 
-            // what a humanoid's arms keep clear of (SBodyClearance), from the skin at rest that's shown: the body's, but
-            // for the arms, the head (and its hair) and what constraints turn after something else (a backpack's arm that
-            // follows the arm), up to the chest and no further out than a skirt goes (not what it carries: wings); and
-            // each arm's own round its bones
+            // SBodyClearance from the shown rest skin: torso below the chest, arm thickness
             void bodyClearance() {
                 const auto& h = model.human;
                 if (!model.humanoid || h[HB_HIPS] < 0)
                     return;
-                // per node: -1 the head's, 0 the body's, 1 + 3 * side + k an arm's (k: 0 upper arm, 1 forearm, 2 hand)
+                // -1 head, 0 body, 1 + 3 * side + k arm (upper arm, forearm, hand)
                 std::vector<int8_t> part(model.nodes.size(), 0);
                 const int           head = h[HB_NECK] >= 0 ? h[HB_NECK] : h[HB_HEAD];
                 for (const auto& nc : model.constraints)
                     if (nc.type != SNodeConstraint::ROLL && nc.node >= 0)
                         part[nc.node] = -1;
-                for (size_t i = 0; i < model.nodes.size(); ++i) { // (parents come first)
+                for (size_t i = 0; i < model.nodes.size(); ++i) { // parents come first
                     const int p = model.nodes[i].parent;
                     part[i]     = (int)i == head || part[i] < 0 ? -1 : p >= 0 ? part[p] : 0;
                     for (int s = 0; s < 2; ++s)
@@ -2346,14 +2301,13 @@ namespace h3d {
                     if (bt.part < 0 || bt.part >= (int)model.parts.size() || !model.parts[bt.part].hidden)
                         for (uint32_t k = bt.first; k < bt.first + bt.count && k < model.indices.size(); ++k)
                             shown[model.indices[k]] = 1;
-                // a part whose skin all follows one hand alone (a microphone, a sword) is held, not the hand: it doesn't
-                // count for how long and thick the hand is (an arm held out till a long one cleared a skirt would stick out)
+                // a part skinned only to a hand is a held prop (a microphone), not the hand
                 auto handOnly = [&](uint32_t v) {
                     const auto& vx = model.vertices[v];
                     for (int k = 0; k < 4; ++k)
                         if (vx.weights[k] >= 250) {
                             const int pt = part[model.joints[vx.joints[k]].node];
-                            return pt == 3 || pt == 6; // (1 + 3 * side + 2)
+                            return pt == 3 || pt == 6; // hands
                         }
                     return false;
                 };
@@ -2370,7 +2324,6 @@ namespace h3d {
                 std::vector<M4> skin(model.joints.size());
                 for (size_t j = 0; j < skin.size(); ++j)
                     skin[j] = restGlobal[model.joints[j].node] * model.joints[j].inverseBind;
-                // the arms' bones at rest, and the way the hand goes (toward its middle finger)
                 std::array<std::array<V3, 3>, 2> bone{};
                 std::array<V3, 2>                handDir{};
                 std::array<bool, 2>              arm{};
@@ -2388,7 +2341,7 @@ namespace h3d {
                         }
                     handDir[s] = normalize(handDir[s]);
                     auto finite = [](const V3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); };
-                    arm[s]      = finite(bone[s][0]) && finite(bone[s][1]) && finite(bone[s][2]) && finite(handDir[s]); // (not a broken file's)
+                    arm[s]      = finite(bone[s][0]) && finite(bone[s][1]) && finite(bone[s][2]) && finite(handDir[s]); // broken files
                 }
                 const V3 hips = model.fix.point(restPos(h[HB_HIPS]));
                 if ((!arm[0] && !arm[1]) || !std::isfinite(hips.x) || !std::isfinite(hips.y) || !std::isfinite(hips.z))
@@ -2396,10 +2349,10 @@ namespace h3d {
                 const int   chest = h[HB_CHEST] >= 0 ? h[HB_CHEST] : h[HB_SPINE];
                 const float top = chest >= 0 ? model.fix.point(restPos(chest)).y : hips.y + 0.15f * model.height, far = 0.25f * model.height;
                 std::vector<V3>       body;
-                std::array<std::vector<V3>, 6> limb; // (per arm and bone)
+                std::array<std::vector<V3>, 6> limb; // per arm and bone
                 for (size_t v = 0; v < model.vertices.size(); ++v) {
                     const auto& vx   = model.vertices[v];
-                    int         most = 0; // the joint it follows most
+                    int         most = 0; // heaviest joint
                     for (int k = 1; k < 4; ++k)
                         if (vx.weights[k] > vx.weights[most])
                             most = k;
@@ -2412,7 +2365,7 @@ namespace h3d {
                             p += skin[vx.joints[k]].point({vx.pos[0], vx.pos[1], vx.pos[2]}) * (vx.weights[k] / 255.f);
                     p = model.fix.point(p);
                     if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z))
-                        continue; // (a broken file's skin)
+                        continue; // broken file
                     if (pt == 0) {
                         if (p.y < top && std::hypot(p.x - hips.x, p.z - hips.z) < far)
                             body.push_back(p - hips);
@@ -2452,11 +2405,7 @@ namespace h3d {
                 c.measured = true;
             }
 
-            // First person, the camera in the eyes: each batch without the triangles that go with the head (it and what
-            // hangs off it: the face, hair, a hat), a copy of the rest after all the batches' own (SAvatarBatch::fpFirst;
-            // theirs drawn as before, in the same order: blended ones look the same): a triangle is the head's when a
-            // corner of it mostly is. And where the eyes are, between them: the eye bones', else a guess from the head's
-            // skin. A humanoid with a head and both arms (its hands are posed in view) only
+            // first person: batches minus the head's triangles (fpFirst), and the eyes
             void firstPerson() {
                 const auto& h = model.human;
                 if (!model.humanoid || h[HB_HEAD] < 0)
@@ -2466,9 +2415,9 @@ namespace h3d {
                         return;
                 const int            headN = h[HB_HEAD];
                 std::vector<uint8_t> headNode(model.nodes.size(), 0);
-                for (size_t i = 0; i < model.nodes.size(); ++i) // (parents come first)
+                for (size_t i = 0; i < model.nodes.size(); ++i) // parents come first
                     headNode[i] = (int)i == headN || (model.nodes[i].parent >= 0 && headNode[model.nodes[i].parent]);
-                std::vector<uint16_t> headW(model.vertices.size(), 0); // how much of it the head moves, of 255
+                std::vector<uint16_t> headW(model.vertices.size(), 0); // head's weight, of 255
                 for (size_t v = 0; v < model.vertices.size(); ++v)
                     for (int k = 0; k < 4; ++k)
                         if (const auto& vx = model.vertices[v]; vx.weights[k] && vx.joints[k] < model.joints.size() && headNode[model.joints[vx.joints[k]].node])
@@ -2479,7 +2428,7 @@ namespace h3d {
                 size_t                hidden = 0;
                 for (auto& bt : model.batches) {
                     if (bt.first + (size_t)bt.count > own || bt.count % 3)
-                        continue; // (left drawn whole)
+                        continue; // left drawn whole
                     body.clear();
                     for (uint32_t t = 0; t < bt.count; t += 3) {
                         const uint32_t* tri = model.indices.data() + bt.first + t;
@@ -2493,14 +2442,13 @@ namespace h3d {
                     model.indices.insert(model.indices.end(), body.begin(), body.end());
                 }
 
-                // the eyes: between the eye bones, where they're in the face (ahead of the head's joint, over it, under
-                // its top)
+                // eyes between the eye bones, if in the face
                 std::vector<M4> skin(model.joints.size());
                 for (size_t j = 0; j < skin.size(); ++j)
                     skin[j] = restGlobal[model.joints[j].node] * model.joints[j].inverseBind;
                 const V3 headAt = model.fix.point(restPos(headN));
                 float    top    = headAt.y;
-                std::vector<V3> face; // the head's skin near it, avatar space (not long hair)
+                std::vector<V3> face; // head skin near the joint, avatar space
                 for (size_t v = 0; v < model.vertices.size(); ++v) {
                     if (headW[v] < 200)
                         continue;
@@ -2523,8 +2471,7 @@ namespace h3d {
                     found = eyes.y > headAt.y && eyes.y < std::max(top, headAt.y + 0.05f) && eyes.z < headAt.z - 0.01f;
                 }
                 if (!found) {
-                    // about 45% of the way up from the head's joint to its top, as far ahead as the face goes there less
-                    // a little (from the bridge of the nose back to the middle of the eyes)
+                    // guess: 45% up the head, just behind the face's front
                     from        = "a guess from the head";
                     const float y = headAt.y + 0.45f * std::max(top - headAt.y, 0.05f * model.height);
                     float       front = headAt.z - 0.05f * model.height;
@@ -2574,7 +2521,7 @@ namespace h3d {
                             continue;
                         c.times.resize(keys);
                         cgltf_accessor_unpack_floats(ch.sampler->input, c.times.data(), keys);
-                        // times in order, and within a quarter of an hour (a clip is baked at 60 frames a second)
+                        // sorted, within MAX_CLIP (baked at 60 Hz)
                         if (!std::ranges::all_of(c.times, [](float t) { return t >= -MAX_CLIP && t <= MAX_CLIP; }) || !std::ranges::is_sorted(c.times) ||
                             c.times.back() - c.times.front() > MAX_CLIP)
                             continue;
@@ -2591,7 +2538,7 @@ namespace h3d {
                         for (float& t : c.times)
                             t -= t0;
                     clip.duration = std::clamp(t1 - t0, 0.f, MAX_CLIP);
-                    if (!emoteSource) // an emote goes where it goes (a jump, a fall)
+                    if (!emoteSource) // emotes keep root motion
                         rootMotion(clip);
                     model.clips.push_back(std::move(clip));
                 }
@@ -2613,10 +2560,10 @@ namespace h3d {
                     }
                 }
                 if (model.clipFor[CLIP_WALK] < 0 && model.clipFor[CLIP_RUN] < 0 && unmatched.size() == 1)
-                    model.clipFor[CLIP_WALK] = unmatched[0]; // one clip that says nothing: most likely a walk cycle
+                    model.clipFor[CLIP_WALK] = unmatched[0]; // lone unnamed clip: likely a walk
             }
 
-            // How fast a clip moves forward, and taking that out: the player moves the avatar.
+            // removes a clip's forward drift: the player moves the avatar
             void rootMotion(SAnimClip& clip) {
                 if (clip.duration <= 0.05f)
                     return;
@@ -2639,7 +2586,7 @@ namespace h3d {
                 if (dist < 0.1f)
                     return;
                 clip.naturalSpeed = dist / clip.duration;
-                const V3 back     = pg.inverse().dir(flat); // the horizontal drift, in the channel's space
+                const V3 back     = pg.inverse().dir(flat); // drift, in the channel's space
                 const V3 slope    = back / clip.duration;
                 const bool cubic  = root->interp == INTERP_CUBIC;
                 for (size_t k = 0; k < root->times.size(); ++k) {
@@ -2656,7 +2603,7 @@ namespace h3d {
 
             // --- the face
 
-            // every morph a VRM 0.x mesh or VRM 1.0 node index and target name
+            // morphs of a VRM 0.x mesh / VRM 1.0 node, by target index
             void bindMorph(SExpression& e, bool byNode, int id, int target, float weight) const {
                 for (size_t i = 0; i < model.morphs.size(); ++i) {
                     const auto& mo = model.morphs[i];
@@ -2673,7 +2620,7 @@ namespace h3d {
                 b.value[0] = x, b.value[1] = y, b.value[2] = z, b.value[3] = w;
             }
 
-            // blendShapeMaster: mesh binds weigh 0..100, material values are Unity's (colors in sRGB, V flipped)
+            // VRM 0.x: weights 0..100; Unity material values (sRGB, V flipped)
             void vrm0Expressions() {
                 const SJson* master = vrmJson.get("blendShapeMaster");
                 const auto*  groups = jarr(master ? master->get("blendShapeGroups") : nullptr);
@@ -2723,7 +2670,7 @@ namespace h3d {
                 }
             }
 
-            // expressions.preset and .custom: weights 0..1, colors linear, texture transforms in glTF's UV space
+            // VRM 1.0: weights 0..1, linear colors, glTF UVs
             void vrm1Expressions() {
                 const SJson* ex = vrmJson.get("expressions");
                 if (!ex)
@@ -2780,8 +2727,7 @@ namespace h3d {
                         read(name, j, -1);
             }
 
-            // the shape keys a preset is likely made of, by their names
-            // the name is `key` once words for parts of the face are taken off its front ("eye_smile", "lip_a")
+            // name is key after stripping face-part prefixes ("eye_smile")
             static bool bareIs(std::string_view name, std::string_view key) {
                 static constexpr std::string_view PARTS[] = {"expression", "blendshape", "eyebrows", "eyebrow", "eyeblow", "mouth", "brows", "brow", "face",
                                                              "eyes",       "lips",       "fcl",      "all",     "mth",     "brw",   "eye",   "lip",  "bs"};
@@ -2791,8 +2737,7 @@ namespace h3d {
                 return false;
             }
 
-            // the first of the preset's alternatives with any shape key of its names; then again with the parts
-            // of the face taken off the names
+            // first alternative with a matching key; pass 2 strips face-part prefixes
             bool guess(int preset, const std::vector<std::string>& names, std::vector<SExpression::SMorphBind>& out) const {
                 for (int pass = 0; pass < 2; ++pass) {
                     for (const std::string_view alt : shapeKeyGuesses()[preset]) {
@@ -2823,8 +2768,7 @@ namespace h3d {
                 return false;
             }
 
-            // "<avatar>.hypr3d.json" next to it: outfit toggles, and the faces VRChat's FX layer makes (the
-            // converter writes it for VRChat avatars)
+            // AVATAR.hypr3d.json beside the model (see the README)
             void readSettings(const std::filesystem::path& file) {
                 std::error_code ec;
                 for (const auto& p : {std::filesystem::path(file).replace_extension(".hypr3d.json"), std::filesystem::path(file.string() + ".hypr3d.json")}) {
@@ -2843,7 +2787,7 @@ namespace h3d {
                 }
             }
 
-            // what the settings file names that the model doesn't have
+            // settings names the model lacks
             std::vector<std::string> missing;
 
             void morphsOf(const SJson* shapes, const std::function<void(int, float)>& add) {
@@ -2868,13 +2812,11 @@ namespace h3d {
                     }
             }
 
-            // the settings file's expressions, and those of them that say how blinking goes
+            // settings expressions; those that set "blink"
             std::vector<int> mine;
             std::set<int>    ownBlink;
 
-            // "expressions": [{"name", "preset", "shapes": {"shape key" or "mesh node/shape key": weight 0..1},
-            // "binary", "blink"/"lookAt"/"mouth": "block", "blend" or "none"}]; for one the model has by that name,
-            // what it leaves out stays as it was
+            // settings "expressions" (README); existing ones keep what isn't given
             void settingsExpressions() {
                 const auto* list = jarr(settings.get("expressions"));
                 if (!list)
@@ -2915,7 +2857,7 @@ namespace h3d {
                 }
             }
 
-            // material variants by name (the model's KHR_materials_variants)
+            // names -> KHR_materials_variants indices
             void variantsOf(const SJson* names, std::vector<int>& out) {
                 if (const auto* list = jarr(names))
                     for (const auto& n : *list) {
@@ -2927,8 +2869,7 @@ namespace h3d {
                     }
             }
 
-            // "transforms": {"node": {"t": [x, y, z], "r": [x, y, z, w], "s": [x, y, z]}}: what of each node's own
-            // translation, rotation and scale is set
+            // "transforms": {"node": {"t", "r", "s"}}, each optional
             void posesOf(const SJson* j, std::vector<SNodePose>& out) {
                 if (!j || j->type != SJson::J_OBJ)
                     return;
@@ -2958,10 +2899,7 @@ namespace h3d {
                 }
             }
 
-            // "hidden": [parts]; "toggles": [{"name", "group" or "groups": [...], "on", "show": [parts], "hide": [parts],
-            // "shapes": {...}, "variants": [material variants], "transforms": {...}, "loop": {"seconds", "a": {"shapes",
-            // "transforms"}, "b": {...}}, "drop": [nodes]}]; "sliders": [{"name", "value", "keys": [{"at", "shapes",
-            // "show", "hide", "variants", "transforms"}]}]; "fixed": [nodes]
+            // settings "hidden", "fixed", "toggles", "sliders" (README)
             void outfit() {
                 std::vector<int> hidden;
                 partsOf(settings.get("hidden"), hidden);
@@ -3011,7 +2949,7 @@ namespace h3d {
                                 else
                                     missing.push_back(std::string(jstr(&x)));
                             }
-                        // one of a group on at first, at most
+                        // at most one per group starts on
                         if (tg.on)
                             for (const auto& o : model.toggles)
                                 if (o.on && std::ranges::any_of(o.groups, [&](const std::string& g) { return std::ranges::find(tg.groups, g) != tg.groups.end(); }))
@@ -3024,7 +2962,7 @@ namespace h3d {
                         sl.name = jstr(s.get("name"));
                         if (sl.name.empty() || model.findSlider(sl.name) >= 0)
                             continue;
-                        // "axes": 2: a 2D one, its "value" and keys' "at" [x, y], its keys a "grid" of n x n
+                        // "axes": 2: [x, y] values, an n x n "grid" of keys
                         const bool two = jnum(s.get("axes"), 1) == 2;
                         auto       xy  = [&](const SJson* j, float& x, float& y) {
                             const auto* a = jarr(j);
@@ -3082,7 +3020,7 @@ namespace h3d {
                             model.expressions[P[p]].preset = -1;
                         P[p] = i;
                     }
-                // custom ones by a preset's name ("Surprised": VRM 0.x has no such preset)
+                // custom ones named as a preset ("Surprised": not a VRM 0.x preset)
                 for (int i = 0; i < (int)defined; ++i) {
                     auto& e = model.expressions[i];
                     if (e.preset >= 0)
@@ -3093,7 +3031,7 @@ namespace h3d {
                     }
                 }
 
-                // the rest from the shape keys' names (VRChat, VRoid, MMD, ARKit), empty ones too
+                // missing or empty presets from shape key names
                 std::vector<std::string> names;
                 for (const auto& mo : model.morphs)
                     names.push_back(normName(mo.name));
@@ -3114,8 +3052,7 @@ namespace h3d {
                     }
                     model.expressions[P[p]].morphs = std::move(binds);
                 }
-                // VRM 1.0 says what an expression blocks, and so can the settings file; for the others: no
-                // blinking through a smile
+                // unless VRM 1.0 or the settings file set it, emotions blend out blinking
                 for (int p : {EX_HAPPY, EX_ANGRY, EX_SAD, EX_RELAXED, EX_SURPRISED})
                     if (const int e = P[p]; e >= 0 && !ownBlink.contains(e) && (e >= (int)fromVRM || vrmVersion != 2))
                         model.expressions[e].overrideBlink = OVERRIDE_BLEND;
@@ -3139,9 +3076,7 @@ namespace h3d {
                     model.expressions[it->second].morphs.push_back({(int)i, 1.f});
                 }
 
-                // the consonants lip sync shows (VRChat's visemes PP, FF, SS and CH): the settings file's "visemes"
-                // ({"pp": {"shape key": weight, ...}, ...}, as the converter writes a VRChat avatar's), else shape keys by
-                // VRChat's names ("vrc.v_pp"), which are expressions of their own by now
+                // consonants (PP, FF, SS, CH): settings "visemes", else "vrc.v_pp"-style shape keys
                 static constexpr std::string_view CONSONANT[VISEME_COUNT - VOWEL_COUNT] = {"pp", "ff", "ss", "ch"};
                 const SJson*                      vis = settings.get("visemes");
                 for (int k = 0; k < VISEME_COUNT - VOWEL_COUNT; ++k) {
@@ -3171,7 +3106,7 @@ namespace h3d {
 
                 lookAt();
 
-                // the face each hand gesture makes, like most VRChat avatars have it
+                // gesture faces, as on most VRChat avatars
                 for (int hand = 0; hand < 2; ++hand) {
                     auto&     g    = model.gestureFace[hand];
                     const int wink = P[hand == 0 ? EX_BLINK_L : EX_BLINK_R];
@@ -3183,9 +3118,7 @@ namespace h3d {
                     g[GESTURE_GUN]       = wink >= 0 ? wink : P[EX_HAPPY];
                     g[GESTURE_THUMBS_UP] = P[EX_HAPPY];
                 }
-                // or as the settings file says: "gestures": {"left"/"right"/"both": {"fist": "expression" or "none"},
-                // "combos": {"fist+open": "expression" or "none"}: the face while the left hand makes one sign and the
-                // right the other}
+                // or settings "gestures" (README)
                 if (const SJson* gs = settings.get("gestures"); gs && gs->type == SJson::J_OBJ)
                     if (const SJson* combos = gs->get("combos"); combos && combos->type == SJson::J_OBJ)
                         for (const auto& [pair, face] : combos->obj) {
@@ -3224,7 +3157,6 @@ namespace h3d {
                     if (const int e = model.preset[p]; e >= 0 && (!model.expressions[e].morphs.empty() || !model.expressions[e].materials.empty()))
                         looks = true;
                 if (vrmVersion) {
-                    // VRM 0.x: firstPerson.lookAtHorizontalInner {xRange, yRange}...; VRM 1.0: lookAt.rangeMapHorizontalInner {inputMaxValue, outputScale}...
                     static constexpr std::string_view ROWS0[] = {"lookAtHorizontalInner", "lookAtHorizontalOuter", "lookAtVerticalDown", "lookAtVerticalUp"};
                     static constexpr std::string_view ROWS1[] = {"rangeMapHorizontalInner", "rangeMapHorizontalOuter", "rangeMapVerticalDown", "rangeMapVerticalUp"};
                     const bool   v1   = vrmVersion == 2;
@@ -3252,7 +3184,7 @@ namespace h3d {
 
             // --- springs
 
-            // a glTF node index from the JSON, as ours; -1 = none
+            // JSON glTF node index -> ours, -1 = none
             int gltfNode(const SJson* j) const {
                 if (!j || j->type != SJson::J_NUM || !(j->num >= 0 && j->num < (double)data->nodes_count))
                     return -1;
@@ -3279,7 +3211,7 @@ namespace h3d {
                 return restGlobal[node].inverse().point(p);
             }
 
-            // a bone as the settings file names it
+            // exact, then loose name; -1 = none
             int nodeNamed(std::string_view name) const {
                 for (int loose = 0; loose < 2 && !name.empty(); ++loose) {
                     const std::string want = loose ? normName(name) : lower(std::string(name));
@@ -3292,24 +3224,24 @@ namespace h3d {
 
             std::vector<std::vector<int>> kids;    // per node
             std::vector<bool>             claimed; // moved by a spring
-            std::vector<bool>             human;   // a humanoid bone, or has one under it: never swings
+            std::vector<bool>             human;   // humanoid bone or above one: never swings
 
             int addCollider(int node, const V3& offset, const V3& tail, float meters, eColliderKind kind = COLLIDER_OUTSIDE) {
                 model.springColliders.push_back({node, offset, tail, std::max(meters, 0.f), kind});
                 return (int)model.springColliders.size() - 1;
             }
 
-            // (j's limitFrame is the limit's own turn, from a frame whose y is along the bone)
+            // j.limitFrame: relative to a frame with y along the bone
             void addJoint(int node, int spring, SSpringJoint j, const V3& tail, float meters) {
                 if (length(tail) * metersAt(node) < 1e-4f)
-                    return; // no length to point with: it stays as the animation has it
+                    return; // zero length: left to the animation
                 j.node   = node;
                 j.spring = spring;
                 j.tail   = tail;
                 j.length = length(tail) * metersAt(node);
                 j.radius = std::max(meters, 0.f);
                 if (j.limit != LIMIT_NONE) {
-                    // the shortest turn from y to the bone; straight down, half a turn round x
+                    // shortest turn from y to the bone; opposite: half a turn round x
                     const V3 d   = normalize(tail);
                     const Quat y = 1.f + d.y < 1e-6f ? Quat{1, 0, 0, 0} : Quat{d.z, 0, -d.x, 1.f + d.y}.normalized();
                     j.limitFrame = (y * j.limitFrame).normalized();
@@ -3318,9 +3250,7 @@ namespace h3d {
                 claimed[node] = true;
             }
 
-            // VRMC_springBone_limit's limit: {"cone": {"angle", "rotation": [x, y, z, w]}}, {"hinge": {"angle", "rotation"}}
-            // or {"spherical": {"pitch", "yaw", "rotation"}}, radians; the rotation turns it from a frame whose y is along
-            // the bone. VRChat's PhysBones' Angle, Hinge and Polar limits come as these
+            // VRMC_springBone_limit's cone, hinge or spherical limit, radians
             void readLimit(const SJson* limit, SSpringJoint& p) {
                 const SJson* s = nullptr;
                 auto         angle = [&](const char* k, float most) {
@@ -3346,9 +3276,7 @@ namespace h3d {
                 }
             }
 
-            // a bone and all under it swing, as VRM 0.x's bone groups have it: each toward its first child, the
-            // last ones toward a made-up end `leaf` model units on (0: as long as the bone before). `byDepth`: each bone's
-            // radius in model units by how far down from the root it is instead (the last for the rest)
+            // root and all under it swing (VRM 0.x bone groups); `leaf`: leaf tail length (0: the bone before's)
             void addTree(int root, int spring, const SSpringJoint& params, float radius, const std::set<int>& ignore, float leaf, bool skinOnly,
                          const std::vector<float>& byDepth = {}) {
                 auto skip = [&](int n) { return claimed[n] || human[n] || ignore.contains(n) || (skinOnly && !skinJoint[n]); };
@@ -3374,9 +3302,7 @@ namespace h3d {
                 }
             }
 
-            // VRM 0.x: secondaryAnimation {boneGroups: [{comment, stiffiness, gravityPower, gravityDir {x, y, z}, dragForce,
-            // center, hitRadius, bones: [roots], colliderGroups: [i]}], colliderGroups: [{node, colliders: [{offset, radius}]}]},
-            // in Unity's axes: z the other way
+            // VRM 0.x secondaryAnimation, in Unity's axes (z flipped)
             void vrm0Springs() {
                 const SJson*                  sa = vrmJson.get("secondaryAnimation");
                 std::vector<std::vector<int>> groups;
@@ -3421,11 +3347,7 @@ namespace h3d {
                 model.springsFrom = "VRM";
             }
 
-            // VRMC_springBone (VRM 1.0): colliders [{node, shape: {sphere: {offset, radius}} or {capsule: {offset, radius,
-            // tail}}}], colliderGroups [{colliders: [i]}], springs [{name, joints: [{node, stiffness, gravityPower, gravityDir,
-            // dragForce, hitRadius}], colliderGroups: [i], center}]: each joint points at the next, the last is only its end.
-            // A collider's VRMC_springBone_extended_collider says what it is instead: {shape: {sphere or capsule: {...,
-            // inside}, plane: {offset, normal}}}
+            // VRMC_springBone, with VRMC_springBone_extended_collider shapes
             void vrm1Springs() {
                 const cgltf_extension* ext = nullptr;
                 for (size_t i = 0; i < data->data_extensions_count && !ext; ++i)
@@ -3500,7 +3422,7 @@ namespace h3d {
                 model.springsFrom = "VRM 1.0";
             }
 
-            // colliders on the humanoid's body, for springs that don't come with any
+            // body colliders for springs without their own
             enum eBody : uint8_t {
                 BODY_HEAD  = 1,
                 BODY_CHEST = 2,
@@ -3522,12 +3444,10 @@ namespace h3d {
                         if (const int n = h[bone]; n >= 0)
                             bodyParts[part].push_back(addCollider(n, inNode(n, restPos(n) + off * u), inNode(n, restPos(n) + off * u), r * m));
                     };
-                    // across the body
                     auto across = [&](int part, int bone, const V3& off, float half, float r) {
                         if (const int n = h[bone]; n >= 0)
                             bodyParts[part].push_back(addCollider(n, inNode(n, restPos(n) + (off - RT * half) * u), inNode(n, restPos(n) + (off + RT * half) * u), r * m));
                     };
-                    // along a limb
                     auto limb = [&](int part, int bone, int to, float r) {
                         if (const int n = h[bone], e = h[to]; n >= 0 && e >= 0)
                             bodyParts[part].push_back(addCollider(n, V3{}, inNode(n, restPos(e)), r * m));
@@ -3554,16 +3474,7 @@ namespace h3d {
                 return out;
             }
 
-            // the settings file's, over the model's own:
-            // "colliders": [{"name", "node", "offset": [x, y, z], "tail": [x, y, z] (a capsule), "radius", "inside": true (it keeps the
-            // bones in)}, or a plane {"name", "node", "offset", "normal": [x, y, z]} (they keep to where it points), or a disc
-            // {"name", "node", "offset", "disc": {"normal": [x, y, z], "radius"}, "radius"} (flat and round round offset, its
-            // radius out to its edge, the collider's own radius round that)], in the node's units;
-            // "springs": [{"name", "bones": [roots], "ignore": [bones], "stiffness", "drag", "gravity", "gravityDir": [x, y, z],
-            // "radius" (or [one for each bone down from a root, the last for the rest]), "center": bone, "immobile", "colliders":
-            // [names; "body" for the ones made for the body], "limit": a VRMC_springBone_limit limit (see readLimit) for each
-            // bone}]: each root and all under it swing, as VRM 0.x has it. A spring that doesn't name colliders keeps out of
-            // all of the file's, or the body's.
+            // settings "colliders" and "springs" (README); springs naming none use the file's, else the body's
             void settingsSprings(const std::vector<SJson>& list) {
                 std::map<std::string, std::vector<int>> named;
                 std::vector<int>                        all;
@@ -3579,7 +3490,7 @@ namespace h3d {
                         const SJson* disc   = c.get("disc");
                         int          k      = -1;
                         if (disc && disc->type == SJson::J_OBJ) {
-                            // (an older hypr3d, that has no discs, keeps the bones out of a sphere that big round its middle)
+                            // older hypr3d reads a disc as a sphere of "radius"
                             k = addCollider(node, o, o + normalize(jvec(disc->get("normal"), {0, 1, 0})), (float)jnum(c.get("radius"), 0.05) * metersAt(node), COLLIDER_DISC);
                             model.springColliders[k].disc = std::max((float)jnum(disc->get("radius"), 0), 0.f) * metersAt(node);
                         } else
@@ -3623,7 +3534,7 @@ namespace h3d {
                     p.scale      = model.scale;
                     readLimit(s.get("limit"), p);
                     const float        radius = (float)jnum(s.get("radius"), 0.02);
-                    std::vector<float> radii; // (a radius for each bone down from a root: a PhysBone's radius curve)
+                    std::vector<float> radii; // PhysBone radius curve, per depth
                     if (const auto* rs = jarr(s.get("radius")))
                         for (const auto& r : *rs)
                             radii.push_back(std::max((float)jnum(&r, 0.02), 0.f));
@@ -3639,16 +3550,16 @@ namespace h3d {
                 }
             }
 
-            // none given: hair, skirts, tails and the like, by their bones' names
+            // no springs given: hair, skirts, tails... by bone name
             void heuristicSprings() {
                 struct SKind {
                     const char*                   name;
-                    std::vector<std::string_view> words; // what a word of the bone's name starts with, or (not ASCII) what it has in it
+                    std::vector<std::string_view> words; // word prefixes; non-ASCII: substrings
                     float                         stiffness, drag, gravity, radius; // for a 1.6 m avatar
                     int                           body;
                 };
                 static const SKind KINDS[] = {
-                    // long chains bend at every bone: gravity keeps a long ponytail from streaming out level at a run
+                    // gravity keeps a ponytail from streaming out level at a run
                     {"hair", {"hair", "bang", "ponytail", "twintail", "kami", "髪"}, 2.f, 0.5f, 0.1f, 0.02f, BODY_HEAD | BODY_CHEST},
                     {"skirt", {"skirt", "スカート"}, 1.2f, 0.6f, 0.05f, 0.03f, BODY_HIPS | BODY_LEGS},
                     {"cape", {"cape", "cloak", "mantle", "マント"}, 1.f, 0.5f, 0.1f, 0.03f, BODY_CHEST | BODY_HIPS | BODY_LEGS},
@@ -3674,8 +3585,7 @@ namespace h3d {
                 const float ref = model.height / 1.6f;
                 std::array<int, std::size(KINDS)> spring;
                 spring.fill(-1);
-                // bones nothing's weighted to (a group's root) stay put, as do those that branch into several chains:
-                // the chains under them swing
+                // unweighted roots and branching bones stay; the chains under them swing
                 std::function<void(int, int)> chain = [&](int n, int k) {
                     const size_t chains = std::ranges::count_if(kids[n], [&](int c) { return skinJoint[c] && !human[c]; });
                     if (skinJoint[n] && weighted[n] && chains <= 1) {
@@ -3711,9 +3621,7 @@ namespace h3d {
                 model.springsFrom = "bone names";
             }
 
-            // how little the avatar moving through the world swings springs with no center: the settings file's "immobile".
-            // VRM's springs were made for sitting in front of a camera; at a run (4.5 m/s) with all the air still, long
-            // hair streams out level behind
+            // settings "immobile": how little world motion swings centerless springs
             float immobile() const {
                 return std::clamp((float)jnum(settings.get("immobile"), 0.9), 0.f, 1.f);
             }
@@ -3751,7 +3659,7 @@ namespace h3d {
                 if (!jarr(settings.get("springs")))
                     for (auto& s : model.springs)
                         s.immobile = immobile();
-                // the springs that got no bones go
+                // drop springs without joints
                 std::vector<int> remap(model.springs.size(), -1);
                 for (const auto& j : model.springJoints)
                     remap[j.spring] = 0;
@@ -3767,9 +3675,7 @@ namespace h3d {
                 model.springs = std::move(kept);
                 for (auto& j : model.springJoints)
                     j.spring = remap[j.spring];
-                // a bone with a limit leaves out the body's colliders its tail starts inside of (deeper than START_IN): its
-                // limit keeps it out of the body, as a PhysBone's does, and the body made up here isn't the avatar's where it
-                // is (a necktie on a chest: pushed off it, it stood out, and swung round through it)
+                // limited bones skip body colliders their tail starts in: the limit keeps them out
                 constexpr float START_IN = 0.005f;
                 for (auto& j : model.springJoints) {
                     if (j.limit == LIMIT_NONE)
@@ -3786,7 +3692,7 @@ namespace h3d {
                             j.startsIn |= c.body;
                     }
                 }
-                // what each spring hangs from: its first root's parent, unless a spring moves that
+                // carrier: a root's parent, unless a spring moves it or its ancestors
                 std::vector<int> jointOf(model.nodes.size(), -1);
                 for (const auto& j : model.springJoints)
                     jointOf[j.node] = j.spring;
@@ -3809,7 +3715,7 @@ namespace h3d {
                 std::ranges::stable_sort(model.springJoints, {}, &SSpringJoint::node);
             }
 
-            // VRMC_node_constraint on the nodes, in an order where what a constraint looks at is done before it
+            // VRMC_node_constraint, each ordered after those it depends on
             void constraints() {
                 std::vector<SNodeConstraint> found;
                 std::vector<int>             of(model.nodes.size(), -1); // node -> its constraint
@@ -3851,7 +3757,7 @@ namespace h3d {
                         found.push_back(k);
                     }
                 }
-                // what a constraint reads: its source and what that hangs off, and what its node hangs off
+                // depends on its source and on the source's and node's ancestors
                 std::vector<uint8_t>     state(found.size(), 0); // 1 being ordered, 2 done
                 size_t                   loops = 0;
                 std::function<bool(int)> visit = [&](int c) {
@@ -3889,10 +3795,7 @@ namespace h3d {
                 return e;
             }
 
-            // the built in ones (humanoids), the model's clips that aren't for walking about, the settings file's
-            // ("emotes": [{"name", "file", "clip", "loop", "hold", "grounded", "speed", "sound"}]: a file by where the settings
-            // file is, else a clip of the model's; "sound" an Ogg Vorbis file it plays, by where the settings file is too)
-            // and the request's files; a later one of a name replaces an earlier one
+            // built in, own non-locomotion clips, settings "emotes", the request's; later names win
             void emotes() {
                 std::vector<std::shared_ptr<SAvatarEmote>> all;
                 std::vector<std::string>                   own, files;
@@ -3980,9 +3883,7 @@ namespace h3d {
                 emotesMade = join(said, "; ");
             }
 
-            // the attacks (a humanoid's): the request's, else the settings file's "attack" ("FILE", or {"file": FILE,
-            // "firstPerson": FILE}: VRM animations of the right arm's punch, by where the settings file is; first person's
-            // the built in one unless it says), else the built in ones; made for this avatar
+            // request's attack, else settings "attack", else built in
             void attacks() {
                 if (!model.humanoid)
                     return;
@@ -4018,9 +3919,7 @@ namespace h3d {
                 model.attacksFrom       = third == fp ? third : std::format("{}, first person {}", third, fp);
             }
 
-            // the walk and the run (a humanoid's that walks procedurally: how its body goes over the steps): the settings
-            // file's "walk" ({"walk": FILE, "run": FILE}: VRM animations of one stride, by where the settings file is; the
-            // built in one for what it leaves out; "none": the walking's own body), else the built in ones
+            // settings "walk", else the built in walk and run
             void gaitClips() {
                 if (!model.humanoid)
                     return;
@@ -4061,8 +3960,7 @@ namespace h3d {
                 model.gaitFrom = said[0] == said[1] ? said[0] : std::format("walk {}, run {}", said[0], said[1]);
             }
 
-            // "hands": {"file": a VRM animation, "left"/"right": {"fist": time, ...}}: a gesture's finger pose, the animation's
-            // at that time (unity2hypr3d writes the Gesture layer's hand poses so)
+            // settings "hands": gesture finger poses from a VRMA
             void hands() {
                 const SJson* h = settings.get("hands");
                 if (!h || h->type != SJson::J_OBJ || !model.humanoid)
@@ -4158,7 +4056,7 @@ namespace h3d {
 
             SAvatarModel             src;
             const SAvatarRequest     req{abs.string()};
-            std::vector<std::string> quiet; // what it says of the model it's read as
+            std::vector<std::string> quiet; // discarded
             SBuild                   sb{req, cancel, guard.get(), src, quiet};
             sb.emoteSource = true;
             sb.nodes();
@@ -4171,7 +4069,7 @@ namespace h3d {
             }
             src.forward = facingOf(src, sb.restGlobal);
 
-            // a VRM animation's faces: nodes the expressions ride on, their x the weight
+            // VRMA expressions: nodes whose translation x is the weight
             std::vector<std::pair<int, std::string>> faceNodes;
             if (const SJson* ex = sb.vrmJson.get("expressions"))
                 for (const char* kind : {"preset", "custom"})
@@ -4180,7 +4078,7 @@ namespace h3d {
                             if (const double n = jnum(v.get("node"), -1); n >= 0 && n < (double)sb.nodeIndex.size() && sb.nodeIndex[(size_t)n] >= 0)
                                 faceNodes.push_back({sb.nodeIndex[(size_t)n], name});
 
-            // and where its eyes look
+            // lookAt node
             int eyeNode = -1;
             if (const SJson* la = sb.vrmJson.get("lookAt"))
                 if (const double n = jnum(la->get("node"), -1); n >= 0 && n < (double)sb.nodeIndex.size())
@@ -4234,11 +4132,9 @@ namespace h3d {
             return out;
         }
 
-        // --- attacks: a punch made for any humanoid (the right arm's), made for the avatar, and its mirror image for the
-        // left arm
+        // --- attacks: a right-arm punch, mirrored for the left
 
-        // what of the body an attack has: the trunk (turned on as it turns it from rest) and the arms (as it has them);
-        // per node (CAvatarAnimator::m_attackPart)
+        // per node (CAvatarAnimator::m_attackPart): trunk turns added on, arms as animated
         enum eAttackPart : uint8_t {
             ATTACK_NONE,
             ATTACK_TRUNK,
@@ -4251,7 +4147,6 @@ namespace h3d {
             return b >= HB_L_SHOULDER && b <= HB_R_HAND;
         }
 
-        // the other side's bone
         constexpr int mirrorBone(int b) {
             if (b >= HB_FINGERS)
                 return b < HB_FINGERS + FINGER_COUNT * 3 ? b + FINGER_COUNT * 3 : b - FINGER_COUNT * 3;
@@ -4272,8 +4167,7 @@ namespace h3d {
             }
         }
 
-        // a clip's mirror image: what one side's bones do, the other's, turned the other way round across the middle (the
-        // frame's +X is the left)
+        // mirror across the body's middle (+X is left)
         SNormClip mirrored(const SNormClip& nc) {
             SNormClip m = nc;
             for (int b = 0; b < HB_COUNT; ++b)
@@ -4288,9 +4182,7 @@ namespace h3d {
             return m;
         }
 
-        // an attack's swings, per arm, made for the avatar from a VRM animation of a humanoid (a GLB in memory: its first
-        // clip, the right arm's punch) of the trunk and arms: when the fists are up, it strikes, the other's may start and
-        // it lets go, from its markers (the animation's extras: {"markers": {"ready": seconds, "hit", "next", "out"}})
+        // swings from an in-memory VRMA right-arm punch, timed by its extras' "markers"
         bool attackClips(const void* bytes, size_t size, const std::string& what, const SAvatarModel& target, const std::atomic<bool>& cancel,
                          std::array<SAvatarAttack, 2>& out, std::string& error) {
             auto guard = gltf::openMemory(bytes, size, what, error);
@@ -4330,8 +4222,7 @@ namespace h3d {
             out[0].anim      = retarget(mirrored(nc), rig);
             out[1].anim.name = c.name;
             out[0].anim.name = c.name + " (mirrored)";
-            // (where its wrists are from its eyes, in arm lengths, the way it faces: at its times, as it was made; the eyes'
-            // middle, else a guess over the head's joint; the mirror image for the left arm's)
+            // wrists from the eyes per clip time (arm lengths, body frame); mirrored for the left
             const auto& sh = src.human;
             if (sh[HB_HEAD] >= 0 && sh[HB_L_UPPER_ARM] >= 0 && sh[HB_L_LOWER_ARM] >= 0 && sh[HB_L_HAND] >= 0 && sh[HB_R_UPPER_ARM] >= 0 &&
                 sh[HB_R_LOWER_ARM] >= 0 && sh[HB_R_HAND] >= 0) {
@@ -4360,7 +4251,7 @@ namespace h3d {
                     out[0].reach.push_back({V3{-at[1].x, at[1].y, at[1].z}, V3{-at[0].x, at[0].y, at[0].z}});
                 }
             }
-            // (the markers, by the clip's name: an animation with no channels isn't a clip)
+            // markers by clip name
             const float dur = c.duration;
             SJson       marks;
             for (size_t i = 0; i < guard->animations_count; ++i)
@@ -4380,9 +4271,7 @@ namespace h3d {
             return true;
         }
 
-        // A walk's or a run's body from a VRM animation of a humanoid (a GLB in memory: its first clip, one stride, the left
-        // heel landing at its start and its end): in the frame above at GAIT_STEPS even steps of the stride, and the
-        // means (the turns' sign-aligned sum, normalized: their spread is small)
+        // one stride from an in-memory VRMA at GAIT_STEPS steps, with mean turns
         constexpr int GAIT_STEPS = 64;
         bool gaitClip(const void* bytes, size_t size, const std::string& what, const std::atomic<bool>& cancel, SGaitClip& out, std::string& error) {
             auto guard = gltf::openMemory(bytes, size, what, error);
@@ -4436,7 +4325,7 @@ namespace h3d {
             return true;
         }
 
-        // a gait clip at a part of its stride (0..1): every bone's turn, and the hips' move
+        // at stride phase 0..1
         void sampleGait(const SGaitClip& c, float phase, std::array<Quat, HB_COUNT>& turn, V3& move) {
             const float  x = (phase - std::floor(phase)) * (float)c.turn.size();
             const size_t i = std::min((size_t)x, c.turn.size() - 1), j = (i + 1) % c.turn.size();
@@ -4477,10 +4366,10 @@ namespace h3d {
         b.nodes();
         b.skins();
         b.readSettings(abs);
-        b.humanoid(); // before the materials: tells whether it's a VRM
+        b.humanoid(); // before materials: detects VRM
         if (b.vrm)
             for (auto& m : b.mats.materials)
-                m.unlit = false; // MToon's fallback is unlit, but lit fits the world better
+                m.unlit = false; // MToon falls back to unlit; lit fits better
         model->images    = std::move(b.mats.images);
         model->materials = b.mats.materials;
         b.meshes();
@@ -4502,7 +4391,7 @@ namespace h3d {
         b.outfit();
         b.springs();
         b.constraints();
-        b.bodyClearance(); // (after the outfit and the constraints: what starts hidden, or follows an arm, doesn't count)
+        b.bodyClearance(); // after outfit() and constraints()
         b.firstPerson();
         b.emotes();
         b.attacks();
@@ -4565,7 +4454,7 @@ namespace h3d {
                                       f[0].measured && f[1].measured ? "" : f[0].measured || f[1].measured ? " (one guessed)" : " (guessed)", -f[0].heel.y * 100,
                                       -f[1].heel.y * 100, (f[0].heel.z + f[1].heel.z) * 50, -(f[0].ball.z + f[1].ball.z) * 50));
             if (const auto& c = model->clearance; c.measured) {
-                // (how far out the body goes, at its widest down to the thighs: a skirt's hem, else the hips)
+                // widest body radius down to the thighs (skirt hem, else hips)
                 float widest = 0, at = 0;
                 for (int i = 0; i < c.rows && c.y0 + c.dy * i < 0; ++i) {
                     if (c.y0 + c.dy * i < -0.2f * model->height)
@@ -4604,7 +4493,7 @@ namespace h3d {
             if (!error.empty())
                 errors.push_back(std::move(error));
         }
-        // some did: what didn't is only said
+        // partial success: failures only logged
         if (res.emotes.empty())
             res.error = errors.empty() ? std::format("{}: no emotes in it", req.path) : SBuild::join(errors, "; ");
         else
@@ -4675,8 +4564,7 @@ namespace h3d {
         return -1;
     }
 
-    // by its own name or a parent node's: "Jacket" is every mesh under the jacket's node too, as a GameObject
-    // turned off in Unity hides its children
+    // own or an ancestor's name: "Jacket" is every mesh under it
     std::vector<int> SAvatarModel::findParts(std::string_view name) const {
         std::vector<int> out;
         for (int loose = 0; loose < 2 && out.empty() && !name.empty(); ++loose) {
@@ -4693,7 +4581,7 @@ namespace h3d {
         return out;
     }
 
-    // "name" on any mesh, or "mesh node/name" (when no shape key is called that)
+    // "name" on any mesh, or "mesh node/name" if no shape key is called that
     std::vector<int> SAvatarModel::findMorphs(std::string_view name) const {
         std::vector<int> out;
         auto             find = [&](std::string_view key, const std::vector<int>* in) {
@@ -4713,16 +4601,7 @@ namespace h3d {
         return out;
     }
 
-    // --- walking
-    //
-    // A humanoid without clips of its own walks procedurally. Each foot is planted where it lands and stays there, in
-    // the world, till it lifts; the body is carried over the feet. How long a stride is and how often it comes follow
-    // the speed and the legs' length as they do in people (dynamic similarity: stride = 2.5 legs x Froude^0.3, after
-    // Alexander 1976), and so does how long each foot is down (the duty factor: about 60% walking, 30-40% running).
-    // Between steps it goes as gait studies measure it: the foot lands on its heel and pushes off over its ball, the
-    // pelvis rises over the standing leg walking (and sinks onto it running), sways over it, drops on the other side
-    // and turns with the stride, the trunk turns against the pelvis and the arms swing against the legs, the head
-    // stays level. Standing, it steps when the body moves off its feet or turns away from them
+    // --- walking: procedural for humanoids without clips (dynamic similarity, Alexander 1976)
 
     namespace {
         constexpr float GRAVITY = 9.81f;
@@ -4738,23 +4617,22 @@ namespace h3d {
             return x - std::floor(x);
         }
 
-        // a difference of phases (of a cycle) the short way round, -0.5..0.5
+        // -0.5..0.5, the short way round
         float phaseDiff(float d) {
             return d - std::round(d);
         }
 
-        // toward `to`, at most `step`
         float approach(float from, float to, float step) {
             return from < to ? std::min(from + step, to) : std::max(from - step, to);
         }
 
-        // 0 to 1 with no speed or acceleration at either end: how a reach, or a foot through the air, goes
+        // minimum-jerk ease 0..1
         float minJerk(float s) {
             s = std::clamp(s, 0.f, 1.f);
             return s * s * s * (10.f + s * (-15.f + 6.f * s));
         }
 
-        // a curve through keys (t rising from 0 to 1), smoothly between them (Catmull-Rom), level at the ends
+        // Catmull-Rom through keys (t 0..1), flat ends
         struct SCurveKey {
             float t, v;
         };
@@ -4772,112 +4650,70 @@ namespace h3d {
             return (2 * u3 - 3 * u2 + 1) * k[i].v + (u3 - 2 * u2 + u) * slope(i) * dt + (-2 * u3 + 3 * u2) * k[i + 1].v + (u3 - u2) * slope(i + 1) * dt;
         }
 
-        // The foot's pitch (radians, toes down > 0) through its time on the ground, from landing to lifting: on the heel,
-        // toes up; flat; the heel rising as it pushes off over its ball. Walking lands further back on the heel and rolls
-        // longer; running lands flatter and pushes off harder
+        // radians, toes down > 0: heel strike, flat, heel rise
         constexpr SCurveKey WALK_STANCE_PITCH[] = {{0, -0.26f}, {0.12f, -0.03f}, {0.2f, 0}, {0.5f, 0}, {0.75f, 0.24f}, {1, 0.9f}};
         constexpr SCurveKey RUN_STANCE_PITCH[]  = {{0, -0.13f}, {0.1f, 0}, {0.4f, 0}, {0.7f, 0.32f}, {1, 0.95f}};
-        // and through the air: toes down as it lifts, turned up to clear the ground, the heel first to land
+        // toes down at lift-off, up to clear the ground, heel first
         constexpr SCurveKey WALK_SWING_PITCH[] = {{0, 0.9f}, {0.2f, 0.4f}, {0.42f, 0.03f}, {0.62f, -0.1f}, {0.85f, -0.16f}, {1, -0.26f}};
         constexpr SCurveKey RUN_SWING_PITCH[]  = {{0, 0.95f}, {0.25f, 0.75f}, {0.5f, 0.38f}, {0.75f, 0.02f}, {0.9f, -0.08f}, {1, -0.13f}};
-        // how high the foot goes through the air (legs): walking, up at once as the knee bends and then low over the
-        // ground; running, the heel kicked up behind
+        // leg lengths
         constexpr SCurveKey WALK_LIFT[]  = {{0, 0}, {0.15f, 0.07f}, {0.3f, 0.065f}, {0.5f, 0.035f}, {0.75f, 0.025f}, {0.9f, 0.015f}, {1, 0}};
         constexpr SCurveKey RUN_LIFT[]   = {{0, 0}, {0.2f, 0.2f}, {0.38f, 0.27f}, {0.55f, 0.22f}, {0.75f, 0.11f}, {0.9f, 0.04f}, {1, 0}};
         constexpr SCurveKey STAND_LIFT[] = {{0, 0}, {0.4f, 0.05f}, {0.75f, 0.035f}, {1, 0}};
-        // How far the knee bends walking (radians), as gait studies measure it (Perry and Burnfield): late in its time
-        // on the ground, nearly straight as the heel rises, bending as the foot pushes off (38° as it leaves the
-        // ground); through the air, folding up to 60° early (the foot clears the ground by it) and straight again
-        // to land. The heel rises as far as keeps the knee to that, and the foot goes up as high as it does
+        // radians, per gait data (Perry and Burnfield)
         constexpr SCurveKey WALK_STANCE_KNEE[] = {{0.4f, 0.1f}, {0.65f, 0.14f}, {0.8f, 0.24f}, {0.9f, 0.42f}, {1, 0.66f}};
         constexpr SCurveKey WALK_SWING_KNEE[]  = {{0, 0.66f}, {0.12f, 0.87f}, {0.25f, 1.f}, {0.33f, 1.05f}, {0.45f, 0.93f}, {0.6f, 0.68f}, {0.75f, 0.35f}, {0.88f, 0.14f}, {1, 0.07f}};
-        // the least the heel rises, late on the ground, whatever the knee
+        // minimum heel rise late in stance
         constexpr SCurveKey WALK_HEEL_LEAST[] = {{0.5f, 0}, {0.8f, 0.1f}, {1, 0.5f}};
 
-        // how far the pelvis turns from a planted foot, radians (a hip turns about 40° each way, with the knee's give),
-        // and how fast a planted foot pivots on its ball when the body turns further, radians a second (people turning
-        // round pivot 30-60° on the foot they stand on, then put the next one down turned: the turn goes over the steps,
-        // not all on one foot)
+        // pelvis turn off a planted foot (radians), then its ball pivot rate (radians/s)
         constexpr float HIP_TURN   = 0.5f;
         constexpr float PIVOT_RATE = 5.f;
-        // a planted foot doesn't pivot where its heel would come over ground higher than it stands by more than this
-        // (meters, a slope's rise aside): on stairs that's into the step behind it, and people step round there instead
+        // m: no pivot where the heel would swing over higher ground (a stair behind)
         constexpr float PIVOT_CLEAR = 0.03f;
-        // how fast the pelvis turns at most (radians a second: a quick turn round, as people's goes, a few hundred degrees
-        // a second), and how quickly that changes (radians a second a second)
+        // max pelvis turn speed (rad/s) and its acceleration (rad/s²)
         constexpr float HIP_RATE = 6.f, HIP_ACCEL = 50.f;
-        // Turning round, people slow down, turn, then go: the legs don't set off the new way till the pelvis faces it
-        // near enough. What the legs carry goes toward a way further than GO_ON (radians) off where the pelvis faces less,
-        // GO_LEAST of it past GO_OFF, while the body is still turning to it; less so the further it has fallen behind
-        // (fully past GO_GIVE of the way from BODY_LAG_SOFT to BODY_LAG), and running (RUN_GO of the way to not at all:
-        // a run turns round in a curve; held back less, a running zigzag goes on across the pelvis, the legs splayed, and
-        // more, it falls behind till it's dragged along)
+        // turning round people slow, turn, then go: velocity scaled down past GO_ON off the pelvis's facing
         constexpr float GO_ON = 0.35f, GO_OFF = 1.8f, GO_LEAST = 0.25f, GO_GIVE = 0.5f, RUN_GO = 0.4f;
-        // turning far, the steps go at least TURN_CADENCE strides a second (turning on the spot), and don't slow down
-        // while the pelvis turns faster than CADENCE_TURN (radians a second: round a tight curve)
+        // turning far: at least TURN_CADENCE strides/s; no slowing while the pelvis turns over CADENCE_TURN radians/s
         constexpr float TURN_CADENCE = 1.1f, CADENCE_TURN = 2.f;
-        // a planted foot further out to its side of its hip than OUT_EASY (meters) hurries the steps: OUT_HURRY more for each
-        // meter past it, up to OUT_MOST (the steps then 1.7 times as quick: hurried more, a step lasts a tenth of a second,
-        // the knee folding and the foot flicking up in a few frames)
+        // planted foot out from its hip past OUT_EASY m hurries the steps, up to OUT_MOST x
         constexpr float OUT_EASY = 0.06f, OUT_HURRY = 6.f, OUT_MOST = 1.3f;
-        // a foot in the air no further out to its side of its hip, or in under the body, than this (meters): it hangs
-        // from the hip, whichever way the pelvis turns meanwhile
+        // max swing foot offset out from / in under its hip, meters
         constexpr float SWING_OUT = 0.05f, SWING_IN = 0.03f;
-        // how quickly the body's turning speeds up or slows down, radians a second a second (a quick turn: 7 radians a
-        // second in about a ninth of a second)
+        // how fast the body's turning speeds up or slows (rad/s²; a quick turn reaches 7 rad/s in about 1/9 s)
         constexpr float TURN_ACCEL = 60.f;
-        // how quickly where the feet go follows a new way to turn, radians a second, and how fast where a foot in the air
-        // lands moves at most, meters a second over the body's speed (else it would snap there)
+        // foot plan turn rate (radians/s); max landing spot speed over the body's (m/s)
         constexpr float TURN_PLAN = 10.f, RETARGET = 2.5f;
-        // What the legs carry follows the player's body: toward its velocity at BODY_K of the difference a second (the
-        // push building up over a few hundredths of a second), speeding up, slowing down and turning back no harder than
-        // legs push (m/s², walking and running: a body over a foot planted half a leg ahead slows at about g/2), and a
-        // little quicker than it to close a gap (BODY_CATCH_UP of the gap a second, at most 3 cm/s and BODY_CATCH_UP_MOST
-        // of its speed over it: setting off it trails a little, rather than hurrying to catch up); harder past BODY_LAG_SOFT behind (6 cm more for each m/s it goes), never more than
-        // BODY_LAG - BODY_LAG_SOFT further; onto it no quicker than stops in the gap left when a wall stopped it (up to
-        // BODY_WALL m/s²); the keys let go, going on past it no further than BODY_REST (and a tenth of a second at
-        // its speed), and stopped within twice that, left there
+        // legs' body following the player: rate (1/s), accels (m/s²), catch-up, lags (m), wall brake, overshoot (m)
         constexpr float BODY_K = 8.f, BODY_WALK_ACCEL = 7.f, BODY_RUN_ACCEL = 10.f, BODY_CATCH_UP = 1.f, BODY_CATCH_UP_MOST = 0.03f, BODY_LAG_SOFT = 0.3f,
                         BODY_LAG = 0.5f, BODY_WALL = 40.f, BODY_REST = 0.2f;
-        // going back and forth (wayToFace holding its facing), it faces the way it has been going when that's faster
-        // than WAY_GOING (m/s): tapping the keys back the other way only slows it down
+        // back and forth: keeps facing its travel above WAY_GOING m/s
         constexpr float WAY_GOING = 0.3f;
-        // turning, the head looks ahead into the turn: HEAD_LEAD of what's left of it, at most HEAD_LEAD_MOST (radians)
+        // head leads a turn: fraction, max radians
         constexpr float HEAD_LEAD = 0.6f, HEAD_LEAD_MOST = 0.7f;
-        // how far the trunk turns from the pelvis at most (radians), and how quickly it turns there (a second)
+        // max trunk twist from the pelvis (rad) and how fast it gets there (1/s)
         constexpr float TRUNK_TWIST = 0.6f, TRUNK_W = 14.f;
-        // how quickly an arm goes out to keep clear of the body as it's swung now (a second, critically damped)
+        // 1/s, critically damped
         constexpr float ARM_PUSH_W = 40.f;
-        // the walk's and the run's clips (SGaitClip) are as they are at these speeds (m/s, for legs of GAIT_LEG meters: a
-        // longer leg's at the speed that's as quick for it, as dynamic similarity has it); slower or quicker their swing
-        // is that much smaller or bigger (down to GAIT_LEAST, up to GAIT_MOST of it)
+        // gait clip speeds (m/s) for GAIT_LEG m legs; swing scale limits
         constexpr float GAIT_WALK = 1.5f, GAIT_RUN = 4.5f, GAIT_LEG = 0.8f, GAIT_LEAST = 0.35f, GAIT_MOST = 1.2f;
-        // how far out the clips' arms need to be held to keep clear of the body is known at this many steps of the
-        // stride, every GAIT_NEED_EVERY-th of them looked at again each frame
+        // clip arm clearance per stride step; 1 in GAIT_NEED_EVERY refreshed a frame
         constexpr int GAIT_NEED_STEPS = 24, GAIT_NEED_EVERY = 8;
-        // how fast a foot's pitch changes at most, radians a second (walking, it pushes off at about 8), and how
-        // quickly that speed changes (radians a second a second): a foot that starts or stops rolling at once flicks
+        // radians/s, radians/s²: limits keep the foot from flicking
         constexpr float FOOT_ROLL = 16.f, FOOT_ROLL_ACCEL = 400.f;
-        // how quickly a foot in the air goes up or down faster or slower for the knee's fold, meters a second a second
-        // (walking steadily it needs 90 at most)
+        // max change in a swinging foot's vertical speed for the knee fold (m/s²; a steady walk needs at most 90)
         constexpr float RAISE_ACCEL = 120.f;
-        // how quickly the steps slow down (strides a second, a second) as the body slows turning back or far: the feet
-        // keep stepping
+        // how fast the steps may slow (strides/s per s) as the body slows; the feet keep stepping
         constexpr float CADENCE_DROP = 0.4f;
-        // how far a foot put down across a stair's edge moves along itself (ahead or back) to be on one tread, meters
-        constexpr float STAIR_SHIFT = 0.16f, STAIR_ROOM = 0.03f; // (and how much room it leaves round itself, meters)
-        // how hard the pelvis speeds up going down for the legs to reach (m/s²), and how fast it goes (m/s)
+        // max shift (m) of a foot across a stair edge onto one tread
+        constexpr float STAIR_SHIFT = 0.16f, STAIR_ROOM = 0.03f; // clearance, meters
+        // how hard (m/s²) and how fast (m/s) the pelvis lowers going down, so the legs reach
         constexpr float LOWER_ACCEL = 60.f, LOWER_SPEED = 3.f;
-        // the steepest slope a foot lies along (radians), and how far the ground under it may be from a line and still
-        // count as one (meters: more is a stair's edge, or rubble)
+        // radians; ground off a line by more (m) isn't a slope
         constexpr float SLOPE_MOST = 0.45f, SLOPE_EVEN = 0.012f;
 
-        // Off the ground the legs, the arms and the body go on from how they were, toward the pose for how it goes, as
-        // springs (a limb with weight: no snapping to it). A jump (or a fall), by how far through it is (`ju`: 0 leaving
-        // the ground at JUMP_UP m/s, 1/2 at the top, 1 coming down as fast): from standing both legs tuck and reach down
-        // to land, the arms swinging up then out; from a run the leg that was stepping goes on ahead and the other trails
-        // (a stride in the air), the arms against them, the leading leg reaching to land first. Angles in radians: the
-        // hip's ahead (thigh from straight down), the knee's bend, the toes down, an arm swung ahead
+        // jump poses by progress `ju`: 0 take-off at JUMP_UP m/s, 1/2 top, 1 landing; radians
         constexpr float JUMP_UP = 6.3f;
         constexpr SCurveKey JUMP_HIP[]        = {{0, 0.55f}, {0.5f, 0.35f}, {1, 0.15f}};
         constexpr SCurveKey JUMP_KNEE[]       = {{0, 1.1f}, {0.5f, 0.7f}, {1, 0.28f}};
@@ -4888,69 +4724,53 @@ namespace h3d {
         constexpr SCurveKey JUMP_TRAIL_HIP[]  = {{0, -0.35f}, {0.5f, -0.15f}, {1, 0.f}};
         constexpr SCurveKey JUMP_TRAIL_KNEE[] = {{0, 1.f}, {0.5f, 1.15f}, {1, 0.8f}};
         constexpr SCurveKey JUMP_TRAIL_TOES[] = {{0, 0.9f}, {1, 0.55f}};
-        constexpr SCurveKey JUMP_ARM[]        = {{0, 0.8f}, {0.5f, 0.4f}, {1, 0.3f}};   // (both, from standing)
+        constexpr SCurveKey JUMP_ARM[]        = {{0, 0.8f}, {0.5f, 0.4f}, {1, 0.3f}};   // from standing
         constexpr SCurveKey JUMP_ARM_OUT[]    = {{0, 0.3f}, {0.5f, 0.55f}, {1, 0.6f}};
-        constexpr SCurveKey JUMP_ARM_AHEAD[]  = {{0, 0.6f}, {1, 0.35f}};                 // (running: against the leading leg)
-        constexpr SCurveKey JUMP_ARM_BACK[]   = {{0, -0.55f}, {1, -0.2f}};              // (on its side)
+        constexpr SCurveKey JUMP_ARM_AHEAD[]  = {{0, 0.6f}, {1, 0.35f}};                 // running: opposite the lead leg
+        constexpr SCurveKey JUMP_ARM_BACK[]   = {{0, -0.55f}, {1, -0.2f}};              // the lead leg's side
         constexpr SCurveKey JUMP_ARM_RUN_OUT[]  = {{0, 0.2f}, {1, 0.45f}};
         constexpr SCurveKey JUMP_ARM_RUN_BEND[] = {{0, 1.25f}, {1, 0.7f}};
-        constexpr SCurveKey JUMP_LEAN[]       = {{0, 0.05f}, {0.5f, -0.02f}, {1, 0.08f}}; // (the trunk ahead of the pelvis)
+        constexpr SCurveKey JUMP_LEAN[]       = {{0, 0.05f}, {0.5f, -0.02f}, {1, 0.08f}}; // trunk ahead of the pelvis
         constexpr SCurveKey JUMP_RUN_LEAN[]   = {{0, 0.18f}, {0.5f, 0.08f}, {1, 0.12f}};
-        // Flying: the body lies along the way it goes, the faster the flatter: FLY_LIE at most, FLY_LIE_SPEED m/s taking
-        // it most of the way there (the plugin's 8 m/s about 55°, flat out 70°), less climbing, as it goes straight up
-        // upright; leaning into speeding up (FLY_PUSH radians an m/s², up to FLY_PUSH_MOST) and back as it slows down (up
-        // to FLY_BRAKE_MOST: a flare); banked into turns as a flier is (the pull round it against gravity) up to
-        // FLY_BANK; its turns no faster than FLY_TURN (radians a second, speeding up at FLY_TURN_ACCEL)
+        // flying: lies flatter the faster, leans with acceleration, banks into turns; FLY_TURN in radians/s
         constexpr float FLY_LIE = 1.3f, FLY_LIE_SPEED = 5.5f, FLY_PUSH = 0.03f, FLY_PUSH_MOST = 0.35f, FLY_BRAKE_MOST = 0.5f, FLY_BANK = 0.7f;
         constexpr float FLY_TURN = 4.f, FLY_TURN_ACCEL = 25.f;
-        // hovering it bobs this far (meters) and sways; flying its legs flutter a little
+        // hover bob, meters
         constexpr float FLY_BOB = 0.022f;
-        // how quickly a jump's pose and a flier's follow what they're after (radians a second), and how springy (1: not at all)
+        // radians/s; damping 1 = critical
         constexpr float AIR_LEG_W = 11.f, AIR_LEG_Z = 0.7f, FLY_LEG_W = 8.f, FLY_LEG_Z = 0.55f, AIR_ARM_W = 9.f, AIR_ARM_Z = 0.7f;
         constexpr float FLY_BODY_W = 6.5f, FLY_BODY_Z = 0.7f;
-        // Where the pose changes all at once (leaving the ground, landing, taking to the air), what was shown goes on as it
-        // went and settles into the new pose critically damped at this rate (a second): not snapping to it
+        // settle rates (1/s) into a new pose at take-off, landing and flight start
         constexpr float SETTLE_AIR = 18.f, SETTLE_LAND = 20.f, SETTLE_FLY = 10.f;
-        // landing, the hips go on down at this much of the speed the body stopped at, and come back up as the pose settles
-        // (the rest of the knees' give is the walking's own dip)
+        // landing: the hips sink on at this fraction of the impact speed
         constexpr float LAND_GIVE = 0.5f;
 
-        // the player's velocity (now cv) t seconds on, going to what the keys ask for as the plugin moves it
+        // player's velocity t seconds on, as the plugin moves it toward `wish`
         V3 keysAhead(const V3& cv, const V3& wish, const SAvatarMotion& m, float t) {
             const V3    c{cv.x, 0, cv.z}, d = V3{wish.x, 0, wish.z} - c;
             const float most = (dot(wish, c) < 0 ? m.turnBack : length(wish) < length(c) ? m.decel : m.accel) * t, dl = length(d);
             return c + (dl > most ? d * (most / dl) : d);
         }
 
-        // one step (dt) of what the legs carry (at p, going v, speeding up a) after the player's body (at cp going cv, the
-        // keys asking for `wish`: going `lead` a moment on), speeding up no harder than `most`: see BODY_K. `go` of the
-        // velocity it's after (turning round: see GO_ON)
+        // one dt step of the legs' body chasing the player's: see BODY_K, GO_ON
         void follow(V3& p, V3& v, V3& a, const V3& cp, const V3& cv, const V3& lead, const V3& wish, bool wall, float most, float dt, float go = 1.f) {
             const V3 off{cp.x - p.x, 0, cp.z - p.z};
-            // (further behind than BODY_LAG_SOFT (and a little more, the faster), harder and quicker, up to twice as hard
-            // at BODY_LAG)
+            // past BODY_LAG_SOFT behind, up to twice as hard by BODY_LAG
             const float soft = BODY_LAG_SOFT + 0.06f * length(V3{cv.x, 0, cv.z}), hard = soft + BODY_LAG - BODY_LAG_SOFT;
             const float far  = smoothstep01((length(off) - soft) / (hard - soft));
             most *= 1.f + far;
-            // (stopped a little way past it, the keys let go: left there, not shuffled back)
+            // stopped just past the player, keys released: stays put
             const bool still = length(wish) < 0.05f && length(V3{cv.x, 0, cv.z}) < 0.05f && length(off) < 2.f * BODY_REST;
             V3         back  = still ? V3{} : off * BODY_CATCH_UP;
             if (const float bl = length(back), cap = 0.03f + (BODY_CATCH_UP_MOST + 0.15f * far) * length(cv); bl > cap)
                 back = back * (cap / bl);
-            // (toward the velocity wanted at BODY_K of the difference a second, no harder than `most`; the push itself
-            // following that, critically damped; the player's a moment on, as the time that takes, so as not to fall
-            // behind: turning back, the body starts slowing as the key goes down)
-            // (turning round, held back by `go`: less so the further behind, going anyway past BODY_LAG_SOFT and a bit,
-            // not dragged along all at once at BODY_LAG)
+            // critically damped push toward the player's velocity a moment ahead; `go` holds back
             V3 want = (V3{lead.x, 0, lead.z} + back) * lerpf(go, 1.f, smoothstep01(far / GO_GIVE));
             V3 push = (want - v) * BODY_K;
             push.y  = 0;
             if (const float pl = length(push); pl > most)
                 push = push * (most / pl);
-            // (a wall stopped the player's body, or the keys push on into it: slowing onto it in the gap left, as hard
-            // as that takes; the keys let go, as legs stop, going on past where the player's stopped but no further
-            // than BODY_REST and a tenth of a second at its speed; not turning back, when the body goes on over the
-            // foot it stops on)
+            // brake within the gap at walls or pushing on; released, stop within BODY_REST
             const bool pushing = wall || (length(wish) > 0.05f && dot(wish, v) > 0), letGo = length(wish) < 0.05f;
             if (const float sp = length(v); sp > 1e-3f && (pushing || letGo) && dot(cv, v) >= 0) {
                 const V3    n    = v / sp;
@@ -4962,7 +4782,7 @@ namespace h3d {
             v += a * dt;
             v.y = 0;
             p += v * dt;
-            // (dragged along at the most behind it; past it, as far as a stop can take it)
+            // clamp the lag and the overshoot
             if (const V3 o{cp.x - p.x, 0, cp.z - p.z}; length(o) > (dot(o, v) >= 0 ? hard : hard + 2.f * BODY_REST)) {
                 const V3 u = o / length(o);
                 p += o * (1.f - hard / length(o));
@@ -4971,18 +4791,16 @@ namespace h3d {
             }
         }
 
-        // toward `to` from x (moving at v, both updated), critically damped at w (radians a second), over dt
+        // critically damped spring, w in radians/s
         void springTo(float& x, float& v, float to, float w, float dt) {
             const float d = x - to, e = std::exp(-w * dt), k = v + w * d;
             x = to + (d + k * dt) * e;
             v = (v - w * k * dt) * e;
         }
 
-        // a value and how fast it changes, going somewhere as a spring does
         struct SSpring {
             float x = 0, v = 0;
-            // toward `to` at w (radians a second), damped z (1 critically, less springy), over dt: in steps short enough
-            // to hold at any frame rate
+            // damping ratio z (1 = critical), substepped for stability
             void to(float to, float w, float z, float dt) {
                 const int   n = std::max(1, (int)std::ceil(dt * 240.f));
                 const float h = dt / n;
@@ -4993,7 +4811,7 @@ namespace h3d {
             }
         };
 
-        // a turn as a rotation vector (along its axis, as long as its angle in radians, the short way round), and back
+        // rotation vector (axis * angle, short way round) and back
         V3 rotationVector(Quat q) {
             if (q.w < 0)
                 q = {-q.x, -q.y, -q.z, -q.w};
@@ -5006,7 +4824,7 @@ namespace h3d {
             return a < 1e-7f ? Quat{r.x * 0.5f, r.y * 0.5f, r.z * 0.5f, 1.f}.normalized() : Quat::axisAngle(r / a, a);
         }
 
-        // the plugin's yaw: 0 faces -Z, turning right is positive; an avatar at that yaw is turned by yawTurn
+        // plugin yaw: 0 faces -Z, right positive
         Quat yawTurn(float yaw) {
             return Quat::axisAngle(UP, -yaw);
         }
@@ -5017,149 +4835,141 @@ namespace h3d {
             return {std::cos(yaw), 0, std::sin(yaw)};
         }
 
-        // a foot's pitch (toes down > 0) in avatar space, about its left
+        // toes down > 0, about the left axis
         Quat footPitch(float pitch) {
             return Quat::axisAngle({1, 0, 0}, -pitch);
         }
 
-        // the ankle over a foot's spot on the ground (under the ankle while the foot is flat), the foot pitched about
-        // its heel (pitch < 0) or its front (> 0), which stay where they are: the ball, with toes of its own that bend,
-        // else the tips of the toes (a shoe rolls over its front edge)
+        // ankle for a foot at `at` pitched about its heel (< 0) or ball / toe tip (> 0)
         V3 ankleOver(const V3& at, float yaw, float pitch, const SFootShape& fs, float ankleH, bool toes) {
             V3 pivot = pitch < 0 ? fs.heel : toes ? fs.ball : fs.toe;
             pivot.x  = 0;
             return at + yawTurn(yaw).rotate(V3{0, ankleH, 0} + pivot - footPitch(pitch).rotate(pivot));
         }
 
-        // how long each foot is on the ground, of a stride: walking about 60%, less the faster, running 30-40%
+        // fraction of a stride each foot is down
         float dutyFactor(float v, float run) {
             return lerpf(std::clamp(0.64f - 0.03f * v, 0.56f, 0.66f), std::clamp(0.5f - 0.035f * v, 0.27f, 0.42f), run);
         }
 
         struct SGaitFoot {
             bool  swing = false; // in the air
-            bool  timed = false; // a step of its own (standing still), not the gait's
-            V3    at;            // on the ground under the ankle (were the foot flat): planted there, or where it's got to
-            float yaw   = 0;     // which way it points (the plugin's yaw)
-            V3    from, to;      // a step's ends, on the ground
+            bool  timed = false; // own step, not the gait's
+            V3    at;            // ground point under the ankle
+            float yaw   = 0;
+            V3    from, to;      // step ends, on the ground
             float fromYaw = 0, toYaw = 0;
-            float fromOut = 0, toOut = 0; // how far out to its side of the body they are (of the pelvis then), meters
-            float fromPitch = 0; // how it was pitched as it lifted
-            float s         = 0; // how far through the step, 0..1
-            float start     = 0; // the gait's: its phase as it lifted
-            float rate      = 0; // a step of its own: s a second
-            float phase     = 0; // the gait's: its phase last frame
-            float pitch     = 0; // as it's drawn
-            bool  locked    = false; // near the end of a step: where it lands stays
-            float spin      = 0;     // planted, pivoting on its ball: 1 as fast as it goes
-            float strain    = 0;     // planted: how far the ankle is from the hip, of as far as the leg reaches
-            float heel      = 0;     // its pitch last frame, as drawn
-            float roll = 0, rollFrom = 0; // how fast its pitch changes, and did last frame
-            float over      = -1;    // planted: how far past the leg's reach the body has gone from it, meters (< 0 short of it)
-            float tight     = 0;     // planted: how far down the pelvis has to come for the leg to reach, of as far as it goes
-            float liftKnee  = 0;     // `knee` as it lifted
-            float landed    = -1;    // when it came down (the gait's time)
-            float fold = 0, foldV = 0; // in the air: how much its knee folds as people's (0 to 1)
-            float raise = 0, raiseV = 0, raiseTo = -1; // in the air: how far up that takes the foot (meters), how fast, and
-                                                       // where it was headed last frame (-1: it's just lifted)
-            float gaitW     = 1;     // in the air: how much it goes as the gait's step (1) or a step of its own (0), eased
-                                     // from one to the other when the walking stops or starts again mid-step
-            bool  wait      = false; // down from a step of its own while walking: it lifts once its time on the ground comes round
-            float toY = 0, toYV = 0; // in the air: the height it goes to, eased (where it lands moving onto the next stair)
+            float fromOut = 0, toOut = 0; // out from the pelvis, meters
+            float fromPitch = 0;
+            float s         = 0; // step progress 0..1
+            float start     = 0; // gait phase at lift-off
+            float rate      = 0; // own step: s per second
+            float phase     = 0; // gait phase last frame
+            float pitch     = 0; // as drawn
+            bool  locked    = false; // landing spot fixed
+            float spin      = 0;     // ball pivot speed / PIVOT_RATE
+            float strain    = 0;     // hip-ankle distance / reach
+            float heel      = 0;     // drawn pitch last frame
+            float roll = 0, rollFrom = 0; // pitch rate, last frame's
+            float over      = -1;    // past the leg's reach, m
+            float tight     = 0;     // pelvis drop needed, of max
+            float liftKnee  = 0;
+            float landed    = -1;    // gait time it landed
+            float fold = 0, foldV = 0; // swing knee fold 0..1
+            float raise = 0, raiseV = 0, raiseTo = -1; // fold raise m, speed, target (-1 new)
+            float gaitW     = 1;     // gait step 1 / own step 0, eased
+            bool  wait      = false; // waits for its gait lift
+            float toY = 0, toYV = 0; // eased landing height
             bool  toYSet = false;
-            // how it lies along the ground (toes down > 0): a slope's pitch under it (level on a stair's tread); in the air,
-            // from where it lifted to where it lands
+            // ground pitch under the foot (toes down > 0); swing: lift-off's to landing's
             float gp = 0, fromGp = 0, toGp = 0;
-            float knee      = 0;     // the hip to the ankle, meters, as drawn
+            float knee      = 0;     // hip to ankle, m, as drawn
             V3    ankle;             // world, as drawn
         };
 
-        // the walking of one model
+        // per-model walking state
         struct SGait {
             SRig              rig;
             SBody             body;
-            std::vector<int>  own; // per node: its humanoid bone, -1 = none
+            std::vector<int>  own; // humanoid bone per node, -1 = none
             std::vector<Quat> scratch;
             M4                hipsToLocal = M4::identity(); // model space -> the hips' parent's
             M4                fixInv      = M4::identity(); // avatar space -> model space
-            Quat              toFrame;                      // turns in avatar space -> the frame above (CPoser's)
-            std::array<Quat, 2> footUntilt;                 // undoes what straightening the legs does to the feet
-            float             unit = 1;                     // meters per unit of the frame above
-            float             leg  = 0.8f;                  // the hip joint's height over the soles, meters
-            float             hipH = 0.9f;                  // the hips' (pelvis bone's), meters
+            Quat              toFrame;                      // avatar-space turns -> body frame
+            std::array<Quat, 2> footUntilt;                 // undoes leg straightening's foot tilt
+            float             unit = 1;                     // meters per body frame unit
+            float             leg  = 0.8f;                  // hip joint height over the soles, m
+            float             hipH = 0.9f;                  // pelvis bone height, m
             std::array<float, 2> thigh{0.4f, 0.4f}, shin{0.4f, 0.4f}, ankleH{0.07f, 0.07f}; // meters
-            std::array<float, 2> ahead{};                   // how far forward each ankle stands at rest, meters
-            std::array<V3, 2>    hipAt;                     // the hip joints from the pelvis, avatar space
-            float             stance = 0.08f;               // half the width between the ankles at rest, meters
-            float             armOut = 0.12f;               // the arms out from the body, radians, to clear the hips
+            std::array<float, 2> ahead{};                   // rest ankle forward offset, m
+            std::array<V3, 2>    hipAt;                     // hip joints from the pelvis, avatar space
+            float             stance = 0.08f;               // half the rest ankle spacing, m
+            float             armOut = 0.12f;               // arm abduction clearing the hips
             std::array<SFootShape, 2> foot;
-            std::array<bool, 2>       toes{};       // the foot has toes of its own
-            std::array<float, 2>      toesUp{1, 1}; // how far its toes come up as it lands, of a bare foot's (high heels: less)
-            // how far the ankle goes ahead, and up, as the foot pushes off (walking, running), meters
+            std::array<bool, 2>       toes{};       // has a toes bone
+            std::array<float, 2>      toesUp{1, 1}; // landing toe lift vs bare foot
+            // push-off ankle travel ahead and up, m (walk, run)
             std::array<float, 2> pushAhead{}, pushUp{};
 
             bool      live = false, moving = false, wasAir = false;
-            float     phase = 0; // of a stride, 0..1: the left foot lands at 0, the right at 0.5
-            // where the body's swing (the pelvis, the trunk, the arms) is from the phase: when the phase jumps (starting
-            // again, a foot lifting early) the body goes on from where it was and catches up, critically damped
+            float     phase = 0; // left lands at 0, right at 0.5
+            // body swing phase offset: catches up after phase jumps, critically damped
             float     phaseOff = 0, phaseOffV = 0;
             float     run = 0, crouch = 0, moveW = 0, moveWV = 0;
-            float     runArms = 0, runArmsV = 0; // `run` for the arms and the trunk: eased in and out (see below)
+            float     runArms = 0, runArmsV = 0; // eased `run` for arms and trunk
             float     stride = 0, cadence = 0, duty = 0.6f, swingTime = 0.4f;
             SGaitFoot feet[2];
-            float     groundY = 0, groundV = 0; // under the feet (world), springy
-            float     groundRate = 0, lastSupport = NAN; // how fast what's under the feet goes up (the last 1/6 s), and it last frame
-            float     slope = 0; // how steeply the ground goes up the way it goes (stairs, a slope), from the body's climb
-            float     dip = 0, dipV = 0;        // the knees giving as it lands
-            float     lowered = 0, loweredV = 0; // how far the pelvis came down for the legs to reach, last frame, and how fast
-            float     hurry   = 1;              // how much quicker than the stride's the steps go (a sharp turn)
-            float     hurrySmooth = 1;          // (eased)
-            float     rollW = 0;                // standing: the pelvis onto a leg (+ right), eased
-            float     airVy = 0;                // the fastest it fell, this time in the air
-            float     pause = 0;                // standing: till the next step may start
+            float     groundY = 0, groundV = 0; // ground under the feet, sprung
+            float     groundRate = 0, lastSupport = NAN; // climb rate (last 1/6 s), last support
+            float     slope = 0; // ground slope along travel
+            float     dip = 0, dipV = 0;        // landing knee give
+            float     lowered = 0, loweredV = 0; // pelvis lowering for reach, speed
+            float     hurry   = 1;              // step speed-up (sharp turns)
+            float     hurrySmooth = 1;
+            float     rollW = 0;                // standing: pelvis onto a leg (+ right)
+            float     airVy = 0;                // fastest fall this airtime
+            float     pause = 0;                // standing: until the next step
             float     time  = 0;
-            V3        lastP, lastVel, accel; // (lastP the player's body)
-            V3        bodyP, bodyV, bodyA;   // what the legs carry (horizontal), following the player's body
-            V3        lastVelC;              // the player's body's velocity last frame
-            float     wall = 0;              // how long ago something stopped the player's body, counting down
+            V3        lastP, lastVel, accel; // lastP: the player's body
+            V3        bodyP, bodyV, bodyA;   // legs' body, following the player
+            V3        lastVelC;              // player's velocity last frame
+            float     wall = 0;              // wall stop countdown
             float     lastYaw = 0, yawRate = 0;
-            float     velTurn = 0; // how fast the way it goes turns, radians a second
-            float     wishTurn = 0; // how fast the way the keys ask for turns (the camera turning), radians a second
+            float     velTurn = 0; // travel turn rate, radians/s
+            float     wishTurn = 0; // wish turn rate (camera), radians/s
             V3        lastWish;
-            float     turnLeft = 0; // how far the body has to turn yet (turnBody's), eased
-            float     forward = 1; // how much of where it goes is ahead of it, -1 backward
-            float     hipLag  = 0, hipLagV = 0; // the pelvis's yaw from the body's (the plugin's yaw): behind it, turning;
-                                                // and how fast the pelvis turns (in the world)
-            float     twist = 0, twistV = 0;   // the trunk turned from the pelvis back toward the body's yaw, eased
-            std::array<float, 2> armClear{}; // how much further out each arm is held to keep clear of a skirt, radians
-            std::array<float, 2> armPush{}, armPushV{}; // (as it's swung now, eased)
-            std::array<float, 2> clipClear{}, clipClearV{}, clipPush{}, clipPushV{}; // (the same for the walk's and run's clips' arms)
-            std::array<std::array<float, GAIT_NEED_STEPS>, 2> clipNeed{}; // (how far out each arm needs, at steps of the stride)
+            float     turnLeft = 0; // turnBody's remaining turn, eased
+            float     forward = 1; // 1 ahead .. -1 backward
+            float     hipLag  = 0, hipLagV = 0; // pelvis yaw lag, turn rate
+            float     twist = 0, twistV = 0;   // trunk twist from the pelvis
+            std::array<float, 2> armClear{}; // skirt clearance per arm, radians
+            std::array<float, 2> armPush{}, armPushV{}; // current swing's, eased
+            std::array<float, 2> clipClear{}, clipClearV{}, clipPush{}, clipPushV{}; // same for the gait clips' arms
+            std::array<std::array<float, GAIT_NEED_STEPS>, 2> clipNeed{}; // per stride step
             unsigned             clipTick = 0;
             V3        pelvis; // world, as drawn
-            // off the ground (see JUMP_*, FLY_*): where the pose has got to, going toward what it's after as springs
+            // airborne pose springs (JUMP_*, FLY_*)
             struct SAirLeg {
-                SSpring hip, knee, out, toes; // the thigh ahead of straight down, the knee's bend, the leg out to its side, the toes down
+                SSpring hip, knee, out, toes; // thigh ahead, knee bend, leg out, toes down
             };
             struct SAirArm {
-                SSpring ahead, out, bend; // as the walking's (armAt): swung ahead, out from the body, the elbow's bend
+                SSpring ahead, out, bend; // as armAt: ahead, out, bend
             };
             std::array<SAirLeg, 2> airLeg{};
             std::array<SAirArm, 2> airArm{};
-            SSpring   airPitch, airRoll, airYaw, airLean; // the pelvis pitched ahead, rolled (right > 0), turned; the trunk ahead of it
+            SSpring   airPitch, airRoll, airYaw, airLean; // pelvis pitch, roll, yaw; trunk lean
             SSpring   flyE;                   // flying, eased (0..1)
-            int       airLead = -1;           // the leg that went on ahead as it left the ground, -1 neither (from standing)
-            float     airRun  = 0;            // how fast it went as it left the ground: 0 standing, 1 running
+            int       airLead = -1;           // leading leg at takeoff, -1 none
+            float     airRun  = 0;            // takeoff speed: 0 standing, 1 running
             bool      grounded = true;        // last frame
-            std::array<V3, 2> armWas{};       // the walking's arms last frame (ahead, out, bend): the air's go on from them
-            float     leanWas = 0;            // the walking's trunk lean last frame
+            std::array<V3, 2> armWas{};       // (ahead, out, bend) last frame
+            float     leanWas = 0;            // grounded lean last frame
         };
 
         SGait& gaitOf(const std::shared_ptr<void>& p) {
             return *static_cast<SGait*>(p.get());
         }
 
-        // what a model's walking needs to know about it, measured at rest
         std::shared_ptr<void> makeGait(const SAvatarModel& md) {
             auto  gp = std::make_shared<SGait>();
             auto& g  = *gp;
@@ -5191,12 +5001,8 @@ namespace h3d {
                 g.hipAt[s] = at(ul) - hips;
                 g.ahead[s] = -ank.z;
                 g.stance += std::abs(ank.x) * 0.5f;
-                // the feet as the legs, straightened, have them: undone (they stay as they stand)
                 g.footUntilt[s] = (g.rig.facing.conj() * g.rig.tpose[ul + 2].conj() * g.rig.facing).normalized();
-                // Landing on the heel, toes up, turns the ankle back about the heel, the more the higher the ankle is over
-                // it: over a high heel, as far again as over a bare foot's, and the leg reaching that much further for
-                // it takes the pelvis down. People in high heels land flatter: here the ankle goes back no further than
-                // over a bare foot's heel (7 cm under it and 6 behind, 1.6 cm)
+                // heel strike: ankle swing-back limited to a bare foot's 1.6 cm (heels land flatter)
                 const float land = -through(WALK_STANCE_PITCH, 0);
                 const float back = g.ankleH[s] * std::sin(land) - std::max(0.f, g.foot[s].heel.z) * (1.f - std::cos(land));
                 g.toesUp[s]      = std::clamp(0.016f / std::max(back, 1e-3f), 0.25f, 1.f);
@@ -5204,7 +5010,7 @@ namespace h3d {
             g.stance = std::max(g.stance, 0.02f);
             g.hipH   = hips.y - sole;
             g.leg    = std::max(0.2f, 0.5f * (at(HB_L_UPPER_LEG).y + at(HB_R_UPPER_LEG).y) - sole);
-            // the hands hang clear of the hips: out as far as the hip joints are, and a bit (a skirt, a coat)
+            // hands clear the hip joints by 9% of the leg (skirt, coat)
             const float shoulders = 0.5f * std::abs(at(HB_L_UPPER_ARM).x - at(HB_R_UPPER_ARM).x);
             const float hipsHalf  = 0.5f * std::abs(g.hipAt[0].x - g.hipAt[1].x);
             const float arm       = 0.5f * (g.body.upper[0] + g.body.fore[0] + g.body.upper[1] + g.body.fore[1]) * g.unit;
@@ -5212,8 +5018,7 @@ namespace h3d {
             return gp;
         }
 
-        // a pose in the frame above (CPoser's) onto the model's nodes: the bones it sets turned, the hips moved; the
-        // others keep their own turn, and go along with the bone above
+        // applies a CPoser-frame pose: turns the `set` bones, moves the hips
         void applyFrame(SGait& g, const std::array<Quat, HB_COUNT>& turn, const std::array<bool, HB_COUNT>& set, const V3& move, std::vector<STRS>& pose) {
             const auto& md = *g.rig.md;
             const Quat  R = g.rig.facing, Rc = R.conj();
@@ -5237,8 +5042,7 @@ namespace h3d {
 
     float CAvatarAnimator::turnBody(float yaw, float want, float dt, float speed) {
         float err = wrapPi(want - yaw);
-        // right round (going back the way it came): toward the side of the foot behind, which swings round while the
-        // one ahead pivots (either way round, the other foot would have to step across it)
+        // turning right round: toward the rear foot's side, so the feet don't cross
         if (std::abs(err) < 2.3f)
             m_turnSide = 0;
         else {
@@ -5246,22 +5050,19 @@ namespace h3d {
                 if (const SGait& g = gaitOf(m_gait); g.moving && !g.wasAir) {
                     const V3    F = forwardOf(yaw);
                     auto        along = [&](const SGaitFoot& ft) { return dot(ft.swing ? ft.to : ft.at, F); };
-                    const float d     = along(g.feet[0]) - along(g.feet[1]); // (the left ahead of the right)
+                    const float d     = along(g.feet[0]) - along(g.feet[1]); // > 0: left foot ahead
                     if (std::abs(d) > 0.05f)
                         m_turnSide = d > 0 ? 1 : -1;
                 }
-            // (from standing, or with the feet level: the way it's turning already, or the short way; kept till it's round)
+            // from standing or feet level: the current turn direction, else the short way; until round
             if (!m_turnSide)
                 m_turnSide = std::abs(m_turnRate) > 0.5f ? (m_turnRate > 0 ? 1 : -1) : err > 0 ? 1 : -1;
             if (m_turnSide && (err > 0) != (m_turnSide > 0))
                 err += m_turnSide > 0 ? TAU : -TAU;
         }
-        // as fast as closes the gap in about a ninth of a second, no faster than about half a turn in two steps (radians a
-        // second), nor than it can still slow down in; getting to that speed and back no quicker than TURN_ACCEL (at once,
-        // the whole body would jerk round as each key goes down)
-        if (std::abs(wrapPi(yaw - m_turnYaw)) > 1e-3f) // (the yaw was set: from still)
+        // ~1/9 s to close the gap, capped by `most` and braking distance
+        if (std::abs(wrapPi(yaw - m_turnYaw)) > 1e-3f) // yaw set elsewhere: restart
             m_turnRate = 0;
-        // (flying, slower: FLY_TURN, as a flier banks round)
         const float accel = m_flying ? FLY_TURN_ACCEL : TURN_ACCEL, most = m_flying ? FLY_TURN : speed > 3.f ? 5.f : 7.f, need = std::abs(err);
         m_turnRate = approach(m_turnRate, std::copysign(std::min({need * (m_flying ? 4.f : 9.f), most, std::sqrt(2.f * accel * need)}), err), accel * dt);
         m_turnYaw        = wrapPi(yaw + m_turnRate * dt);
@@ -5271,10 +5072,7 @@ namespace h3d {
     }
 
     std::optional<float> CAvatarAnimator::wayToFace(const SAvatarMotion& m, bool thirdPerson, float bodyYaw, float keysYaw) {
-        // (going back and forth: another turn back within ALT_BACK of one; held one way ALT_HOLD, it turns to it;
-        // running, it doesn't hold (it would run sideways); where it will be going WAY_AHEAD seconds on)
-        // (holding, it faces the way it has been going the last WAY_MEAN seconds, when it goes somewhere as it taps: the
-        // keys back the other way only slow it down)
+        // taps back and forth within ALT_BACK s keep the facing until one way is held ALT_HOLD s
         constexpr float ALT_BACK = 0.5f, ALT_HOLD = 0.4f, WAY_AHEAD = 0.25f, WAY_MEAN = 0.4f;
         m_wayClock += m.dt;
         m_wayMean += (V3{m.vel.x, 0, m.vel.z} - m_wayMean) * (1.f - std::exp(-m.dt / WAY_MEAN));
@@ -5300,7 +5098,6 @@ namespace h3d {
         if (m_wayHold && !m.run)
             return m_wayYaw;
         m_wayHold = false;
-        // (running, hardly ahead: the body turns as the way it goes does)
         const V3 to = keysAhead(m.vel, w, m, WAY_AHEAD * std::clamp((3.f - length(V3{m.vel.x, 0, m.vel.z})) / 1.5f, 0.2f, 1.f));
         return length(to) > 0.05f ? std::atan2(to.x, -to.z) : std::atan2(dir.x, -dir.z);
     }
@@ -5311,7 +5108,7 @@ namespace h3d {
             m_gait = makeGait(md);
         SGait&      g   = gaitOf(m_gait);
         const float dt  = std::clamp(m.dt, 0.f, 0.05f);
-        const V3    Pc  = origin(m.world); // (the player's body, as it moves)
+        const V3    Pc  = origin(m.world);
         const V3    Fw  = m.world.dir({0, 0, -1});
         const float yaw = std::atan2(Fw.x, -Fw.z);
         const V3    F = forwardOf(yaw), Rt = rightOf(yaw);
@@ -5320,9 +5117,7 @@ namespace h3d {
             velC = F * m.speed;
         const bool grounded = !air && !m.flying;
         g.time += dt;
-        // where the body will face t seconds on: turning on as turnBody turns it (at most 7 radians a second, speeding up
-        // at TURN_ACCEL, no further than it has to; what's left of the turn eased, as when a key goes down it jumps, and
-        // where a foot lands would with it); else as fast as it turns now, a moment on
+        // yawIn(t): body yaw t s on, from turnBody's turn, else the current rate briefly
         const bool turnKnown = m_turnKnown;
         m_turnKnown          = false;
         g.turnLeft           = turnKnown ? approach(g.turnLeft, m_turnLeft, TURN_PLAN * dt) : 0.f;
@@ -5334,34 +5129,24 @@ namespace h3d {
             return yaw + sgn * std::min(std::abs(g.turnLeft), r * t1 + 0.5f * TURN_ACCEL * t1 * t1 + 7.f * (t - t1));
         };
 
-        // the first time, back from a clip, or the body jumped (a respawn, a teleport: a move its velocity doesn't
-        // account for; a stair's step up is half a metre at most): standing where it is
+        // fresh: first frame, back from a clip, or teleported
         const V3   moved = Pc - g.lastP, unexplained = moved - V3{velC.x, m.vy, velC.z} * dt;
         const bool fresh = !g.live || !m_gaitUsed || length(V3{unexplained.x, 0, unexplained.z}) > 0.5f || std::abs(unexplained.y) > 1.f;
-        // (leaving the ground, landing, taking to the air from it: the pose changes all at once there, and what was shown
-        // settles into the new one; see SETTLE_AIR)
+        // takeoff and landing switch pose: settle into it
         if (!fresh && grounded != g.grounded)
             m_settleAsk = std::max(m_settleAsk, grounded ? SETTLE_LAND : m.flying ? SETTLE_FLY : SETTLE_AIR);
-        const bool leaving = !grounded && (g.grounded || fresh); // (the air's pose starts from how it was)
+        const bool leaving = !grounded && (g.grounded || fresh);
         g.grounded         = grounded;
-        // What the legs carry: the body going as a person's does, no quicker to start, stop or go back the other way
-        // than legs push it (the player's body starts at 10 m/s² and stops at 14: a person's feet couldn't keep under
-        // that). It follows the player's (see BODY_K): at a steady speed with it, behind it as it speeds up, slows down or
-        // turns back, never past it into a wall; with it in the air
-        const float bodyMost = lerpf(BODY_WALK_ACCEL, BODY_RUN_ACCEL, m.run ? 1.f : g.run); // (Shift down: as it sets off)
-        // (the player's body stopped quicker than the plugin slows it: it hit something)
+        // carried body: follows the player's (BODY_K) no harder than legs push, never into a wall
+        const float bodyMost = lerpf(BODY_WALK_ACCEL, BODY_RUN_ACCEL, m.run ? 1.f : g.run); // Shift: run accel from the start
+        // hit something: velocity changed faster than the plugin accelerates
         g.wall     = length(velC - g.lastVelC) > 1.5f * std::max({m.accel, m.decel, m.turnBack}) * dt + 0.05f ? 0.25f : std::max(0.f, g.wall - dt);
         g.lastVelC = velC;
-        // The pelvis's yaw (last frame's), and where it will face t seconds on, standing on foot `stand`: toward where
-        // the body will (yawIn), no further than the hip turns from that foot, which pivots on its ball toward it
-        // meanwhile (once it's a little off, no faster than PIVOT_RATE). Where the legs go is worked out from the pelvis:
-        // the body (and the head and the trunk after it) turns first, the legs step round after it
-        // (from the body's yaw now, as it was: the body has turned since; not wrapped, turning right round it may lag
-        // it by near half a turn)
+        // hy: last frame's pelvis yaw from the body's (unwrapped); legs are planned from it
         const float lagNow = fresh ? 0.f : g.hipLag - wrapPi(yaw - g.lastYaw), hy = yaw + lagNow;
-        // (and as far as it can turn by then: from as fast as it turns now, speeding up at HIP_ACCEL to HIP_RATE)
+        // hipIn(stand, t): pelvis yaw t s on, toward yawIn(t) within HIP_TURN of the standing foot
         auto        hipIn  = [&](int stand, float t) {
-            const float want = yawIn(t) - hy; // (from the pelvis now)
+            const float want = yawIn(t) - hy;
             const auto& o    = g.feet[stand];
             float       f    = wrapPi((o.swing ? o.toYaw : o.yaw) - hy);
             if (const float err = want - f; !o.swing && std::abs(err) > 0.3f)
@@ -5370,17 +5155,15 @@ namespace h3d {
             const float t1 = std::min((HIP_RATE - r) / HIP_ACCEL, t);
             return hy + std::copysign(std::min(std::abs(to), r * t1 + 0.5f * HIP_ACCEL * t1 * t1 + HIP_RATE * (t - t1)), to);
         };
-        // (how far out to foot s's side of the pelvis p is, meters)
+        // how far p is out on foot s's side of the pelvis
         auto outOf = [&](int s, const V3& p) { return dot(V3{p.x - g.pelvis.x, 0, p.z - g.pelvis.z}, rightOf(hy)) * (s ? 1.f : -1.f); };
-        // (how much of the velocity it's after the legs go for, the pelvis facing hipYaw while the body turns to bodyYaw:
-        // see GO_ON)
+        // share of the wanted velocity the legs take while the pelvis turns (GO_ON)
         auto goFor = [&](const V3& to, float hipYaw, float bodyYaw) {
             if (length(V3{to.x, 0, to.z}) < 0.05f)
                 return 1.f;
             const float wy = std::atan2(to.x, -to.z), off = std::abs(wrapPi(wy - hipYaw));
             const float turning = smoothstep01((off - std::abs(wrapPi(wy - bodyYaw)) - 0.3f) / 0.6f);
             const float along   = smoothstep01((std::cos(off) - std::cos(GO_OFF)) / (std::cos(GO_ON) - std::cos(GO_OFF)));
-            // (running, a turn goes round in a curve at speed: held back less, RUN_GO)
             return lerpf(1.f, lerpf(lerpf(GO_LEAST, 1.f, RUN_GO * (m.run ? 1.f : g.run)), 1.f, along), turning);
         };
         if (fresh || !grounded)
@@ -5392,7 +5175,6 @@ namespace h3d {
         const V3    P{g.bodyP.x, Pc.y, g.bodyP.z};
         const V3    vel = g.bodyV;
         const float v = length(vel), L = g.leg;
-        // how steeply the ground goes up the way it goes, from how fast the body climbs (up or down stairs, a slope)
         if (fresh || !grounded)
             g.slope = 0;
         else if (v > 0.3f && dt > 1e-4f)
@@ -5400,8 +5182,7 @@ namespace h3d {
         else
             g.slope *= std::exp(-dt * 2.f);
         const V3 way = v > 0.3f ? vel / v : F;
-        // where a foot can stand: the ground there, looked for near the body's feet (as far up or down as that slope
-        // goes: running down stairs a foot lands most of a metre below)
+        // ground under p, near the slope-extended feet height
         auto groundAt = [&](V3 p) {
             const float near = P.y + g.slope * dot(V3{p.x - P.x, 0, p.z - P.z}, way);
             p.y              = near;
@@ -5410,23 +5191,18 @@ namespace h3d {
                     p.y = *y;
             return p;
         };
-        // the ground under a foot pointing that way there (heel, ankle, middle, toes): on one line (a slope no steeper
-        // than SLOPE_MOST, or level), its pitch (toes down > 0), and the height it stands at: a slope's under the ankle,
-        // lying along it; else the highest (across a stair's edge, on the edge, not its toes inside the next step up)
+        // ground under a foot (heel, ankle, middle, toe): along one line, else the highest
         struct SUnder {
             float y = 0, lo = 0, hi = 0, pitch = 0;
-            bool  even = true; // (with room round it)
-            int   fit  = 3;    // how well it stands there: 3 even with room round it, 2 even, 1 all but the heel on one
-                               // tread (hanging over its edge, a long foot up a stair), 0 across an edge
+            bool  even = true; // line holds STAIR_ROOM past heel and toe
+            int   fit  = 3;    // 3 even + room, 2 even, 1 heel over an edge, 0 across
         };
         auto under = [&](V3 p, float fyaw, int s) {
-            // (one line a little past its heel and toes too, STAIR_ROOM: a foot coming down heel first onto a stair
-            // clears the edge behind it)
             const V3    f    = forwardOf(fyaw);
             const float back = std::max(g.foot[s].heel.z, 0.f), toe = std::max(-g.foot[s].toe.z, 0.01f);
             const float yb = groundAt(p - f * (back + STAIR_ROOM)).y, yh = groundAt(p - f * back).y, ya = groundAt(p).y;
             const float ym = groundAt(p + f * (0.5f * toe)).y, yt = groundAt(p + f * toe).y, yf = groundAt(p + f * (toe + 0.5f * STAIR_ROOM)).y;
-            const float k = (yt - yh) / (back + toe); // (up along it, a meter)
+            const float k = (yt - yh) / (back + toe); // rise per meter
             auto        on = [&](float y, float d) { return std::abs(y - (ya + k * d)) < SLOPE_EVEN; };
             SUnder      u;
             const bool  line = on(yh, -back) && on(ym, 0.5f * toe) && on(yt, toe) && std::abs(k) < std::tan(SLOPE_MOST);
@@ -5438,14 +5214,12 @@ namespace h3d {
             return u;
         };
         auto footY = [&](V3 p, float fyaw, int s) { return under(p, fyaw, s).y; };
-        // where a foot put down there stands (stairs, a kerb): the whole of it on one tread (or one slope), moved along
-        // itself as little as that takes (up to STAIR_SHIFT), else on the edge; on rough ground (bumps, no step) where it is
+        // footing: shifted along the foot (up to STAIR_SHIFT) onto one tread, else on the edge
         auto footing = [&](V3 p, float fyaw, int s) {
             const V3 f = forwardOf(fyaw);
             const auto u0 = under(p, fyaw, s);
             if (u0.even || u0.hi - u0.lo < 0.06f)
                 return V3{p.x, u0.y, p.z};
-            // (the nearest that fits best: with room round it, else even, else a long foot's heel over an edge)
             V3  best{p.x, u0.y, p.z};
             int fit = u0.fit;
             for (float d = 0.02f; d <= STAIR_SHIFT + 1e-4f && fit < 3; d += 0.02f)
@@ -5455,12 +5229,10 @@ namespace h3d {
                             best = {q.x, u.y, q.z}, fit = u.fit;
             return best;
         };
-        // the ankle over a foot's spot as ankleOver puts it on level ground, the whole foot turned to lie along the
-        // ground there (gp)
+        // ankle over a foot spot, tilted to ground pitch gp
         auto ankleAt = [&](const V3& at, float fyaw, float pitch, float gp, int s) {
             return at + yawTurn(fyaw).rotate(footPitch(gp).rotate(ankleOver({}, 0, pitch, g.foot[s], g.ankleH[s], g.toes[s])));
         };
-        // where each foot stands at rest, the body as it is now
         const float wide = g.stance * (1.f + 0.3f * g.crouch);
         auto        spot = [&](int s) { return footing(P + Rt * (s ? wide : -wide) + F * g.ahead[s], yaw, s); };
 
@@ -5484,7 +5256,7 @@ namespace h3d {
             g.velTurn += (std::clamp(turned / dt, -6.f, 6.f) - g.velTurn) * (1.f - std::exp(-dt * 12.f));
         } else
             g.velTurn = 0;
-        // (a key going down or up turns it at once: that's no curve)
+        // a key press jumps the wish: not a curve
         if (length(m.wish) > 0.3f && length(g.lastWish) > 0.3f && dt > 1e-4f) {
             const float turned = wrapPi(std::atan2(m.wish.x, -m.wish.z) - std::atan2(g.lastWish.x, -g.lastWish.z));
             g.wishTurn += ((std::abs(turned) < 0.3f ? std::clamp(turned / dt, -6.f, 6.f) : 0.f) - g.wishTurn) * (1.f - std::exp(-dt * 12.f));
@@ -5495,31 +5267,19 @@ namespace h3d {
             g.accel += ((vel - g.lastVel) / dt - g.accel) * (1.f - std::exp(-dt * 6.f));
         g.lastP = Pc, g.lastVel = vel, g.lastYaw = yaw;
 
-        // walk or run: as the player asks, or when a walk can't go that fast (Froude number over 0.8)
         const float froude = v * v / (GRAVITY * L);
         g.run    = approach(g.run, (m.run && v > 1.f) || froude > 0.8f ? 1.f : 0.f, dt * 4.f);
         g.crouch = approach(g.crouch, m.crouched && !m.flying ? 1.f : 0.f, dt * 5.f);
 
-        // how high the pelvis (the hips' bone) goes, over the ground: walking over the standing leg it rises by aWalk
-        // over its mean and sinks between steps (the legs' reach can take it lower there, below; the whole of it
-        // 4-5 cm at a brisk walk, as people's: over the standing leg the knee stays a little bent); running it sinks
-        // by aRun as the leg takes the weight and rises as much in the air, its mean as the foot lands and leaves
-        const float bob = L * (0.01f + 0.008f * std::min(v, 2.5f)); // (as far as the legs are made to reach, below)
+        // pelvis height: walking, highest over the standing leg; running, lowest under load
+        const float bob = L * (0.01f + 0.008f * std::min(v, 2.5f));
         const float hWalk = g.hipH - L * 0.0275f, aWalk = 0.7f * bob;
         const float hRun = g.hipH - L * 0.065f, aRun = L * (0.03f + 0.005f * std::min(v, 7.f));
         const float hCrouch = 0.36f * g.hipH * g.crouch;
 
-        // stride, cadence and duty factor for the speed. The stance (the ground the body covers over a foot) no
-        // longer than the legs span: from as far ahead as a leg reaches landing on its heel to as far behind as it
-        // reaches pushing off, and what rolling the foot carries the ankle along. Walking, a longer one takes shorter
-        // quicker steps (short legs and high heels do); running, the foot's time on the ground gets shorter, as it
-        // does going faster. The foot lands where that leaves as much of each reach to spare. (The legs reach from a
-        // pelvis no more than 3% of the leg below where the stride takes it between steps: further, and each step
-        // would drop the body twice as far as people's does)
-        // (going sideways or backwards, as in first person, the steps are shorter, the feet rolled less) (up or down
-        // stairs or a slope, the reaches are along the ground: up, further ahead than behind, down the other way round;
-        // down a flight a foot lands nearly under the body, as people's does, else the legs can't reach it)
-        const float ahead_ = v > 0.05f ? dot(vel / v, forwardOf(hy)) : 1.f; // how much of it is forward (of the pelvis), -1 backward
+        // stride, cadence and duty factor: the stance is capped by the legs' span (reach ahead + behind + foot roll);
+        // past it walking shortens steps, running shortens contact
+        const float ahead_ = v > 0.05f ? dot(vel / v, forwardOf(hy)) : 1.f; // forward share vs the pelvis, -1 backward
         g.forward          = approach(g.forward, ahead_, dt * 4.f);
         const float frontal = std::max(0.f, g.forward);
         float beta   = dutyFactor(v, g.run);
@@ -5531,7 +5291,7 @@ namespace h3d {
             const float pushP  = lerpf(through(WALK_STANCE_PITCH, 1), through(RUN_STANCE_PITCH, 1), g.run);
             float       fwd = 0, back = 0, roll = 0;
             const float sl = std::clamp(g.slope, -1.f, 1.f);
-            // (how far along the ground a leg reaches from a hip h over it: x² + (h - sl·x)² = reach²)
+            // reach along slope sl from hip height h: x² + (h - sl·x)² = reach²
             auto along = [&](float h, float reach, float sl) {
                 const float a = 1.f + sl * sl, b = sl * h, c = h * h - reach * reach;
                 return std::max(0.f, (b + std::sqrt(std::max(0.f, b * b - a * c))) / a);
@@ -5550,11 +5310,9 @@ namespace h3d {
             beta             = lerpf(beta, std::clamp(span / std::max(stride, 1e-3f), 0.2f, beta), g.run);
             ahead            = fwd - (fwd + back + roll - beta * stride) * fwd / std::max(fwd + back, 1e-3f);
         }
-        // (how far the pelvis has yet to turn to where the body goes, the keys down: 0 to 1 turning far)
+        // 0..1: pelvis far from the body's yaw
         const float turnFar = length(m.wish) > 0.1f ? smoothstep01((std::abs(wrapPi(yawIn(0.15f) - hy)) - 0.6f) / 0.8f) : 0.f;
-        // (strides a second; slowing through a turn back the other way, or turning far, the steps don't slow with it:
-        // only as the walking winds down; else they ease down to the pace, not at once; turning on the spot, as a quick
-        // step's)
+        // strides per second; drops slowly (CADENCE_DROP) reversing or turning far
         float cadence = std::max(v / std::max(stride, 1e-3f), lerpf(lerpf(0.8f, 1.3f, g.run), TURN_CADENCE, turnFar) * std::sqrt(0.9f / L));
         if (g.moving)
             cadence = std::max(cadence, g.cadence - dt * (dot(m.wish, vel) < 0 || std::abs(g.turnLeft) > 1.f || std::abs(g.hipLagV) > CADENCE_TURN ? CADENCE_DROP : 3.f));
@@ -5562,11 +5320,7 @@ namespace h3d {
         ahead               = lerpf(0.5f * beta * stride, std::clamp(ahead, 0.f, 0.5f * beta * stride), frontal);
         g.stride = stride, g.cadence = cadence, g.duty = beta, g.swingTime = (1.f - beta) / cadence;
 
-        // (stepping sideways the legs don't cross: a foot landing `left` seconds on lands on its own side of the other
-        // one, across the way the pelvis will face as it stands on it (turning right round, the feet turn after it: across
-        // their own way they would cross); nor further apart across than a step to the side goes: turning sharply, the
-        // way it goes swings round faster than the body does, and a foot put down ahead on that way would land far out
-        // to its side)
+        // a landing foot stays on its own side of the other, within a side step
         auto        uncross = [&](int s, V3 to, float left) {
             const auto& other  = g.feet[1 - s];
             const V3    beside = other.swing ? other.to : other.at;
@@ -5579,13 +5333,9 @@ namespace h3d {
                 to += rt * (sd * (apart - most));
             return to;
         };
-        // where a foot lifting now (or on its way) lands: `ahead` of where the body will be then, on its own side of
-        // the way. `left` = what's left of the swing, in seconds. Also how far it lands out to its side of the body (of
-        // the pelvis as it will face), meters
+        // landing(s, left): spot `ahead` of the body `left` s on, its yaw, how far out from the pelvis
         auto        landing = [&](int s, float left) {
-            // (where the body will be, and how it goes then: following the player's, going on toward what the keys ask
-            // for as the plugin moves it, turning on as they do (the camera turning); the step as long as for the speed
-            // then, where it's slowing down or turning back, or waiting for the pelvis to turn)
+            // simulate both bodies until then
             V3          at = P, bv = vel, ba = g.bodyA, cp = Pc, cv = velC;
             const float w  = std::abs(g.wishTurn) > 0.05f ? g.wishTurn : 0.f;
             for (int i = 0; i < 8; ++i) {
@@ -5599,16 +5349,12 @@ namespace h3d {
             at.y = P.y;
             const float bs = length(bv), stepAhead = ahead * std::clamp(bs / std::max(v, 0.3f), 0.f, 1.3f);
             const V3    fwd = bs > 0.05f ? bv / bs : v > 0.05f ? vel / v : forwardOf(yaw);
-            // (turned toward where the body will face no further than the hip turns from the pelvis as it lands, which
-            // is no further from the other foot: a sharp turn takes steps; and on its own side of the pelvis then: under
-            // its hip)
+            // within HIP_TURN of the pelvis at landing: sharp turns take steps
             const float ply  = hipIn(1 - s, left);
             const float ly   = ply + std::clamp(yawIn(left) - ply, -HIP_TURN, HIP_TURN);
             const V3    rt   = rightOf(ply + (ly - ply) * (1.f - smoothstep01(std::abs(g.slope) / 0.2f)));
             const float side = lerpf(wide * 0.9f, wide * 0.35f, g.run) * (s ? 1.f : -1.f);
-            // (a foot that will pivot on its ball as it stands, the body turning on past it, put down as far the other
-            // way as its heel swings: the ankle ends under the hip, not in under the body; on even ground, where it
-            // stands turned that far too: on a stair its heel would swing into the next step)
+            // a foot that will pivot lands offset by its heel swing, so the ankle ends under the hip
             const float rem = yawIn(left + g.duty / std::max(cadence, 0.1f)) - ly;
             const float piv = std::abs(rem) > 0.3f ? std::copysign(std::min(std::abs(rem) - 0.3f, PIVOT_RATE * g.duty / std::max(cadence, 0.1f)), rem) : 0.f;
             const V3    ball{0, 0, g.foot[s].ball.z}, place = uncross(s, at + fwd * stepAhead + rt * side, left);
@@ -5618,9 +5364,7 @@ namespace h3d {
         };
 
         if (!grounded) {
-            // off the ground: nothing planted, the fastest fall kept for the landing. Leaving it: the leg that goes on
-            // ahead (the one stepping, the furthest through its step; standing, or walking with both down, neither), and
-            // how fast it went
+            // in the air: at takeoff note the leading leg and the speed
             if (leaving) {
                 g.airLead  = -1;
                 float most = -1;
@@ -5636,9 +5380,7 @@ namespace h3d {
             g.airVy  = g.wasAir ? std::min(g.airVy, m.vy) : m.vy;
             g.wasAir = true;
         } else if (g.wasAir) {
-            // landed: the feet where they came down, the knees giving as it takes the fall. Going on (a key down, on its
-            // way), the stride goes on from the foot that comes down first (the lower, else the one ahead), the other on
-            // through the air if it's running (walking, it's down too): not stopping dead to start again
+            // landed moving: the stride goes on from the first foot down, not stopping dead
             g.wasAir = false;
             for (int s = 0; s < 2; ++s) {
                 auto& ft = g.feet[s];
@@ -5646,9 +5388,8 @@ namespace h3d {
             }
             g.groundY = P.y, g.groundV = g.groundRate = 0, g.lastSupport = NAN;
             const bool going = v > 0.8f && length(m.wish) > 0.1f;
-            if (going && beta < 0.5f) { // (walking, both come down: it steps on from standing)
-                // (as far into its time on the ground as where it came down says: the body is over it as much as the
-                // stride would have it by then, landing `ahead` of it)
+            if (going && beta < 0.5f) { // running; walking restarts from standing
+                // first foot's phase from how far the body is past it
                 const V3    d     = g.feet[0].ankle - g.feet[1].ankle;
                 const int   first = std::abs(d.y) > 0.03f ? (d.y < 0 ? 0 : 1) : dot(d, way) > 0 ? 0 : 1, other = 1 - first;
                 const float over  = ahead - dot(g.feet[first].at - P, way);
@@ -5668,19 +5409,16 @@ namespace h3d {
                     std::tie(ft.to, ft.toYaw, ft.toOut) = landing(other, (1.f - ph) / cadence);
                 }
             }
-            // (the hips going on down some as the body stops: see SETTLE_LAND)
             m_settleLift = LAND_GIVE;
             if (!m.flying)
                 g.dipV += std::clamp(-g.airVy - 1.5f, 0.f, 10.f) * (going ? 0.1f : 0.16f);
         }
 
         if (grounded) {
-            // starting: the foot furthest behind the way it goes lifts first (or one stepping already goes on); to go
-            // somewhere behind it, stepping round at once (the legs go that way once the pelvis has turned to it)
+            // starting: the rear foot lifts first
             if (!g.moving && (v > 0.25f || turnFar > 0.5f)) {
                 g.moving = true;
-                // (turning far as it starts, the foot on the side it turns to: it opens the turn, as people step, where
-                // the other would step across it)
+                // a far turn: the foot on its side leads
                 int lead = g.feet[0].swing ? 0 : g.feet[1].swing ? 1 : -1;
                 if (lead < 0)
                     lead = turnKnown && std::abs(m_turnLeft) > 1.f ? (m_turnLeft > 0 ? 1 : 0) : dot(g.feet[0].at - g.feet[1].at, vel) < 0 ? 0 : 1;
@@ -5690,11 +5428,10 @@ namespace h3d {
                 g.phaseOff     = phaseDiff(g.phaseOff + was - g.phase);
                 ft.phase       = ft.swing ? ph : beta - 1e-4f;
                 ft.start       = beta;
-                ft.timed = ft.wait = false; // (a step of its own goes on as the gait's, eased into it)
+                ft.timed = ft.wait = false; // becomes a gait step, eased
                 g.feet[1 - lead].phase = frac(ph + 0.5f);
             } else if (g.moving && v < 0.12f && length(velC) < 0.3f && length(m.wish) < 0.1f) {
-                // stopping: a foot in the air comes down beside the other in what's left of its step (not going back
-                // the other way, what the legs carry slowing through a stand as the player's already goes)
+                // stopping: a foot in the air lands beside the other
                 g.moving = false;
                 for (auto& ft : g.feet)
                     if (ft.swing) {
@@ -5704,18 +5441,14 @@ namespace h3d {
             }
 
             if (g.moving) {
-                // (a planted foot the body leaves to its side, turning sharply, not ahead of it as it pushes off anyway;
-                // or nearly out of the leg's reach: the pelvis down further than walking takes it, 0 to 1 and more as
-                // it's dragged)
+                // strained: planted foot nearly out of reach; leaving: body moving off it sideways or strained
                 auto strained = [&](int s) { return std::max(0.f, (g.feet[s].tight - 0.55f) / 0.25f) + std::max(0.f, g.feet[s].over / 0.015f); };
                 auto leaving = [&](int s) {
                     const auto& ft = g.feet[s];
                     const V3    d{P.x - ft.at.x, 0, P.z - ft.at.z};
                     return !ft.swing && dot(d, vel) > 0 && (std::abs(dot(d, rightOf(ft.yaw))) > 0.35f * length(d) || strained(s) > 0);
                 };
-                // quicker steps while the standing foot is left behind (turning sharply, stopping short, going back)
-                // (or nearly out of the leg's reach as the body leaves it)
-                // (or left out to its side of the hip: walking round a tight curve, quicker shorter steps)
+                // hurry while a planted foot is left behind, out of reach or out to its side
                 float behind = 1.f;
                 for (int s = 0; s < 2; ++s)
                     if (const auto& ft = g.feet[s]; !ft.swing) {
@@ -5729,15 +5462,11 @@ namespace h3d {
                 g.hurry = std::min(behind * behind, 2.5f);
                 g.phase = frac(g.phase + cadence * dt * g.hurry);
                 g.hurrySmooth += (g.hurry - g.hurrySmooth) * (1.f - std::exp(-dt * 10.f));
-                // (the body's swing going on at the eased pace: hurrying all at once, the arms and the pelvis would jerk)
+                // body swing at the eased pace, or arms and pelvis jerk
                 g.phaseOff = phaseDiff(g.phaseOff + cadence * dt * (g.hurrySmooth - g.hurry));
-                // a foot the body has turned or moved away from, walking, lifts early (as people step out of a turn):
-                // the stride goes on from its lifting, the other foot being down (the one that needs it more, and not
-                // one just down)
+                // walking, a foot the body turned or moved from lifts early
                 int   lift = -1;
                 float need = 0;
-                // (how long a foot in the air at phase ph has yet to go: turning, or speeding up or slowing down, the steps
-                // as hurried as now; walking steadily as the stride goes, though the steps hurry to keep up)
                 const float changing  = std::max({turnFar, smoothstep01(std::abs(g.turnLeft) / 0.8f), smoothstep01((length(g.accel) - 1.f) / 2.f)});
                 auto        swingLeft = [&](float ph) { return (1.f - ph) / (cadence * lerpf(1.f, g.hurry, changing)); };
                 for (int s = 0; s < 2; ++s) {
@@ -5763,8 +5492,7 @@ namespace h3d {
                     auto&       ft = g.feet[s];
                     const float ph = frac(g.phase + 0.5f * s);
                     if (ft.swing && ft.timed) {
-                        // a step of its own from standing still going on (the other foot took the lead starting again):
-                        // down where the gait puts it, then on the ground till its time there comes round
+                        // a standing step overtaken by the gait: land where it says, then wait for the stance
                         ft.s = std::min(1.f, ft.s + dt * ft.rate);
                         if (ft.s < 0.7f) {
                             const auto [to, ly, lo] = landing(s, (1.f - ft.s) / std::max(ft.rate, 1e-3f));
@@ -5781,7 +5509,7 @@ namespace h3d {
                     } else if (!ft.swing) {
                         if (ft.wait && ph < beta)
                             ft.wait = false;
-                        // lifts as its time on the ground is over (not just before landing again: it waits a stride)
+                        // lifts when its stance ends, not just before landing again
                         if (!ft.wait && ph >= beta && ph < 0.92f && ft.phase <= ph) {
                             ft.swing = true, ft.timed = false, ft.locked = false, ft.gaitW = 1;
                             ft.from = ft.at, ft.fromYaw = ft.yaw, ft.fromPitch = ft.pitch, ft.liftKnee = ft.knee, ft.fromOut = outOf(s, ft.at);
@@ -5789,7 +5517,7 @@ namespace h3d {
                             std::tie(ft.to, ft.toYaw, ft.toOut) = landing(s, swingLeft(ph));
                         }
                     } else if (ph < ft.phase - 0.5f) {
-                        // it came round: down
+                        // phase wrapped: landed
                         ft.swing = false;
                         ft.at = ft.to, ft.yaw = ft.toYaw, ft.landed = g.time;
                     } else {
@@ -5801,34 +5529,28 @@ namespace h3d {
                             ft.to += (to - ft.to) * k;
                             ft.toYaw += wrapPi(ly - ft.toYaw) * k;
                             ft.toOut += (lo - ft.toOut) * k;
-                            // (uncrossed as it goes, else it jumps as it locks; eased, as where the body will face jumps
-                            // as a key goes down)
+                            // uncross in flight, eased, so locking doesn't jump
                             ft.to += (uncross(s, ft.to, swingLeft(ph)) - ft.to) * (1.f - std::exp(-dt * 25.f));
                             ft.locked = ft.s > 0.75f;
-                        } else { // (where it lands stays, but for crossing the other leg as the body turns on, or the body
-                                 // stopping short or turning back)
-                            // (going there once it's 10 cm off, eased in from 6; and kept uncrossed eased, as at once the
-                            // foot would jump as what it stands beside goes from where the other foot is to where it lands)
+                        } else { // locked: big changes only
+                            // retarget past 6 cm; uncross eased (the other foot's reference jumps)
                             if (const auto [to, ly, lo] = landing(s, swingLeft(ph)); length(to - ft.to) > 0.06f)
                                 ft.to += (to - ft.to) * (smoothstep01((length(to - ft.to) - 0.06f) / 0.04f) * (1.f - std::exp(-dt * 8.f)));
                             ft.to += (uncross(s, ft.to, swingLeft(ph)) - ft.to) * (1.f - std::exp(-dt * 25.f));
                         }
-                        // (as it comes down, onto one tread where it's got to, not across the edge: heel or toes up in the air;
-                        // going there no faster than RETARGET, below)
+                        // locked: onto one tread, not across an edge; moves at most RETARGET over body speed
                         if (ft.locked) {
                             const V3 fl = footing(ft.to, ft.toYaw, s);
                             ft.to.x = fl.x, ft.to.z = fl.z;
                         }
                         if (V3 d{ft.to.x - was.x, 0, ft.to.z - was.z}; length(d) > (RETARGET + v) * dt)
                             ft.to = was + d * ((RETARGET + v) * dt / length(d));
-                        // (on whatever's under it there: going onto the next stair, the higher)
                         ft.to.y = footY(ft.to, ft.toYaw, s);
                     }
                     ft.phase = ph;
                 }
             } else {
-                // standing: a foot that's off its spot (the body moved, or turned away from it) steps back under the body,
-                // the one furthest off first
+                // standing: a foot off its spot steps back, the furthest first
                 g.hurry = 1;
                 g.hurrySmooth += (1.f - g.hurrySmooth) * (1.f - std::exp(-dt * 10.f));
                 g.pause -= dt;
@@ -5863,7 +5585,7 @@ namespace h3d {
                     if (!ft.swing)
                         continue;
                     ft.s = std::min(1.f, ft.s + dt * ft.rate);
-                    if (ft.s < 0.7f) { // (it follows the body; then it's coming down, on what's under it there)
+                    if (ft.s < 0.7f) { // follows the body, then comes down
                         const float k = 1.f - std::exp(-dt * 12.f);
                         ft.to += (spot(s) - ft.to) * k;
                         ft.toYaw += wrapPi(yaw + std::clamp(g.yawRate * 0.3f, -0.5f, 0.5f) - ft.toYaw) * k;
@@ -5877,26 +5599,23 @@ namespace h3d {
                 }
             }
         }
-        // (critically damped, as are the pelvis's turn and the knee's fold: eased in and out, not starting or stopping at
-        // once as each key goes down or up)
+        // eased so the gait doesn't start or stop at once
         springTo(g.moveW, g.moveWV, g.moving ? std::clamp(v / 0.7f, 0.f, 1.f) : 0.f, 14.f, dt);
         g.moveW        = std::clamp(g.moveW, 0.f, 1.f);
         const float mw = g.moveW;
 
-        // a planted foot the body turns away from pivots on its ball, as people turn on the standing foot (walking,
-        // once it's a little off; standing, as far as the hip turns: past that it steps). The pelvis turns toward the
-        // body's yaw as far as the planted legs let it, the trunk and the head turning on ahead of it
+        // planted feet pivot on the ball as the body turns; the pelvis turns as far as they allow
         if (grounded) {
             const float from = g.moving ? 0.3f : HIP_TURN;
             for (int s = 0; s < 2; ++s) {
                 auto& ft   = g.feet[s];
                 float rate = 0;
-                // (how far the body is turned from it: by way of the pelvis, which turns after the body the way it turns)
+                // via the pelvis, so it unwraps the right way
                 if (const float need = -lagNow - wrapPi(ft.yaw - hy), over = std::abs(need) - (ft.spin > 0.05f ? 0.03f : from); !ft.swing && over > 0) {
                     const float turn = std::copysign(std::min(over, PIVOT_RATE * dt), need);
                     const V3    ball{0, 0, g.foot[s].ball.z}, heel{0, 0, std::max(g.foot[s].heel.z, 0.f)};
                     const V3    at = ft.at + yawTurn(ft.yaw).rotate(ball) - yawTurn(ft.yaw + turn).rotate(ball);
-                    // (not swinging its heel into a step: see PIVOT_CLEAR; it stays as it is, and it steps round instead)
+                    // no pivot swinging the heel into a step (PIVOT_CLEAR): it steps instead
                     if (groundAt(at + yawTurn(ft.yaw + turn).rotate(heel)).y < ft.at.y + std::tan(ft.gp) * heel.z + PIVOT_CLEAR) {
                         ft.at  = at;
                         ft.yaw = wrapPi(ft.yaw + turn);
@@ -5905,7 +5624,7 @@ namespace h3d {
                 }
                 ft.spin += (rate - ft.spin) * (1.f - std::exp(-dt * 15.f));
             }
-            // (the pelvis's yaw from the body's: it turns in the world, not along with the body)
+            // pelvis lag range the planted feet allow
             float lo = -1e9f, hi = 1e9f;
             for (const auto& ft : g.feet)
                 if (!ft.swing) {
@@ -5913,9 +5632,7 @@ namespace h3d {
                     lo            = std::max(lo, c - HIP_TURN);
                     hi            = std::min(hi, c + HIP_TURN);
                 }
-            // (as fast as closes the gap in about a 25th of a second, no faster than HIP_RATE, speeding up and slowing
-            // down no quicker than HIP_ACCEL: a foot lifting that held it back, it turns on after the other, not round
-            // at once)
+            // within HIP_RATE / HIP_ACCEL: no snap round when a foot lifts
             const float need = (lo <= hi ? std::clamp(0.f, lo, hi) : 0.5f * (lo + hi)) - lagNow;
             g.hipLagV        = approach(g.hipLagV, std::copysign(std::min({std::abs(need) * 25.f, HIP_RATE, std::sqrt(2.f * HIP_ACCEL * std::abs(need))}), need), HIP_ACCEL * dt);
             g.hipLag         = lagNow + (std::abs(g.hipLagV * dt) > std::abs(need) && g.hipLagV * need > 0 ? need : g.hipLagV * dt);
@@ -5927,17 +5644,15 @@ namespace h3d {
                 ft.spin = 0;
         }
 
-        const V3 Rp = rightOf(yaw + g.hipLag); // (the pelvis's right: what it sways and leans across)
+        const V3 Rp = rightOf(yaw + g.hipLag);
 
-        // the feet: planted ones rolled over the heel and the ball as the stride goes, the others on their way (backwards
-        // the other way round: onto the toes first, off the heel; sideways flat)
+        // planted feet roll heel to toe (backwards the reverse, sideways flat)
         const float roll = g.forward >= 0 ? g.forward : 0.4f * g.forward;
         std::array<V3, 2>   ankleW;
         std::array<Quat, 2> footW;
         float               support = 0; // the ground under them
         auto toesUp = [&](int s, float pitch) { return pitch < 0 ? pitch * g.toesUp[s] : pitch; };
-        // a foot's pitch this frame toward `want` from last frame's: no quicker than FOOT_ROLL, and speeding up and
-        // slowing down to it no quicker than FOOT_ROLL_ACCEL (a second call in a frame starts over)
+        // pitch toward `want`, rate-limited (FOOT_ROLL, FOOT_ROLL_ACCEL)
         auto rollTo = [&](SGaitFoot& ft, float want) {
             const float err = want - ft.heel, most = FOOT_ROLL_ACCEL * dt;
             const float stop = std::copysign(std::min(std::abs(err) / std::max(dt, 1e-4f), std::sqrt(2.f * FOOT_ROLL_ACCEL * std::abs(err))), err);
@@ -5954,23 +5669,21 @@ namespace h3d {
             V3          at = ft.at;
             float       fy = ft.yaw, pitch = 0;
             if (!grounded)
-                continue; // (the air's pose, below)
+                continue; // air pose below
             if (!ft.swing) {
                 const float u = std::clamp(frac(g.phase + 0.5f * s) / beta, 0.f, 1.f);
                 pitch         = g.moving ? toesUp(s, lerpf(through(WALK_STANCE_PITCH, u), through(RUN_STANCE_PITCH, u), g.run) * mw * roll) : 0.f;
-                if (!g.moving) // (flat again, gently)
+                if (!g.moving)
                     pitch = ft.pitch * std::exp(-dt * 14.f);
-                if (ft.spin > 1e-3f) // (pivoting: on its ball)
+                if (ft.spin > 1e-3f) // on its ball
                     pitch = std::max(pitch, 0.15f * ft.spin);
                 support += at.y * 0.5f;
                 ft.gp += (under(at, fy, s).pitch - ft.gp) * (1.f - std::exp(-dt * 20.f));
             } else {
-                // (running, the foot still comes down going ahead some: it doesn't reach out past where it lands and
-                // come back as far)
-                // (as the gait's step or one of its own, or on its way from one to the other)
+                // running, the foot still moves ahead as it lands; gw blends the gait's step with its own
                 const float gw = smoothstep01(ft.gaitW);
                 const float u = ft.s, e = lerpf(minJerk(u), u * u * (3.f - 2.f * u) + 0.6f * u * u * (u - 1.f), g.run * gw);
-                // (the height it goes to eased as where it lands moves onto another stair, exactly that as it lands)
+                // landing height eased onto a new stair, exact at touchdown
                 if (!ft.toYSet)
                     ft.toY = ft.to.y, ft.toYV = 0, ft.toYSet = true, ft.fromGp = ft.gp;
                 else
@@ -5980,10 +5693,7 @@ namespace h3d {
                 V3 to = ft.to;
                 to.y  = lerpf(ft.toY, ft.to.y, smoothstep01((ft.s - 0.8f) / 0.2f));
                 at    = lerp(ft.from, to, e);
-                // (under its hip, whichever way the pelvis turns meanwhile: out to its side, or in under the body, no
-                // further than where it lifted and where it lands are, and SWING_OUT or SWING_IN, from the pelvis as it
-                // was last frame; not swung out round the body as the pelvis turns over the other foot. Not onto
-                // higher ground: turning round on a stair, across the pelvis is up or down the steps)
+                // keep it under its hip as the pelvis turns (SWING_OUT / SWING_IN), not onto higher ground
                 {
                     const float sd = s ? 1.f : -1.f, ends = lerpf(ft.fromOut, ft.toOut, ft.s), hipOut = std::abs(g.hipAt[s].x);
                     const float was = dot(V3{at.x - g.pelvis.x, 0, at.z - g.pelvis.z}, Rp) * sd;
@@ -5992,8 +5702,7 @@ namespace h3d {
                         std::abs(lim - was) > 1e-4f && under(in, ft.fromYaw + wrapPi(ft.toYaw - ft.fromYaw) * e, s).hi < std::max(ft.from.y, to.y) + 0.02f)
                         at.x = in.x, at.z = in.z;
                 }
-                // up a step: up first, then over; down one: over its edge, then down; else over as it goes; and over
-                // whatever's under it on the way (a stair's edge), but where it lifts and lands
+                // step up: up then over; step down: over then down; clear edges on the way
                 const float rise = to.y - ft.from.y;
                 at.y = ft.from.y + rise * (rise > 0.03f ? minJerk(std::min(1.f, ft.s * 1.7f)) : rise < -0.03f ? minJerk(std::clamp((e - 0.25f) / 0.75f, 0.f, 1.f)) : e);
                 if (std::abs(rise) > 0.03f || std::abs(footY(ft.from, ft.fromYaw, s) - ft.from.y) > 0.03f)
@@ -6011,16 +5720,13 @@ namespace h3d {
             }
             if (!ft.swing)
                 ft.toYSet = false;
-            pitch     = rollTo(ft, pitch); // (as a foot rolls)
+            pitch     = rollTo(ft, pitch);
             ft.pitch  = pitch;
             ankleW[s] = ankleAt(at, fy, pitch, ft.gp, s);
             footW[s]  = yawTurn(fy) * footPitch(pitch + ft.gp);
         }
 
-        // the ground under the feet (up a stair as a foot gets there), springy; going somewhere, what the body goes over:
-        // the ground's mean from a little behind it to a little ahead the way it goes (the line of a flight of stairs,
-        // not a step at a time; running down one the feet are left behind on the steps above). Critically damped toward
-        // it as it goes on up or down, else a pelvis following it up a flight lags behind, the knees bent
+        // pelvis ground: mean along the heading (a flight's line); springy, tracking the climb rate
         if (grounded) {
             if (mw > 0.01f) {
                 float line = 0;
@@ -6038,37 +5744,32 @@ namespace h3d {
                 g.groundY = support, g.groundV = g.groundRate;
         } else
             g.groundY = P.y, g.groundV = g.groundRate = 0, g.lastSupport = NAN;
-        // the knees giving as it lands, and back
         {
             constexpr float W = 11.f;
             g.dipV += (-g.dip * W * W - 2.f * 0.75f * W * g.dipV) * dt;
             g.dip = std::clamp(g.dip + g.dipV * dt, -0.03f * L, 0.3f * L);
         }
 
-        // the pelvis: over the body, down a little as the knees bend (more running), rising and sinking with each
-        // step (walking highest over the standing leg, running lowest), swaying over the standing foot
+        // pelvis: over the body, bobbing and swaying
         springTo(g.phaseOff, g.phaseOffV, 0.f, 15.f, dt);
         const float phL = g.phase + g.phaseOff, mid = 4.f * PI * (phL - beta * 0.5f);
         const float gaitY = lerpf(hWalk + aWalk * std::cos(mid), hRun - aRun * std::cos(mid), g.run);
         float       rollW = 0; // standing: onto one leg
         if (grounded && !g.moving) {
-            // standing: the weight onto the foot that stays while the other steps, else swaying slowly between them
+            // standing: weight onto the planted foot while the other steps, else a slow sway
             for (int s = 0; s < 2; ++s)
                 if (g.feet[s].swing)
                     rollW += dot(g.feet[1 - s].at - P, Rp) * 0.55f * std::sin(PI * std::min(1.f, g.feet[s].s * 1.2f));
             rollW += L * 0.012f * std::sin(TAU * g.time / 6.5f) * (1.f - mw);
         }
-        // (eased: stopping with a foot well out to the side, as from a sidestep, it doesn't jump onto it)
+        // eased: no jump onto a far-out foot when stopping
         g.rollW += (rollW - g.rollW) * (1.f - std::exp(-dt * 12.f));
         rollW = g.rollW;
-        // (walking into running and back, the arms and the trunk ease from one to the other: at a steady rate, as the
-        // legs' stride goes, the elbows would bend and the swing grow all at once as Shift goes down or up)
+        // eased walk/run blend for arms and trunk
         springTo(g.runArms, g.runArmsV, g.run, 12.f, dt);
         const float ra = std::clamp(g.runArms, 0.f, 1.f);
-        // The body over the steps as the avatar's walk and run have it (SGaitClip: made in Blender), at the body's phase:
-        // walking to running as the arms ease, swung about its mean as far as the speed takes it (GAIT_WALK), as much of it
-        // as the body walks (sw: standing, the walking's own). Its hips, trunk, head and arms in place of the walking's
-        // own swing; what that adds for turning, leaning, crouching and keeping the arms clear of the body stays
+        // styled: the walk/run clips (SGaitClip) drive hips, trunk, head and arms at the body's phase; turns, lean,
+        // crouch and arm clearance stay procedural
         const bool                 styled = m_gaitStyle && grounded && md.gaitClips[0] && md.gaitClips[1];
         const float                amp    = std::clamp(v / (lerpf(GAIT_WALK, GAIT_RUN, ra) * std::sqrt(L / GAIT_LEG)), GAIT_LEAST, GAIT_MOST);
         std::array<Quat, HB_COUNT> sMean;
@@ -6093,24 +5794,22 @@ namespace h3d {
             styleAt(phL, sT, sMove);
         const float sw = styled ? smoothstep01(mw) : 0.f;
         const auto& sHas = styled ? md.gaitClips[0]->has : std::array<bool, HB_COUNT>{};
-        // (the clip's bones as this avatar has them: a bone it doesn't have, as the one below it; its top (the arms'
-        // frame) its upper chest, else chest)
+        // clip turn of bone b, or of the nearest lower bone the clip has
         auto sAt = [&](const std::array<Quat, HB_COUNT>& T, int b) {
             for (; b > HB_HIPS && !sHas[b]; --b)
                 ;
             return T[b];
         };
-        // (the clip's sway: its hips to their left, in hips heights; here + = right, meters)
+        // sway, m, + = right (the clip's: hips heights, + = left)
         const float lat = lerpf(-mw * L * 0.028f * (1.f - 0.65f * g.run) * std::cos(2.f * PI * (phL - beta * 0.5f)), -mw * (sMove.x - sMeanMove.x) * g.unit, sw) +
-            rollW; // (+ = right)
+            rollW;
         V3          pelvis = P + Rp * lat;
         pelvis.y  = (grounded ? g.groundY : P.y) + lerpf(g.hipH - 0.006f * L, gaitY, mw) - hCrouch - g.dip;
 
-        // Off the ground (JUMP_*, FLY_*): the pose it goes to, and the springs going there; leaving the ground they start
-        // from how the legs, the arms and the trunk were
+        // in the air (JUMP_*, FLY_*): springs toward the pose, from the grounded pose at takeoff
         g.flyE.to(m.flying ? 1.f : 0.f, 7.f, 1.f, dt);
-        const float fe = smoothstep01(std::clamp(g.flyE.x, 0.f, 1.f)); // (flying, eased)
-        float       ju = 0.5f, hover = 0;                              // (how far through a jump; hovering, 0..1)
+        const float fe = smoothstep01(std::clamp(g.flyE.x, 0.f, 1.f));
+        float       ju = 0.5f, hover = 0;
         if (!grounded) {
             if (leaving) {
                 const Quat hq = yawTurn(yaw);
@@ -6118,7 +5817,7 @@ namespace h3d {
                 for (int s = 0; s < 2; ++s) {
                     auto&       al = g.airLeg[s];
                     const auto& ft = g.feet[s];
-                    const V3    d  = hq.conj().rotate(ft.ankle - was - hq.rotate(g.hipAt[s])); // (avatar space: ahead -z, right +x)
+                    const V3    d  = hq.conj().rotate(ft.ankle - was - hq.rotate(g.hipAt[s])); // avatar space: ahead -z, right +x
                     const float t = g.thigh[s], sh = g.shin[s], dist = std::clamp(length(d), std::abs(t - sh) + 1e-3f, t + sh);
                     const float knee = std::acos(std::clamp((dist * dist - t * t - sh * sh) / (2.f * t * sh), -1.f, 1.f));
                     const float hip  = std::atan2(-d.z, -d.y) + std::asin(std::clamp(sh * std::sin(knee) / dist, -1.f, 1.f));
@@ -6128,13 +5827,12 @@ namespace h3d {
                 }
                 g.airLean  = {g.leanWas, 0};
                 g.airPitch = g.airRoll = g.airYaw = {};
-                // (a jump: the body pushed up over a moment, not off like a shot)
+                // a jump lifts the body over a moment
                 m_settleLift = m.vy > 1.f ? 1.f : 0.f;
             }
             // a jump or a fall
             ju            = std::clamp(0.5f - m.vy / (2.f * JUMP_UP), 0.f, 1.f);
             const float r = g.airLead >= 0 ? g.airRun : 0.f;
-            // flying, by how it goes: ahead (cruise, and flat out), hovering, climbing or sinking with little way on
             const float u = dot(vel, F), side = dot(vel, Rt), vy = m.vy, sp = std::sqrt(u * u + side * side + vy * vy);
             const float cruise = 1.f - std::exp(-std::max(u, 0.f) / FLY_LIE_SPEED), fast = std::clamp((u - 9.f) / 6.f, 0.f, 1.f);
             const float climb = std::clamp(vy / 6.f, 0.f, 1.f) * (1.f - cruise), sink = std::clamp(-vy / 6.f, 0.f, 1.f) * (1.f - cruise);
@@ -6144,20 +5842,17 @@ namespace h3d {
             pitchTo += std::clamp(FLY_PUSH * aF, -FLY_BRAKE_MOST, FLY_PUSH_MOST) + 0.2f * std::clamp(-vy / 8.f, 0.f, 1.f) * cruise;
             float rollTo = std::clamp(std::atan(length(vel) * g.velTurn / GRAVITY) * 0.9f + 0.06f * side + 0.02f * aR, -FLY_BANK, FLY_BANK) +
                 0.035f * std::sin(TAU * 0.21f * g.time) * hover;
-            // (first person, from its eyes: lying along the flight would take the camera down and ahead; hardly, and
-            // banking less)
+            // first person: barely lie down or bank (camera in the eyes)
             if (m.fp.on)
                 pitchTo *= 0.25f, rollTo *= 0.5f;
             const float lw = lerpf(AIR_LEG_W, FLY_LEG_W, fe), lz = lerpf(AIR_LEG_Z, FLY_LEG_Z, fe);
             for (int s = 0; s < 2; ++s) {
-                // jumping: tucked, reaching down to land; from a run the leg stepping goes on ahead, the other trailing
+                // jump: legs tucked; from a run, a stride in the air
                 const bool lead = s == g.airLead;
                 float hipJ  = lerpf(through(JUMP_HIP, ju) + (s ? 0.04f : -0.02f), through(lead ? JUMP_LEAD_HIP : JUMP_TRAIL_HIP, ju), r);
                 float kneeJ = lerpf(through(JUMP_KNEE, ju) + (s ? 0.08f : 0.f), through(lead ? JUMP_LEAD_KNEE : JUMP_TRAIL_KNEE, ju), r);
                 float toesJ = lerpf(through(JUMP_TOES, ju), through(lead ? JUMP_LEAD_TOES : JUMP_TRAIL_TOES, ju), r);
-                // flying: hovering the right leg bent and the left nearly straight, treading slowly; flying ahead trailing
-                // along the body (the right knee bent, less flat out), fluttering a little; climbing they hang straight,
-                // sinking they come up under it; swinging back as it speeds up and ahead as it slows
+                // flying legs: per-mode poses, treading and flutter
                 const bool  bent = s == 1;
                 const float sd   = s ? PI : 0.f;
                 float hipF  = lerpf(bent ? 0.32f : 0.12f, bent ? 0.05f : -0.08f, cruise);
@@ -6174,9 +5869,7 @@ namespace h3d {
                 al.out.to(lerpf(0.06f, lerpf(0.05f, 0.02f, cruise), fe), lw, lz, dt);
                 al.toes.to(lerpf(toesJ, toesF, fe), lw, lz, dt);
                 al.knee.x = std::clamp(al.knee.x, 0.f, 2.4f);
-                // the arms: from standing swinging up then out; from a run against the legs, bent as running; flying
-                // hovering held out a little, drifting; ahead swept back along the body (closer flat out); climbing down
-                // by it, sinking out; forward and out slowing down; out on the high side of a bank
+                // air arms likewise, out on a bank's high side
                 const float aheadJ = lerpf(through(JUMP_ARM, ju), through(lead ? JUMP_ARM_BACK : JUMP_ARM_AHEAD, ju), r);
                 const float outJ   = lerpf(through(JUMP_ARM_OUT, ju), through(JUMP_ARM_RUN_OUT, ju), r);
                 const float bendJ  = lerpf(0.4f, through(JUMP_ARM_RUN_BEND, ju), r);
@@ -6185,7 +5878,7 @@ namespace h3d {
                 float bendF  = lerpf(lerpf(lerpf(0.5f, lerpf(0.25f, 0.12f, fast), cruise), 0.3f, climb), 0.45f, sink);
                 aheadF += 0.06f * std::sin(TAU * 0.27f * g.time + s * 2.1f) * hover + std::clamp(-0.012f * aF, 0.f, 0.45f);
                 outF += 0.05f * std::sin(TAU * 0.19f * g.time + s) * hover + std::clamp(-0.006f * aF, 0.f, 0.25f);
-                const float up = g.airRoll.x * (s ? -1.f : 1.f); // (this arm's side up, rolled)
+                const float up = g.airRoll.x * (s ? -1.f : 1.f); // this arm's side rolled up
                 outF += up > 0 ? 0.3f * up : 0.12f * up;
                 auto& aa = g.airArm[s];
                 aa.ahead.to(lerpf(aheadJ, aheadF, fe), AIR_ARM_W, AIR_ARM_Z, dt);
@@ -6194,8 +5887,7 @@ namespace h3d {
                 aa.out.x  = std::clamp(aa.out.x, 0.f, 1.4f);
                 aa.bend.x = std::clamp(aa.bend.x, 0.f, 2.4f);
             }
-            // the trunk: jumping ahead a little (more from a run), upright at the top; flying curled a little hovering,
-            // arched flying ahead
+            // air trunk: jump lean, or flying (curled hovering, arched cruising)
             const float leanJ = lerpf(through(JUMP_LEAN, ju), through(JUMP_RUN_LEAN, ju), r);
             const float leanF = lerpf(lerpf(lerpf(0.06f, lerpf(-0.15f, -0.22f, fast), cruise), -0.05f, climb), 0.1f, sink);
             g.airLean.to(lerpf(leanJ, leanF, fe), AIR_ARM_W, AIR_ARM_Z, dt);
@@ -6205,24 +5897,22 @@ namespace h3d {
         } else
             g.airPitch = g.airRoll = g.airYaw = {};
 
-        // its turns (the frame above: +x the avatar's left, +y up, +z ahead): with the stride (the hip of the leg going
-        // ahead goes ahead too), dropping on the side of the swinging leg, tilted ahead a little; leaning into turns
+        // pelvis turns (frame above: +x left, +y up, +z ahead): with the stride, into turns
         const float fwdA  = dot(g.accel, F);
-        // (as far as it's pushed sideways, round a curve or setting off to its side: not as the body turns round on the
-        // spot; walking, a little)
+        // lean by the sideways push, not by turning on the spot
         const float leanMost = lerpf(0.1f, 0.2f, g.run);
         const float lean     = mw * std::clamp(std::atan(dot(g.accel, Rp) / GRAVITY) * 0.6f, -leanMost, leanMost);
         float yawP = -mw * lerpf(0.06f + 0.02f * std::min(v, 2.f), 0.1f, g.run) * std::cos(TAU * phL);
-        // (standing, the hip over the leg taking the weight is the higher one)
+        // standing, the weight-bearing hip is higher
         float rollP = mw * 0.07f * std::sin(TAU * (phL + 0.05f)) + lean - (1.f - mw) * 0.6f * rollW / L;
         float tiltP = mw * lerpf(0.03f, 0.09f, g.run) + 0.25f * g.crouch;
-        if (sw > 0) { // (the clip's: about its mean, which tilts ahead)
+        if (sw > 0) { // clip: about its mean, which tilts ahead
             const V3 d = rotationVector(sMean[HB_HIPS].conj() * sT[HB_HIPS]), m0 = rotationVector(sMean[HB_HIPS]);
             yawP       = lerpf(yawP, mw * d.y, sw);
             rollP      = lerpf(rollP, mw * d.z + lean - (1.f - mw) * 0.6f * rollW / L, sw);
             tiltP      = lerpf(tiltP, mw * (m0.x + d.x) + 0.25f * g.crouch, sw);
         }
-        const float lagP  = -g.hipLag; // (the frame above turns left > 0)
+        const float lagP  = -g.hipLag; // frame above: left > 0
         const Quat  hipsQ = Quat::axisAngle(UP, yawP + lagP + g.airYaw.x) * Quat::axisAngle({0, 0, 1}, rollP + g.airRoll.x) *
             Quat::axisAngle({1, 0, 0}, tiltP + g.airPitch.x);
         pelvis += Rp * (std::sin(lean) * g.hipH * 0.5f);
@@ -6230,25 +5920,22 @@ namespace h3d {
         // the pelvis no higher than the planted legs reach
         const M4   toAvatar = m.world.inverse();
         const Quat bodyQ    = yawTurn(yaw);
-        const Quat hipsW    = bodyQ * (g.toFrame.conj() * hipsQ * g.toFrame); // (frame above -> avatar space -> world)
-        // Walking ahead, the knees bend as people's do (WALK_STANCE_KNEE, WALK_SWING_KNEE): late on the ground the heel
-        // rises as far as keeps the knee to that while the pelvis comes down to the foot landing ahead (so that foot
-        // holds the pelvis down only if even its heel right up doesn't reach), and a foot in the air goes up as far
-        // as the knee folds
-        const float kneeW    = (1.f - g.run) * mw * std::clamp(2.f * g.forward, 0.f, 1.f); // (easing out as it stops)
+        const Quat hipsW    = bodyQ * (g.toFrame.conj() * hipsQ * g.toFrame); // frame above -> avatar -> world
+        // walking ahead, knees follow WALK_STANCE_KNEE / WALK_SWING_KNEE: the heel rises late in stance
+        const float kneeW    = (1.f - g.run) * mw * std::clamp(2.f * g.forward, 0.f, 1.f);
         auto        stanceU  = [&](int s) { return std::clamp(frac(g.phase + 0.5f * s) / beta, 0.f, 1.f); };
         auto        heelUp   = [&](int s) { return kneeW > 0.01f && !g.feet[s].swing && stanceU(s) >= 0.4f; };
-        auto        heelMost = [&](int s) { // (as far as it rises by this frame: no quicker than a foot rolls)
+        auto        heelMost = [&](int s) { // heel limit this frame (FOOT_ROLL)
             return approach(g.feet[s].heel, 1.15f, FOOT_ROLL * dt);
         };
-        auto        kneeAt   = [&](int s, float bend) { // (the hip to the ankle with the knee bent that far)
+        auto        kneeAt   = [&](int s, float bend) { // hip-ankle distance at that bend
             const float a = g.thigh[s], b = g.shin[s];
             return std::min(std::sqrt(a * a + b * b + 2.f * a * b * std::cos(bend)), 0.995f * (a + b));
         };
         if (!grounded)
             g.lowered = g.loweredV = 0;
         else {
-            // (a foot coming down counts too, the more the nearer it is to landing, so the pelvis is down as it lands)
+            // a landing foot counts as it nears touchdown
             float lower = 0;
             for (int s = 0; s < 2; ++s) {
                 const auto& ft = g.feet[s];
@@ -6258,7 +5945,7 @@ namespace h3d {
                 const V3 ankle = ft.swing ? ankleAt(ft.to, ft.toYaw, toesUp(s, lerpf(through(WALK_SWING_PITCH, 1), through(RUN_SWING_PITCH, 1), g.run)), ft.toGp, s)
                     : heelUp(s)           ? ankleAt(ft.at, ft.yaw, lerpf(ft.pitch, std::max(ft.pitch, heelMost(s)), kneeW), ft.gp, s)
                                           : ankleW[s];
-                // (from where the hip will be as it lands)
+                // hip at landing
                 const V3    hip   = pelvis + hipsW.rotate(g.hipAt[s]) + (ft.swing ? vel * ((1.f - ft.s) * g.swingTime) : V3{});
                 const float reach = 0.995f * (g.thigh[s] + g.shin[s]);
                 const float dx    = length(V3{hip.x - ankle.x, 0, hip.z - ankle.z});
@@ -6267,11 +5954,9 @@ namespace h3d {
                 if (!ft.swing)
                     g.feet[s].tight = (hip.y - ankle.y - up) / (0.12f * L);
             }
-            // (no further than the knees bend well; up or down stairs or a slope further, and as far as a foot stands
-            // or comes down below what the pelvis goes over, as people's do going down (the leg behind bent, the one
-            // ahead reaching down to the next step): a foot still out of reach is dragged after the body)
+            // lowering limit: what knees bend well, more on slopes and stairs; feet out of reach are dragged
             float below = 0;
-            for (const auto& ft : g.feet) { // (a foot ahead, or under it: one behind lifts, as people's does going up)
+            for (const auto& ft : g.feet) { // only feet ahead or under
                 const V3    p = ft.swing ? ft.to : ft.at;
                 const float w = ft.swing ? smoothstep01(ft.gaitW) * smoothstep01((ft.s - 0.5f) / 0.5f) : 1.f;
                 if (dot(V3{p.x - P.x, 0, p.z - P.z}, way) > -0.1f * L)
@@ -6284,8 +5969,7 @@ namespace h3d {
                 auto& ft = g.feet[s];
                 if (!heelUp(s))
                     continue;
-                // the heel up: the least from its curve's floor that brings the ankle near enough the hip, else as
-                // near as it goes this frame
+                // heel up: least pitch (from WALK_HEEL_LEAST) bringing the ankle within knee reach
                 const V3    hip   = pelvis + hipsW.rotate(g.hipAt[s]);
                 const float u     = stanceU(s), want = kneeAt(s, through(WALK_STANCE_KNEE, u));
                 auto        dist  = [&](float p) { return length(ankleAt(ft.at, ft.yaw, p, ft.gp, s) - hip); };
@@ -6305,7 +5989,7 @@ namespace h3d {
                 ft.pitch  = rollTo(ft, lerpf(ft.pitch, best, kneeW));
                 ankleW[s] = ankleAt(ft.at, ft.yaw, ft.pitch, ft.gp, s);
                 footW[s]  = yawTurn(ft.yaw) * footPitch(ft.pitch + ft.gp);
-                // (and the pelvis down to it, if that doesn't reach)
+                // lower the pelvis for the rest
                 const float reach = 0.995f * (g.thigh[s] + g.shin[s]), dx = length(V3{hip.x - ankleW[s].x, 0, hip.z - ankleW[s].z});
                 const float over = hip.y - ankleW[s].y - std::sqrt(std::max(0.f, reach * reach - dx * dx)), room = lowest - lower;
                 ft.tight         = (lower + over) / (0.12f * L);
@@ -6314,10 +5998,7 @@ namespace h3d {
                     lower += std::min(over, room);
                 }
             }
-            // (down as far as the legs need, as a body goes down: speeding up no harder than LOWER_ACCEL, to at most
-            // LOWER_SPEED (a foot landing on a stair well below needs a lot more of a sudden; walking, the least bit
-            // more a frame, followed all but exactly); and back up smoothly as a foot that held it down lifts, as
-            // people's goes: critically damped, not at a speed that starts and stops at once, a hop at every step)
+            // lowered: down fast (LOWER_ACCEL, LOWER_SPEED), up critically damped so steps don't hop
             if (lower > g.lowered) {
                 const float want = std::min(std::sqrt(2.f * LOWER_ACCEL * (lower - g.lowered)), LOWER_SPEED);
                 g.loweredV       = std::min(want, std::max(g.loweredV, 0.f) + LOWER_ACCEL * dt);
@@ -6337,8 +6018,7 @@ namespace h3d {
                 const float most = std::sqrt(std::max(0.f, reach * reach - up * up)), dx = length(d);
                 ft.strain        = dx / std::max(most, 1e-3f);
                 ft.over          = dx - most;
-                // (not into a stair's riser: where the ground is higher it stays, the leg short of it; up or down a
-                // slope along it)
+                // drag the foot, but not into a stair riser
                 if (const V3 pull = d * ((most - dx) / std::max(dx, 1e-4f)); dx > most + 1e-4f) {
                     const auto u = under(ft.at + pull, ft.yaw, s);
                     if (u.y < ft.at.y + 0.02f || (u.even && u.y < ft.at.y + 0.1f)) {
@@ -6348,8 +6028,7 @@ namespace h3d {
                     }
                 }
             }
-            // a foot in the air up as far as the knee folds, landing where it goes (easing in and out as the stride
-            // starts and stops)
+            // a swinging foot rises as the knee folds
             for (int s = 0; s < 2; ++s) {
                 auto& ft = g.feet[s];
                 springTo(ft.fold, ft.foldV, ft.timed ? 0.f : kneeW, 20.f, dt);
@@ -6359,15 +6038,12 @@ namespace h3d {
                 }
                 const V3    hip    = pelvis + hipsW.rotate(g.hipAt[s]);
                 V3&         at     = ankleW[s];
-                // (from as it lifted; less in a quick step)
+                // from the lift-off bend; less in quick steps
                 const float want   = lerpf(ft.liftKnee, kneeAt(s, through(WALK_SWING_KNEE, ft.s) / g.hurrySmooth), smoothstep01(ft.s / 0.2f));
                 const float across = length(V3{at.x - hip.x, 0, at.z - hip.z});
-                // (no higher than a step's: with the foot far behind, as going back, it doesn't kick up to the hip)
+                // a foot far behind doesn't kick up to the hip
                 const float y = want > across ? hip.y - std::sqrt(want * want - across * across) : hip.y, most = 0.12f * L;
-                // Followed as it goes, but speeding up and slowing down no quicker than RAISE_ACCEL, and slowing down in
-                // time for where it stops (on the swing's own height, or at `most`): stopping a hurried or cut-short
-                // step, what the knee needs comes and goes faster than a foot moves, and the foot would stop dead
-                // (onto it, as fast as it goes plus what closes the gap slowing down to it; not past it)
+                // raise: rate-limited (RAISE_ACCEL), braking for 0 and `most`; else a cut-short step stops dead
                 const float to = std::clamp(y - at.y, 0.f, most), err = to - ft.raise, rdt = std::max(dt, 1e-4f);
                 float       rv = (ft.raiseTo < 0 ? 0.f : (to - ft.raiseTo) / rdt) + std::copysign(std::sqrt(2.f * RAISE_ACCEL * std::abs(err)), err);
                 rv             = err >= 0 ? std::min(rv, err / rdt) : std::max(rv, err / rdt);
@@ -6379,9 +6055,7 @@ namespace h3d {
             }
         }
 
-        // off the ground: the legs as the air's springs have them, from the hips as the pelvis lies, the feet along the
-        // shins; hovering the body bobs, flying it rises a little as it lies down (its middle where a standing body's is);
-        // coming down from a jump the pelvis goes as far down or up as puts the lower foot on the ground as the body lands
+        // in the air: legs from the air springs; landing a jump, the pelvis shifts to put the lower foot down
         if (!grounded) {
             const float bobF = (FLY_BOB * std::sin(TAU * 0.4f * g.time) + 0.006f * std::sin(TAU * 0.93f * g.time + 0.7f)) * hover;
             pelvis = P + UP * (g.hipH * lerpf(0.97f, 0.95f, fe) + fe * (bobF + 0.22f * g.hipH * std::sin(std::max(0.f, g.airPitch.x))));
@@ -6402,7 +6076,7 @@ namespace h3d {
             for (int s = 0; s < 2; ++s) {
                 auto& ft = g.feet[s];
                 ft.ankle = ankleW[s];
-                ft.pitch = std::asin(std::clamp(-footW[s].rotate({0, 0, -1}).y, -1.f, 1.f)); // (toes down, as the landing takes it)
+                ft.pitch = std::asin(std::clamp(-footW[s].rotate({0, 0, -1}).y, -1.f, 1.f)); // toes down, ready to land
                 ft.roll  = 0;
                 ft.yaw   = yaw;
             }
@@ -6410,7 +6084,7 @@ namespace h3d {
             for (int s = 0; s < 2; ++s)
                 g.feet[s].ankle = ankleW[s];
         g.pelvis = pelvis;
-        for (int s = 0; s < 2; ++s) { // (and for the status: how far the knee bends)
+        for (int s = 0; s < 2; ++s) {
             g.feet[s].knee = length(ankleW[s] - pelvis - hipsW.rotate(g.hipAt[s]));
             g.feet[s].heel = g.feet[s].pitch;
         }
@@ -6421,16 +6095,13 @@ namespace h3d {
 
         CPoser p(g.body);
         p.body(hipsQ, frameOf(pelvis) - UP);
-        // the trunk turns against the pelvis (the shoulders stay square) and leans ahead, more running, starting and
-        // crouching; breathing
-        // (off the ground, as the air's spring has it)
+        // trunk: twisted against the pelvis, leaning ahead, breathing; in the air from the air spring
         const float accelLean = std::clamp(std::atan(fwdA / GRAVITY) * 0.6f, -0.12f, 0.3f) * std::min(1.f, mw + 0.5f);
         const float trunkLean = (grounded ? mw * lerpf(0.055f, 0.1f, ra) + accelLean + 0.3f * g.crouch - 0.6f * tiltP : g.airLean.x) +
             0.012f * std::sin(TAU * g.time / 4.f);
         if (grounded)
             g.leanWas = trunkLean - 0.012f * std::sin(TAU * g.time / 4.f);
-        // (and back round from where the pelvis lags behind a turn, as far as the spine twists (TRUNK_TWIST, easing
-        // into it), turning there critically damped: after the head, not whipping round with the body)
+        // trunk turns back from the pelvis lag, soft-limited to TRUNK_TWIST
         {
             const float twist = std::clamp(lagP, -TRUNK_TWIST, TRUNK_TWIST), knee = 0.6f * TRUNK_TWIST;
             const float soft  = std::abs(twist) <= knee ? twist : std::copysign(knee + (TRUNK_TWIST - knee) * std::tanh((std::abs(lagP) - knee) / (TRUNK_TWIST - knee)), lagP);
@@ -6443,8 +6114,7 @@ namespace h3d {
         const auto& h         = md.human;
         const int   torso     = (h[HB_SPINE] >= 0) + (h[HB_CHEST] >= 0) + (h[HB_UPPER_CHEST] >= 0);
         Quat        trunkDone = hipsQ;
-        // (the clip's: its trunk over its hips bone by bone, as far as this avatar has them, the top one up to the clip's
-        // top; on it what the walking adds turning (the twist back), speeding up and crouching, and breathing)
+        // clip trunk bone by bone, plus the walking's twist, lean, crouch and breathing
         const int  top   = h[HB_UPPER_CHEST] >= 0 ? HB_UPPER_CHEST : h[HB_CHEST] >= 0 ? HB_CHEST : HB_SPINE;
         const Quat added = Quat::axisAngle(UP, -g.twist) * Quat::axisAngle({1, 0, 0}, accelLean + 0.15f * g.crouch + 0.012f * std::sin(TAU * g.time / 4.f));
         Quat       below = sw > 0 ? sT[HB_HIPS] : Quat{};
@@ -6459,10 +6129,7 @@ namespace h3d {
                 p.bend(b, part);
                 trunkDone = trunkDone * part;
             }
-        // the head level, looking where it goes (the camera's look turns it after); flying lying down, as far as a neck
-        // bends back (HEAD_MOST), looking a little down ahead past that
-        // Turning, it looks ahead into the turn, where the body will face (HEAD_LEAD of what's left of the turn, up to
-        // HEAD_LEAD_MOST radians): as people's head turns first, then the trunk, then the pelvis and the feet
+        // head level along the heading, at most HEAD_MOST from the trunk, leading into turns (HEAD_LEAD)
         constexpr float HEAD_MOST = 0.9f;
         const float     headLead = grounded ? std::clamp(g.turnLeft * HEAD_LEAD, -HEAD_LEAD_MOST, HEAD_LEAD_MOST) : 0.f;
         Quat            level    = slerp(Quat{}, trunkDone.conj() * Quat::axisAngle(UP, -headLead), 0.85f);
@@ -6470,8 +6137,7 @@ namespace h3d {
             level = slerp(Quat{}, level, HEAD_MOST / turned);
         Quat neck = slerp(Quat{}, level, 0.45f), head = slerp(Quat{}, level, 0.55f);
         if (sw > 0) {
-            // (the clip's head (level, nodding and tilting with the steps) looking into the turn the same way; its neck
-            // half way, else between its top and the head; no further round from the trunk than a neck turns)
+            // clip head: leads the turn too, at most HEAD_MOST from the trunk
             const Quat hc = Quat::axisAngle(UP, -headLead) * sT[HB_HEAD];
             const Quat nc = Quat::axisAngle(UP, -0.45f * headLead) * (sHas[HB_NECK] ? sT[HB_NECK] : slerp(sAt(sT, HB_UPPER_CHEST), sT[HB_HEAD], 0.5f));
             Quat       nl = trunkDone.conj() * nc, hl = nc.conj() * hc;
@@ -6484,13 +6150,9 @@ namespace h3d {
         p.bend(HB_NECK, neck);
         p.bend(HB_HEAD, head);
 
-        // the arms swing against the legs (the left ahead as the right foot lands), a little after them; walking
-        // hanging, the elbows bent more as they come ahead; running bent near square, pumping
+        // arms swing against the legs, slightly after; elbows bend more running
         const float armAmp = mw * lerpf(0.16f + 0.1f * std::min(v, 2.f), 0.55f, ra);
-        // an arm swung that far (radians ahead), out from the body that far: the upper arm and the forearm (the chest's
-        // frame). The forearm bent ahead from the upper arm, in the plane the arm swings in; running the hands come in
-        // toward the middle as they come ahead
-        // (off the ground, as the air's springs have it: swung, the elbow's bend)
+        // armAt: upper arm and forearm (chest frame) for swing and out angles
         auto aheadOf = [&](int s, float swing) { return grounded ? swing + lerpf(0.04f, -0.08f, ra) * mw + 0.25f * g.crouch : swing; };
         auto bendOf  = [&](int s, float swing) {
             const float fore = armAmp > 1e-3f ? swing / armAmp : 0.f;
@@ -6506,8 +6168,7 @@ namespace h3d {
                 f.x -= sx * 0.35f * 1.3f * smoothstep01((fore + 0.3f) / 1.3f) * ra * mw;
             return std::pair{u, normalize(f)};
         };
-        // How far an arm so posed goes into the body (a skirt, a coat), meters, < 0 clear of it: its elbow, forearm and
-        // hand (their skin, a sleeve half counted: it gives) against how far out the body goes at rest round the hips
+        // into: how far a posed arm sinks into the rest body round the hips, m; sleeves count half
         const SBodyClearance& cl = md.clearance;
         auto into = [&](int s, const std::pair<V3, V3>& arm) {
             const SBody& b   = p.measure();
@@ -6515,7 +6176,7 @@ namespace h3d {
             const V3     hip = UP + p.move, elbow = p.jointAt(s ? HB_R_UPPER_ARM : HB_L_UPPER_ARM) + top.rotate(arm.first) * b.upper[s];
             const V3     fore = top.rotate(arm.second);
             float        most = -1e30f;
-            auto         at   = [&](const V3& q, float r) { // (a point of the arm, the frame above, its skin r meters round it)
+            auto         at   = [&](const V3& q, float r) { // arm point (frame above), skin r m
                 const V3    a   = g.toFrame.conj().rotate(hq.conj().rotate(q - hip)) * g.unit;
                 const float rho = std::hypot(a.x, a.z);
                 const int   i0 = (int)std::floor((a.y - r - cl.y0) / cl.dy), i1 = (int)std::floor((a.y + r - cl.y0) / cl.dy);
@@ -6537,7 +6198,7 @@ namespace h3d {
                 at(wrist + fore * (cl.hand[s] / g.unit * (q + 1) / 4.f), ar[2][q]);
             return most;
         };
-        // the least an arm swung that far goes out to be clear of it
+        // least `out` clearing the body
         auto clearOut = [&](int s, float swing, float out) {
             if (into(s, armAt(s, swing, out)) <= 0)
                 return out;
@@ -6548,8 +6209,7 @@ namespace h3d {
                 (into(s, armAt(s, swing, 0.5f * (lo + hi))) > 0 ? lo : hi) = 0.5f * (lo + hi);
             return hi;
         };
-        // the clip's arm (the walk's and the run's: see above) in the chest's frame, as its own chest had it: the upper
-        // arm, the forearm, the hand along and its palm; turned out from the body as far again (about the chest's ahead)
+        // clip arm (upper arm, forearm, hand, palm) in its chest frame; turnedOut swings it out
         auto clipArm = [&](int s, const std::array<Quat, HB_COUNT>& T) {
             const Quat c  = sAt(T, HB_UPPER_CHEST).conj();
             const int  ua = s ? HB_R_UPPER_ARM : HB_L_UPPER_ARM;
@@ -6563,9 +6223,7 @@ namespace h3d {
                 d = q.rotate(d);
             return arm;
         };
-        // (how far out it has to be turned to be clear of the body, as clearOut has it of the walking's own)
-        // (up to 1.2 radians: an arm brought in to this avatar's own hang from a clip made on one in a wide skirt may need
-        // most of that back)
+        // least turn out clearing the body, up to 1.2 rad (a clip made in a wide skirt may need most)
         auto clipOut = [&](int s, const std::array<V3, 4>& arm) {
             if (!cl.measured || into(s, {arm[0], arm[1]}) <= 0)
                 return 0.f;
@@ -6586,15 +6244,10 @@ namespace h3d {
             SArm        clip{};
             V3          clipWas;
             if (sw > 0) {
-                // The clip's arm: hanging as far out from the body as the walking's own does (for this avatar's hips: the
-                // clip's are as far out as the avatar it was made on needed, in or out from that), then as far out again as
-                // the whole stride needs to keep it clear of the body (a skirt; eased in slower than out); as it's swung
-                // now only past that (critically damped): the body is known by 5° round it, and an arm going in and out
-                // with each swing at once jitters
+                // clip arm: spread fitted to armOut, plus stride clearance, plus a damped push for this swing
                 const V3    um   = clipArm(s, sMean)[0];
                 const float base = g.armOut - std::asin(std::clamp(sx * um.x, -1.f, 1.f));
-                // (the stride at the same steps of it: walking steadily, the same; a third of them looked at again a frame,
-                // the time that takes; followed critically damped, quicker out than in)
+                // need at GAIT_NEED_STEPS points of the stride, a few re-sampled a frame
                 float cycle = 0;
                 if (cl.measured) {
                     auto& need = g.clipNeed[s];
@@ -6625,18 +6278,16 @@ namespace h3d {
                     continue;
                 }
             }
-            if (grounded) // (the air's arms go on from here; kept clear of a skirt as these are)
+            if (grounded) // air arms start from these
                 g.armWas[s] = lerp(V3{aheadOf(s, swing), out, bendOf(s, swing)}, clipWas, sw);
             if (cl.measured) {
-                // out as far as it keeps clear of a skirt: as it's swung now, and held out as far as the whole swing
-                // needs (not in and out with each swing), easing in slower than out
+                // held out to clear a skirt over the whole swing; in slower than out
                 float cycle = 0;
                 for (float w : {-1.f, -0.75f, -0.5f, -0.25f, 0.f, 0.25f, 0.5f, 0.75f, 1.f})
                     if (armAmp > 0.01f || w == 0.f)
                         cycle = std::max(cycle, clearOut(s, w * armAmp, out) - out);
                 g.armClear[s] = approach(g.armClear[s], cycle, dt * (cycle > g.armClear[s] ? 2.f : 0.6f));
-                // (and as it's swung now, critically damped at ARM_PUSH_W: how far out the body goes is known by 5° round
-                // it, and at once the arm would jump out a step's worth as it passes from one to the next)
+                // plus the current swing's, damped: the outline is sampled every 5°
                 if (const float now = clearOut(s, swing, out) - out; fresh)
                     g.armPush[s] = now, g.armPushV[s] = 0;
                 else
@@ -6659,14 +6310,13 @@ namespace h3d {
                     p.set[sh]     = true;
                 }
 
-        // the legs to the feet, the knees over the toes (off the ground, ahead of the pelvis as it lies; the toes along
-        // the foot)
+        // legs to the feet, knees over the toes
         for (int s = 0; s < 2; ++s) {
             const Quat foot  = turnOf(footW[s]);
             const Quat level = turnOf(yawTurn(std::atan2(footW[s].rotate({0, 0, -1}).x, -footW[s].rotate({0, 0, -1}).z)));
             const V3   knee  = (grounded ? level : hipsQ).rotate({0, 0, 1}) + (grounded ? Quat{} : hipsQ).rotate(V3{s ? -0.12f : 0.12f, 0, 0});
             p.legTo(s, frameOf(ankleW[s]), foot * g.footUntilt[s], knee);
-            if (h[s ? HB_R_TOES : HB_L_TOES] >= 0) // (on the ground as the heel rises)
+            if (h[s ? HB_R_TOES : HB_L_TOES] >= 0) // toes flat as the heel rises
                 p.toes(s, grounded ? level * Quat::axisAngle({1, 0, 0}, std::min(g.feet[s].pitch, std::max(0.f, g.feet[s].pitch - 0.9f))) * g.footUntilt[s]
                                    : foot * g.footUntilt[s]);
         }
@@ -6682,7 +6332,7 @@ namespace h3d {
             return "null";
         const SGait& g = gaitOf(m_gait);
         std::string  feet;
-        // how far the knee bends, degrees, from how far the ankle is from the hip
+        // knee bend, degrees, from hip-ankle distance
         auto kneeBend = [&](int s) {
             const float a = g.thigh[s], b = g.shin[s], d = std::clamp(g.feet[s].knee, std::abs(a - b), a + b);
             return 180.f - std::acos(std::clamp((a * a + b * b - d * d) / (2 * a * b), -1.f, 1.f)) * 180.f / PI;
@@ -6692,8 +6342,7 @@ namespace h3d {
             feet += std::format(R"({}{{"planted": {}, "step": {:.3f}, "pitch": {:.3f}, "yaw": {:.1f}, "strain": {:.2f}, "tight": {:.2f}, "knee": {:.0f}, "at": [{:.3f}, {:.3f}, {:.3f}], "ankle": [{:.3f}, {:.3f}, {:.3f}]}})",
                                 s ? ", " : "", !ft.swing, ft.swing ? ft.s : 0.f, ft.pitch, ft.yaw * 180.f / PI, ft.swing ? 0.f : ft.strain, ft.swing ? 0.f : ft.tight, kneeBend(s), ft.at.x, ft.at.y, ft.at.z, ft.ankle.x, ft.ankle.y, ft.ankle.z);
         }
-        // off the ground: the leg that went ahead, how fast it went, flying (eased), how the body lies (degrees: pitched
-        // ahead, rolled right), each leg's hip and knee and each arm's swing and spread (degrees)
+        // in the air; angles in degrees
         std::string air = "null";
         if (!g.grounded) {
             constexpr float D = 180.f / PI;
@@ -6701,7 +6350,7 @@ namespace h3d {
                               g.airLead, g.airRun, g.flyE.x, g.airPitch.x * D, g.airRoll.x * D, g.airLeg[0].hip.x * D, g.airLeg[0].knee.x * D, g.airLeg[1].hip.x * D,
                               g.airLeg[1].knee.x * D, g.airArm[0].ahead.x * D, g.airArm[0].out.x * D, g.airArm[1].ahead.x * D, g.airArm[1].out.x * D);
         }
-        // (what the legs carry: where it is and how fast it goes, x z)
+        // carried body position and velocity, x z
         return std::format(R"({{"moving": {}, "speed": {:.3f}, "run": {:.2f}, "phase": {:.3f}, "stride": {:.3f}, "cadence": {:.3f}, "duty": {:.3f}, "leg": {:.3f}, "pelvis": [{:.3f}, {:.3f}, {:.3f}], "ground": {:.3f}, "slope": {:.2f}, "lowered": {:.3f}, )"
                            R"("hipYaw": {:.1f}, "carry": [{:.3f}, {:.3f}, {:.3f}, {:.3f}], "feet": [{}], "air": {}, "body": {{"hips": {:.3f}, "thigh": {:.3f}, "shin": {:.3f}, "ankle": {:.3f}, "hipJoint": [{:.3f}, {:.3f}, {:.3f}], "stance": {:.3f}, )"
                            R"("armOut": {:.3f}}}}})",
@@ -6803,7 +6452,7 @@ namespace h3d {
         m_emoteFace.assign(md.expressions.size(), 0.f);
         m_exprW.assign(md.expressions.size(), 0.f);
         m_exprOut.assign(md.expressions.size(), 0.f);
-        m_matOut.assign(md.expressions.size(), -1.f); // makes them the first time
+        m_matOut.assign(md.expressions.size(), -1.f); // -1: forces a first update
         resetOutfit();
         m_morphW = m_shapeBase;
         if (std::ranges::any_of(md.expressions, [](const SExpression& e) { return !e.materials.empty(); }))
@@ -6819,7 +6468,7 @@ namespace h3d {
         m_restFootY = lowestFoot(m_global);
         m_joints.assign(md.joints.size() * 12, 0.f);
         fingerAxes();
-        // what the attacks' clips have of the body
+        // body part per node the attack clips animate
         m_attackPart.assign(md.nodes.size(), ATTACK_NONE);
         for (int b = 0; b < HB_COUNT; ++b)
             if (const int n = md.human[b]; n >= 0)
@@ -6830,7 +6479,7 @@ namespace h3d {
                                 m_attackPart[n] = attackArmBone(b) ? ATTACK_ARM : ATTACK_TRUNK;
         m_attackPose = m_attackWas = m_pose;
 
-        // what the springs move: their bones and all under them
+        // spring-moved nodes: joint index, -2 below a joint, -1 none
         m_springOf.assign(md.nodes.size(), -1);
         for (size_t j = 0; j < md.springJoints.size(); ++j)
             m_springOf[md.springJoints[j].node] = (int)j;
@@ -6851,8 +6500,7 @@ namespace h3d {
         m_centerAt.assign(md.springs.size(), M4::identity());
         m_centerInv = m_centerAt;
         m_colliderAt.assign(md.springColliders.size(), {});
-        // what the springs go by of the pose: what their roots hang from, their centers, carriers and colliders, and all
-        // above those (to have them between two frames, springPoseAt())
+        // nodes the springs read, and their ancestors, for springPoseAt()
         std::vector<char> up(md.nodes.size(), 0);
         auto              mark = [&](int n) {
             for (; n >= 0 && !up[n]; n = md.nodes[n].parent)
@@ -6906,7 +6554,7 @@ namespace h3d {
         return {};
     }
 
-    // `d` is a rotation in model space, applied to the bone relative to its parent's rest orientation
+    // `d`: model-space rotation, applied relative to the parent's rest orientation
     void CAvatarAnimator::rotateBone(std::vector<STRS>& pose, int bone, const Quat& d) const {
         const int n = m_model->human[bone];
         if (n < 0)
@@ -6917,16 +6565,16 @@ namespace h3d {
     }
 
     namespace {
-        // the gestures' hands, as VRChat's
+        // VRChat gesture hand poses
         struct SHandPreset {
             std::array<float, FINGER_COUNT>     curl;   // thumb..little: 1 = a fist
             std::array<float, FINGER_COUNT - 1> spread; // index..little, toward the thumb
             float                               fold;   // the thumb's first bone, across the palm
-            std::array<float, 3>                aim;    // where the thumb's other two point (along, across, out of the palm), or 0 to curl
-            int                                 hold;   // the finger the thumb lies over, its tip over the next; else -1
+            std::array<float, 3>                aim;    // other thumb bones' aim (along, across, palm); 0 curls
+            int                                 hold;   // finger under the thumb, -1 none
         };
         constexpr SHandPreset HAND_POSES[GESTURE_COUNT] = {
-            {{0.25f, 0.3f, 0.36f, 0.42f, 0.48f}, {0.06f, 0, -0.06f, -0.12f}, 0.2f, {}, -1}, // neutral: relaxed, curled more toward the little finger
+            {{0.25f, 0.3f, 0.36f, 0.42f, 0.48f}, {0.06f, 0, -0.06f, -0.12f}, 0.2f, {}, -1}, // neutral: relaxed
             {{0, 1, 1, 1, 1}, {0, 0, 0, 0}, 0, {}, FINGER_INDEX},                           // fist
             {{0, 0, 0, 0, 0}, {0.5f, 0.1f, -0.3f, -0.6f}, -0.2f, {0.65f, 0.75f, -0.05f}, -1}, // open
             {{0, 0, 1, 1, 1}, {0, 0, 0, 0}, 0, {}, FINGER_MIDDLE},                          // point
@@ -6936,12 +6584,11 @@ namespace h3d {
             {{0, 1, 1, 1, 1}, {0, 0, 0, 0}, -0.2f, {0.3f, 1, -0.15f}, -1},                  // thumbs up
         };
         constexpr float DEG = 0.0174532925f;
-        // how far each bone turns at 1: a finger's three; the thumb's first by fold, the other two by curl
+        // turn of each bone at 1 (thumb: first by fold, others by curl)
         constexpr float SEG[3] = {80 * DEG, 95 * DEG, 60 * DEG}, THUMB[3] = {45 * DEG, 35 * DEG, 60 * DEG}, SPREAD = 12 * DEG;
     }
 
-    // the ways each finger bends, from the hand at rest: along it out to the fingers, across it from the
-    // little finger to the index, and out of the palm; then the thumb for each gesture
+    // finger bend axes from the rest hand, then each gesture's thumb pose
     void CAvatarAnimator::fingerAxes() {
         const auto& md = *m_model;
         m_handRig      = {};
@@ -7000,9 +6647,9 @@ namespace h3d {
             }
             m_handRig[hand] = true;
 
-            // the thumb: turned as the preset says, or laid over the fingers it holds down
+            // thumb: preset turn, or laid over the fingers it holds
             auto whole = [&](int f) { return bone(f, 0) >= 0 && bone(f, 1) >= 0 && bone(f, 2) >= 0; };
-            auto joint = [&](int f, int s) { // at rest: the finger's root, its next two joints, its tip
+            auto joint = [&](int f, int s) { // rest root, two joints, tip
                 if (s < 3)
                     return at(bone(f, s));
                 const int b = bone(f, 2);
@@ -7032,7 +6679,7 @@ namespace h3d {
                     const V3    ip = over(p.hold), tip = over(p.hold + 1), p0 = joint(FINGER_THUMB, 0);
                     const V3    rest1 = joint(FINGER_THUMB, 1) - p0, c = ip - p0;
                     const float L0 = length(rest1), L1 = length(joint(FINGER_THUMB, 2) - joint(FINGER_THUMB, 1)), dist = length(c);
-                    // its first joint L0 from its root and L1 from where the next goes, toward the palm: opposed
+                    // first thumb joint: L0 from the root, L1 from the target, toward the palm
                     V3 p1 = p0 + rest1;
                     if (dist >= L0 + L1)
                         p1 = p0 + c * (L0 / dist);
@@ -7051,7 +6698,7 @@ namespace h3d {
                 } else
                     continue;
                 Quat w{};
-                for (int s = 0; s < 3; ++s) { // each bone turned from where its parent carries it
+                for (int s = 0; s < 3; ++s) { // each relative to its parent
                     const Quat ws = length(to[s]) > 1e-6f ? arc(w.rotate(restDir(s)), normalize(to[s])) * w : w;
                     out[s]        = (w.conj() * ws).normalized();
                     w             = ws;
@@ -7073,8 +6720,7 @@ namespace h3d {
         }
     }
 
-    // the fingers as the hand's gesture (or the emote's) has them, eased in; over the animation's unless the hand
-    // is neutral
+    // fingers to the gesture, eased; neutral keeps the animation's own
     void CAvatarAnimator::hands(float dt, std::vector<STRS>& pose) {
         const auto&         md   = *m_model;
         const float         k    = 1.f - std::exp(-dt * 25.f);
@@ -7096,7 +6742,7 @@ namespace h3d {
             for (int s = 0; s < 3; ++s)
                 cur.thumb[s] = slerp(cur.thumb[s], m_thumbPose[hand][g][s], k);
             m_handW[hand] += ((g == GESTURE_NEUTRAL && clip ? 0.f : 1.f) - m_handW[hand]) * k;
-            // a pose of the avatar's own for this gesture, eased in over the preset's
+            // the avatar's own gesture pose, eased in over the preset
             const bool own = md.handPoseSet[hand][g];
             if (own) {
                 if (m_handCustom[hand] < 1e-3f)
@@ -7126,8 +6772,7 @@ namespace h3d {
         }
     }
 
-    // the head turned toward where the camera looks (yawOff: of that, what the trunk turned already); weight: how much (an
-    // emote has the head)
+    // head toward the camera look less yawOff (the trunk's turn); weight < 1 under an emote
     void CAvatarAnimator::look(const SAvatarMotion& m, std::vector<STRS>& pose, float weight, float yawOff) const {
         const auto& md = *m_model;
         if (!md.humanoid || weight < 1e-3f)
@@ -7152,59 +6797,48 @@ namespace h3d {
     }
 
     namespace {
-        // First person's hands in the camera's frame (x right, y up, -z ahead), from the eye in arm lengths (shoulder to
-        // wrist: a big avatar's come as far into the view as a small one's), left then right: each wrist, the way the hand
-        // points (to its middle finger) and the way its palm faces
+        // first-person hand poses in the camera frame (x right, y up, -z ahead), arm lengths from the eye
         struct SFpPose {
             V3 at[2], along[2], palm[2];
         };
-        // ready: held up in front, low in the view, the palms in and a little down
+        // ready: up in front, low, palms in
         constexpr SFpPose FP_READY{{{-0.37f, -0.41f, -0.79f}, {0.36f, -0.40f, -0.80f}}, {{0.3f, 0.25f, -1.f}, {-0.3f, 0.25f, -1.f}}, {{0.85f, -0.45f, 0.f}, {-0.85f, -0.45f, 0.f}}};
         // typing: lower and nearer together, the palms down
         constexpr SFpPose FP_TYPE{{{-0.21f, -0.37f, -0.72f}, {0.21f, -0.37f, -0.72f}}, {{0.25f, -0.05f, -1.f}, {-0.25f, -0.05f, -1.f}}, {{0.15f, -1.f, 0.1f}, {-0.15f, -1.f, 0.1f}}};
-        // holding something out there: both reaching for it either side of the crosshair, the palms to it, the fingers up
+        // holding: either side of the crosshair, palms in, fingers up
         constexpr SFpPose FP_HOLD{{{-0.33f, -0.22f, -0.90f}, {0.33f, -0.22f, -0.90f}}, {{0.15f, 0.85f, -0.5f}, {-0.15f, 0.85f, -0.5f}}, {{0.15f, 0.f, -1.f}, {-0.15f, 0.f, -1.f}}};
         // where the elbows go: down, out and back
         constexpr V3 FP_ELBOW[2] = {{-0.7f, -1.f, 0.4f}, {0.7f, -1.f, 0.4f}};
-        // A hand making a gesture is held up a little and in, where it shows, turned so the gesture reads side on (a hand
-        // pointing away from the eye hides behind its own forearm, or a sleeve): the way it points and its palm faces (the
-        // right hand's; the left's mirrored); the neutral hand as ready
+        // a gesturing hand shows side on, raised and in, or the forearm would hide it; right hand, left mirrored
         struct SFpShow {
             V3 along, palm;
         };
         constexpr V3      FP_SHOW_AT = {0.30f, -0.27f, -0.80f};
         constexpr SFpShow FP_SHOW[GESTURE_COUNT] = {
             {},
-            {{-1.f, 0.15f, -0.35f}, {0.1f, 0.f, 1.f}},  // fist: the knuckles in across the view, the thumb up
-            {{0.f, 1.f, -0.3f}, {0.f, 0.f, -1.f}},      // open: up, the palm out
+            {{-1.f, 0.15f, -0.35f}, {0.1f, 0.f, 1.f}},  // fist: knuckles across, thumb up
+            {{0.f, 1.f, -0.3f}, {0.f, 0.f, -1.f}},      // open: up, palm out
             {{-0.7f, 0.2f, -0.7f}, {-0.2f, -1.f, 0.2f}}, // point: ahead and in
-            {{0.f, 1.f, -0.3f}, {0.f, 0.f, -1.f}},      // victory: up, the palm out
+            {{0.f, 1.f, -0.3f}, {0.f, 0.f, -1.f}},      // victory: up, palm out
             {{0.f, 1.f, -0.3f}, {0.f, 0.f, -1.f}},      // rock'n'roll: the same
-            {{-0.7f, 0.15f, -0.7f}, {-0.7f, 0.f, 0.7f}}, // handgun: ahead and in, the thumb up
+            {{-0.7f, 0.15f, -0.7f}, {-0.7f, 0.f, 0.7f}}, // handgun: ahead and in, thumb up
             {{-1.f, 0.15f, -0.35f}, {0.1f, 0.f, 1.f}},  // thumbs up: as a fist
         };
-        // touching: the right hand's fingertip goes to the crosshair, a little under it and to the right (its pointing
-        // finger, not the hand, over what it touches), as far ahead as there's room, FP_TOUCH_REACH arm lengths at most
+        // touching: the right fingertip just below-right of the crosshair, as far ahead as there's room
         constexpr V3    FP_TOUCH_AT = {0.035f, -0.06f, 0.f};
         constexpr float FP_TOUCH_REACH = 0.9f;
-        // the hands' frame turns up and down with the camera's pitch only so far (looking down they come up the view, in
-        // front of the body below it; looking up they stay low), and looking far down, ready hands let go (the arms
-        // hang as the walking has them: the body and the legs below in sight): from FP_DOWN_FROM to FP_DOWN_ALL radians down
+        // the hands' frame pitches less than the camera; looking far down, ready hands drop
         constexpr float FP_PITCH_DOWN = 0.65f, FP_PITCH_UP = 0.45f, FP_DOWN_FROM = 0.75f, FP_DOWN_ALL = 1.2f;
-        // how quickly the hands go where they're going (radians a second, critically damped); touching quicker
+        // hand spring rates, rad/s; touching quicker
         constexpr float FP_W = 13.f, FP_TOUCH_W = 24.f;
-        // how far they fall behind the camera's turns (arm lengths per radian a second) and moves (per m/s), at most
-        // FP_LAG_MOST, catching up at FP_LAG_W (radians a second) a little springy (FP_LAG_Z)
+        // hand lag behind camera turns and moves, capped, springing back
         constexpr float FP_TURN_LAG = 0.022f, FP_MOVE_LAG = 0.014f, FP_LAG_MOST = 0.12f, FP_LAG_W = 11.f, FP_LAG_Z = 0.65f;
-        // walking, the hands bob (arm lengths: across with each stride, up and down with each step) and swing a little
-        // against the legs; running they pump: ahead and up, and back and down
+        // walking bob and swing, running pump (arm lengths)
         constexpr float FP_BOB_X = 0.035f, FP_BOB_Y = 0.02f, FP_SWING = 0.06f, FP_PUMP_AHEAD = 0.12f, FP_PUMP_BACK = 0.3f, FP_PUMP_UP = 0.1f;
-        // how far the trunk turns from the hips toward where the camera looks, at most (radians): the hands in view reach
-        // from shoulders square to the view; and bends over looking down past FP_BEND_FROM (radians), by FP_BEND of that
+        // trunk turn toward the look, and bend looking down
         constexpr float FP_TWIST = 0.75f, FP_BEND_FROM = 0.35f, FP_BEND = 0.3f;
 
-        // two bones from `from` reaching for `to` (as near as they reach), bending toward `hint`: the first bone's
-        // direction, the second's
+        // two-bone IK toward `to`, bending toward `hint`: both bones' directions
         std::pair<V3, V3> twoBones(const V3& from, const V3& to, float l1, float l2, const V3& hint) {
             const V3 d    = to - from;
             float    dist = length(d);
@@ -7222,7 +6856,7 @@ namespace h3d {
             return t < 0 ? 0.f : t < up ? minJerk(t / up) : 1.f - minJerk((t - up) / down);
         }
 
-        // x (going v) a step toward `to` as SSpring::to has it
+        // one SSpring::to step
         void springStep(float& x, float& v, float to, float w, float z, float dt) {
             SSpring s{x, v};
             s.to(to, w, z, dt);
@@ -7231,10 +6865,10 @@ namespace h3d {
     }
 
     V3 SFirstPersonEye::update(const V3& feet, const V3& eyes, float yaw, float dt) {
-        // (FP_EYE_STILL: how far the eyes go before the camera goes after them, meters)
+        // dead zone the camera ignores, m
         constexpr float FP_EYE_STILL = 0.03f;
         const V3        want = yawTurn(yaw).conj().rotate(eyes - feet);
-        if (!live || length(want - held) > 1.5f) // (or put somewhere else)
+        if (!live || length(want - held) > 1.5f) // or teleported
             held = off = want, v = {}, live = true;
         else if (dt > 0.f) {
             if (const V3 d = want - held; length(d) > FP_EYE_STILL)
@@ -7262,7 +6896,7 @@ namespace h3d {
         const float dt = std::clamp(m.dt, 0.f, 0.05f);
         m_fpW      = approach(m_fpW, can ? 1.f : 0.f, dt / 0.2f);
         m_fpTrunkW = approach(m_fpTrunkW, can ? 1.f - emoteW : 0.f, dt / 0.25f);
-        // (ready, looking far down: let go, the arms as the walking has them)
+        // ready, looking far down: the walking's arms
         const float down = m.fp.hands == FPH_READY ? smoothstep01((-m.fp.pitch - FP_DOWN_FROM) / (FP_DOWN_ALL - FP_DOWN_FROM)) : 0.f;
         m_fpArmsW        = approach(m_fpArmsW, can && m.fp.hands != FPH_DOWN ? (1.f - emoteW) * (1.f - down) : 0.f, dt / 0.25f);
         m_fpGesture      = {-1, -1};
@@ -7272,8 +6906,7 @@ namespace h3d {
             m_fpGesture = {GESTURE_OPEN, GESTURE_OPEN};
         if (m_fpArmsW <= 0.f)
             m_fpLive = false;
-        // the camera the hands and the trunk go by: first person's; while it's off (or turned off: going out of it, the
-        // view gone behind the avatar), as it was last, going along with the body
+        // view the hands and trunk follow: first person's, else the last one carried with the body
         const V3    F    = m.world.dir({0, 0, -1});
         const float body = std::atan2(F.x, -F.z);
         if (can) {
@@ -7295,7 +6928,7 @@ namespace h3d {
         const int   n    = (h[HB_SPINE] >= 0) + (h[HB_CHEST] >= 0) + (h[HB_UPPER_CHEST] >= 0);
         if (!n)
             return 0.f;
-        // looking down, bent over toward where it looks, as people looking at their feet are: the eyes out over the body
+        // looking down, bend over to see the feet
         const float bend  = std::max(0.f, -m_fpViewPitch - FP_BEND_FROM) * FP_BEND * w;
         const V3    right = normalize((m.world * md.fix).inverse().dir(rightOf(m_fpViewYaw)));
         for (int b : {HB_SPINE, HB_CHEST, HB_UPPER_CHEST})
@@ -7313,7 +6946,7 @@ namespace h3d {
         const bool  fresh = !m_fpLive;
         m_fpLive          = true;
 
-        // the hands' frame: the camera's, pitched less (but touching and holding, where it points)
+        // hands' frame: the camera's, pitched less unless touching or holding
         const V3    eye = m_fpViewEye;
         const float yaw = m_fpViewYaw, pitch = m_fpViewPitch, hp = pitch * (pitch < 0 ? FP_PITCH_DOWN : FP_PITCH_UP);
         const V3    right = rightOf(yaw);
@@ -7321,13 +6954,13 @@ namespace h3d {
         auto        world = [&](const V3& c, float p) { const V3 f = fwdAt(p); return right * c.x + cross(right, f) * c.y - f * c.z; };
         auto        frame = [&](const V3& w) { const V3 f = fwdAt(hp); return V3{dot(w, right), dot(w, cross(right, f)), -dot(w, f)}; };
 
-        // behind the camera's turns and moves
+        // lag behind camera turns and moves
         {
             V3 lag{};
             if (!fresh && dt > 1e-4f) {
                 const float yr = std::clamp(wrapPi(yaw - m_fpYaw) / dt, -6.f, 6.f), pr = std::clamp((pitch - m_fpPitch) / dt, -6.f, 6.f);
                 const V3    v  = frame((eye - m_fpEye) * (1.f / dt));
-                lag            = V3{-FP_TURN_LAG * yr, -FP_TURN_LAG * pr, 0} - v * (FP_MOVE_LAG * (length(v) < 20.f ? 1.f : 0.f)); // (not a jump across the world)
+                lag            = V3{-FP_TURN_LAG * yr, -FP_TURN_LAG * pr, 0} - v * (FP_MOVE_LAG * (length(v) < 20.f ? 1.f : 0.f)); // not a teleport
                 for (float* c : {&lag.x, &lag.y, &lag.z})
                     *c = std::clamp(*c, -FP_LAG_MOST, FP_LAG_MOST);
             }
@@ -7338,7 +6971,7 @@ namespace h3d {
         }
         m_fpYaw = yaw, m_fpPitch = pitch, m_fpEye = eye;
 
-        // the steps: the walking's, else as fast as it goes
+        // step phase: the gait's, else from the speed
         float mw = 0, run = 0, phase = 0;
         if (m_gaitUsed && g.grounded)
             mw = g.moveW, run = std::clamp(g.runArms, 0.f, 1.f), phase = g.phase;
@@ -7360,9 +6993,9 @@ namespace h3d {
             switch (m.fp.hands) {
                 case FPH_TOUCH:
                     if (s == 1) {
-                        // the fingertip to the crosshair, as far as there's room (and the arm reaches); poked as it's pressed
+                        // fingertip to the crosshair as room and reach allow; pokes on press
                         const float reach = std::clamp((m.fp.room - 0.03f) / A, 0.35f, FP_TOUCH_REACH) + 0.06f * bump(m_fpPoke, 0.07f, 0.16f);
-                        // (from the right, across: from behind, the hand would hide behind its forearm)
+                        // from the right: from behind, the forearm would hide the hand
                         const V3    tip   = FP_TOUCH_AT + V3{0, 0, -reach};
                         along             = normalize(V3{-0.7f, 0.15f, -0.7f});
                         at                = tip - along * (md.clearance.hand[1] > 0 ? md.clearance.hand[1] / A : 0.35f);
@@ -7387,14 +7020,14 @@ namespace h3d {
                 // breathing
                 at.y += 0.008f * std::sin(TAU * m_time / 4.2f + s);
             }
-            // walking: bobbing, swinging a little against the legs (ahead as the other leg is); running, pumping
+            // walk bob and swing; run pump
             const float fs = -std::cos(TAU * (phase + 0.5f * s));
             if (m.fp.hands != FPH_TOUCH || s == 0) {
                 const float walk = mw * (1.f - run);
                 at += V3{FP_BOB_X * std::sin(TAU * phase), -FP_BOB_Y * 0.5f * (1.f - std::cos(2.f * TAU * phase)), -FP_SWING * fs} * walk;
                 at += V3{-sx * 0.06f * std::max(fs, 0.f), FP_PUMP_UP * fs - 0.05f, fs > 0 ? -FP_PUMP_AHEAD * fs : -FP_PUMP_BACK * fs} * (mw * run);
             }
-            // a wall or a window near: the hands no further ahead than there's room, lower the less there is
+            // near a wall: hands no further ahead than the room, and lower
             if (const float most = (m.fp.room - 0.05f) / A; -at.z > most) {
                 const float over = -at.z - std::max(most, 0.3f);
                 at.z             = -std::max(most, 0.3f);
@@ -7412,7 +7045,7 @@ namespace h3d {
             hd.pitch += (aim - hd.pitch) * k;
         }
 
-        // the arms to them: from the shoulders as posed (the trunk turned), the elbows down and out
+        // arms reach them, elbows down and out
         globals(pose, m_global);
         const M4    toModel = (M4::translation({0, m_lift, 0}) * m.world * md.fix).inverse();
         const float arms    = smoothstep01(m_fpArmsW);
@@ -7423,7 +7056,7 @@ namespace h3d {
         }
     }
 
-    // (the shoulder from m_global: globals() first)
+    // needs m_global (globals() first)
     void CAvatarAnimator::reachArm(std::vector<STRS>& pose, int s, const V3& wrist, const V3& elbow, const V3& along, const V3& palm, float w) {
         const auto& md = *m_model;
         const auto& h  = md.human;
@@ -7449,13 +7082,11 @@ namespace h3d {
     // --- attacks
 
     namespace {
-        // the body is the attack's over ATTACK_IN as one starts; a swing after another takes over from it over ATTACK_CROSS
-        // (from where its fists are up, when that one's still up); ATTACK_PAUSE after the last one started, the next is
-        // the right's again
+        // attack blend-in, swing crossfade, and the pause after which the right hand leads again
         constexpr float ATTACK_IN = 0.1f, ATTACK_CROSS = 0.1f, ATTACK_PAUSE = 0.9f;
-        // how much of the head's looking where the camera looks an attack takes over (the head goes with the punch)
+        // share of the head's look an attack overrides
         constexpr float ATTACK_LOOK = 0.75f;
-        // first person, the swing goes where the camera looks, but up and down no further than this (radians)
+        // first-person swing pitch limits, radians
         constexpr float ATTACK_UP = 0.5f, ATTACK_DOWN = -0.6f;
     }
 
@@ -7471,22 +7102,21 @@ namespace h3d {
         for (int b : {HB_HEAD, HB_L_UPPER_ARM, HB_L_LOWER_ARM, HB_L_HAND, HB_R_UPPER_ARM, HB_R_LOWER_ARM, HB_R_HAND})
             if (h[b] < 0)
                 return false;
-        stopEmote(); // (as moving does)
-        if (m_swingNext >= 0) // (one's waiting already)
+        stopEmote();
+        if (m_swingNext >= 0) // already queued
             return true;
         if (hand < 0)
             hand = m_swingAgo > ATTACK_PAUSE ? 1 : 1 - m_swingLast;
         hand &= 1;
         if (m_swing.t >= 0 && m_swing.t < attackOf(m_swing).next)
-            m_swingNext = hand; // (once this one has struck)
+            m_swingNext = hand; // after this one strikes
         else
             swingStart(hand, m_fpW > 0.5f);
         return true;
     }
 
     void CAvatarAnimator::swingStart(int hand, bool fp) {
-        // after one that's still up: from where this one's fists are up, that one going on under it as it takes over;
-        // after one that's letting go, from the start, taking over from it
+        // after a swing still up, start at `ready` and crossfade; else from the start
         const bool up = m_swing.t >= 0 && m_attackW > 0.5f;
         if (m_swing.t >= 0) {
             m_swingWas   = m_swing;
@@ -7509,7 +7139,7 @@ namespace h3d {
                 }
             return std::string("null");
         };
-        // (the chest's turn from the hips)
+        // chest yaw from the hips
         float turn = 0;
         if (m_model && m_model->humanoid && m_global.size() == m_model->nodes.size()) {
             const auto& md    = *m_model;
@@ -7534,7 +7164,6 @@ namespace h3d {
             m_attackW = 0;
             return;
         }
-        // (the one asked for next, once this one has struck)
         if (m_swingNext >= 0 && m_swing.t >= attackOf(m_swing).next) {
             swingStart(m_swingNext, m_fpW > 0.5f);
             m_swingNext = -1;
@@ -7547,7 +7176,7 @@ namespace h3d {
         m_swingCross = std::min(1.f, m_swingCross + dt / ATTACK_CROSS);
         if (m_swingCross >= 1.f)
             m_swingWas.t = -1;
-        // the body: the swing's at once, let go from where it starts letting go to its end (no quicker than it came in)
+        // weight: 1 until `out`, then to 0 by the end, rate-limited (ATTACK_IN)
         const float want = m_swing.t >= dur ? 0.f : m_swing.t <= a.out ? 1.f : 1.f - (m_swing.t - a.out) / (dur - a.out);
         m_attackW        = want > m_attackW ? std::min(want, m_attackW + dt / ATTACK_IN) : std::max(want, m_attackW - dt / ATTACK_IN);
         if (m_swing.t >= dur && m_attackW <= 0.f) {
@@ -7556,7 +7185,7 @@ namespace h3d {
             return;
         }
         m_swingFist[0] = m_swingFist[1] = m_swing.t < a.out + 0.05f;
-        // its pose, taking over from the one before
+        // pose, crossfaded from the previous swing
         sampleClip(a.anim, m_swing.t, m_attackPose);
         if (m_swingWas.t >= 0) {
             sampleClip(attackOf(m_swingWas).anim, m_swingWas.t, m_attackWas);
@@ -7574,7 +7203,7 @@ namespace h3d {
         const float w  = smoothstep01(m_attackW);
         for (size_t n = 0; n < pose.size(); ++n)
             if (m_attackPart[n] == ATTACK_TRUNK) {
-                // (the clip's turn from rest, in the bone's own frame)
+                // clip turn from rest, in the bone's frame
                 const Quat q = (pose[n].r * md.nodes[n].rest.r.conj() * m_attackPose[n].r).normalized();
                 pose[n].r    = w >= 0.999f ? q : slerp(pose[n].r, q, w).normalized();
             }
@@ -7586,8 +7215,7 @@ namespace h3d {
         const auto& md = *m_model;
         const float w  = smoothstep01(m_attackW);
         const bool  fp = m.fp.on && md.eyeHeight > 0;
-        // first person: the hands where the clip has them in the view (from the eyes, in arm lengths: whatever the avatar's
-        // build), its view the camera's, pitched no further than ATTACK_UP and ATTACK_DOWN
+        // first person: wrists from the clip's reach in the view (arm lengths from the eyes), pitch clamped
         std::array<V3, 2> reach;
         bool              aim    = false;
         auto              wrists = [&](const SSwing& sw, std::array<V3, 2>& out) {
@@ -7625,10 +7253,9 @@ namespace h3d {
             swingArms(w);
             return;
         }
-        const std::vector<STRS> under = pose; // (the arms as first person holds them: the swing giving way to them starts from these)
+        const std::vector<STRS> under = pose; // first-person arms
         swingArms(w);
-        // the fist no further ahead than there's room (a wall, a window there): the swing giving way, as far as that takes,
-        // to the hands as first person holds them (kept short of it already)
+        // fist no further ahead than the room: bisect the swing weight toward the first-person arms
         const int   hand = md.human[m_swing.hand ? HB_R_HAND : HB_L_HAND];
         const float most = std::max(m.fp.room - 0.1f, 0.15f);
         const V3    look{std::sin(m_fpViewYaw) * std::cos(m_fpViewPitch), std::sin(m_fpViewPitch), -std::cos(m_fpViewYaw) * std::cos(m_fpViewPitch)};
@@ -7657,12 +7284,12 @@ namespace h3d {
         const float l1 = length(origin(m_restGlobal[la]) - origin(m_restGlobal[ua])), l2 = length(origin(m_restGlobal[hd]) - origin(m_restGlobal[la]));
         if (l1 < 1e-6f || l2 < 1e-6f || length(E - S) < 1e-6f || length(W - E) < 1e-6f)
             return;
-        // (bent the way it's bent: the elbow's way out from the line through the shoulder and the wrist)
+        // bend the way it's bent
         const V3   sw = length(W - S) > 1e-6f ? normalize(W - S) : normalize(E - S);
         const auto [u, f] = twoBones(S, wrist, l1, l2, E - S - sw * dot(E - S, sw));
         const Quat turnU = arc(normalize(E - S), u), turnF = arc(turnU.rotate(normalize(W - E)), f);
         const Quat want[3] = {(turnU * rotationOf(gu)).normalized(), (turnF * turnU * rotationOf(gl)).normalized(), rotationOf(gh)};
-        // (each from its own parent as posed by then: a bone between two keeps its own turn)
+        // each relative to its parent as posed so far
         const int nodes[3] = {ua, la, hd};
         for (int i = 0; i < 3; ++i) {
             const int  n  = nodes[i], p = md.nodes[n].parent;
@@ -7679,9 +7306,8 @@ namespace h3d {
         return (float)(m_rng >> 8) / 16777216.f;
     }
 
-    // expressions (held, or the gesture's), blinking, where the eyes look, and what that makes of the morphs
-    // and materials; how the expressions combine is VRM 1.0's (three-vrm's)
-    // what a node pose sets of a node's own, f of the way there
+    // face(): expressions, blinks and eye look into morphs and materials, combined as VRM 1.0 (three-vrm)
+    // putPose: applies what a node pose sets, f of the way
     static void putPose(STRS& d, const SNodePose& p, float f) {
         if (p.set & SNodePose::T)
             d.t = lerp(d.t, p.trs.t, f);
@@ -7691,8 +7317,7 @@ namespace h3d {
             d.s = lerp(d.s, p.trs.s, f);
     }
 
-    // how far a loop is from a to b: there and back every `seconds`, easing in and out at both (VRCFury's keys have
-    // flat tangents)
+    // loop weight a->b->a every `seconds`, eased (VRCFury keys have flat tangents)
     static float loopWeight(float time, float seconds) {
         const float p = std::fmod(time, seconds) / seconds;
         const float u = p < 0.5f ? 2 * p : 2 - 2 * p;
@@ -7706,7 +7331,7 @@ namespace h3d {
         const float  dt = std::clamp(m.dt, 0.f, 0.1f);
         auto         binary = [&](size_t e, float w) { return md.expressions[e].binary ? (w > 0.5f ? 1.f : 0.f) : w; };
 
-        // the held one, else the face both hands' gestures make together, else that of the hand that made its gesture last
+        // held expression, else the hands' gesture combo, else the last gesturing hand's face
         int   want  = m_held;
         float wantW = m_heldWeight;
         if (want < 0 && md.gestureCombo[m_gesture[0]][m_gesture[1]] != -2) {
@@ -7727,7 +7352,7 @@ namespace h3d {
 
         auto& out = m_exprOut;
         out       = m_exprW;
-        // the emote's faces, under the player's own (but for closing the eyes)
+        // emote faces under the player's (blinks excepted)
         if (m_emote >= 0) {
             float mine = 0;
             for (size_t e = 0; e < n; ++e)
@@ -7738,7 +7363,7 @@ namespace h3d {
             }
         }
 
-        // what they block of the blinking, looking and mouth
+        // VRM overrides: how much they block blink, look and mouth
         float blockBlink = 0, blockLook = 0, blockMouth = 0;
         for (size_t e = 0; e < n; ++e) {
             const float w = binary(e, out[e]);
@@ -7793,7 +7418,7 @@ namespace h3d {
         } else
             m_blinkT = -1;
 
-        // the eyes: where the head doesn't turn to (see look()), and glancing about
+        // eyes: the look the head doesn't take, plus saccades
         if (md.lookAt.type != SLookAt::NONE) {
             if ((m_saccadeIn -= dt) <= 0) {
                 m_saccadeIn = 0.6f + 2.4f * random();
@@ -7828,8 +7453,7 @@ namespace h3d {
             }
         }
 
-        // lip sync: the mouth's presets as the voice has them, and the consonants the avatar has, in place of as much of
-        // the vowels
+        // lip sync: consonant visemes replace as much of the vowels
         float spoken = 0;
         for (int k = VOWEL_COUNT; k < VISEME_COUNT; ++k)
             if (const int e = md.consonant[k - VOWEL_COUNT]; e >= 0 && m_visemes[k] > 0) {
@@ -7853,7 +7477,7 @@ namespace h3d {
         }
 
         m_morphW = m_shapeBase;
-        for (const int t : m_loops) { // a toggle's loop: its shape keys from a to b and back
+        for (const int t : m_loops) { // toggle loops: shape keys a->b->a
             const auto& l = md.toggles[t].loop;
             const float w = loopWeight(m_time, l.seconds);
             auto        at = [&](const std::vector<std::pair<int, float>>& v, int morph) {
@@ -7873,7 +7497,7 @@ namespace h3d {
             m_morphW[i]      = std::clamp(m_morphW[i], std::min(base, 0.f), std::max(base, 1.f));
         }
 
-        // materials: colors and atlas faces, made again when what they come from changes
+        // materials: rebuilt when expression weights change
         if (m_materials.empty())
             return;
         bool changed = false;
@@ -7915,7 +7539,7 @@ namespace h3d {
     // --- outfit
 
     namespace {
-        // the key of a slider in effect at its value: the last at or below it (the first below all of them)
+        // slider key at v: the last at or below it (else the first)
         size_t sliderKey(const SAvatarSlider& s, float v) {
             size_t k = 0;
             for (size_t i = 1; i < s.keys.size(); ++i)
@@ -7924,8 +7548,7 @@ namespace h3d {
             return k;
         }
 
-        // a 2D slider's keys around (x, y): the grid cell's corners (left bottom, right bottom, left top, right top)
-        // and how far across it
+        // 2D slider: corner keys of the grid cell around (x, y), and the position in it
         struct SCell {
             const SAvatarSlider::SKey* k[4] = {};
             float                      fx = 0, fy = 0;
@@ -7944,7 +7567,7 @@ namespace h3d {
             return c;
         }
 
-        // the key a slider's parts and material variants are as: 1D the last at or below the value, 2D the nearest
+        // key whose parts and variants apply: 1D the last at or below, 2D the nearest
         const SAvatarSlider::SKey& sliderOn(const SAvatarSlider& s, float v, float vy) {
             if (!s.grid)
                 return s.keys[sliderKey(s, v)];
@@ -7976,9 +7599,7 @@ namespace h3d {
         }
     }
 
-    // nodes a toggle leaves in the world (VRCFury's World Drop): where they were when it turned on, and all under them;
-    // and nodes held in the world (MA's World Fixed Object): where their rest pose was when the avatar appeared (MA
-    // moves them to a world-fixed root as the avatar is built)
+    // dropped nodes (VRCFury World Drop) stay where toggled on; MA World Fixed Objects at their first rest pose
     void CAvatarAnimator::drops(const SAvatarMotion& m) {
         if (m_dropBy.empty())
             return;
@@ -8012,7 +7633,7 @@ namespace h3d {
     void CAvatarAnimator::outfit() {
         const auto&  md    = *m_model;
         const size_t parts = md.parts.size();
-        // parts a toggle or a slider shows are hidden unless one of those shows them; one that hides them wins
+        // parts a toggle or slider can show stay hidden unless shown; hiding wins
         std::vector<uint8_t> showable(parts, 0), shownBy(parts, 0), hiddenBy(parts, 0);
         for (size_t t = 0; t < md.toggles.size(); ++t) {
             for (const int p : md.toggles[t].show) {
@@ -8048,7 +7669,7 @@ namespace h3d {
             if (m_toggles[t])
                 for (const auto& [m, w] : md.toggles[t].shapes)
                     m_shapeBase[m] = w;
-        for (size_t s = 0; s < md.sliders.size(); ++s) { // along the line between the keys on each side
+        for (size_t s = 0; s < md.sliders.size(); ++s) { // 1D: between neighbouring keys
             const auto& sl = md.sliders[s];
             const float v  = m_sliders[s];
             if (sl.grid) { // 2D: between the four keys around it
@@ -8088,7 +7709,7 @@ namespace h3d {
             if (!std::isnan(m_shapeSet[i]))
                 m_shapeBase[i] = m_shapeSet[i];
 
-        // node poses: the rest, as the toggles that are on and the sliders have it
+        // node poses: rest, then active toggles and sliders
         const bool posed = std::ranges::any_of(md.toggles, [](const SAvatarToggle& t) { return !t.poses.empty(); }) ||
             std::ranges::any_of(md.sliders, [](const SAvatarSlider& s) { return std::ranges::any_of(s.keys, [](const SAvatarSlider::SKey& k) { return !k.poses.empty(); }); });
         if (!posed)
@@ -8138,7 +7759,7 @@ namespace h3d {
                         putPose(m_nodePose[p.node], p, f);
             }
         }
-        // what plays while its toggle is on, and what stays in the world
+        // active loops and world drops
         m_loops.clear();
         std::vector<int> was = std::move(m_dropBy);
         m_dropBy.assign(md.nodes.size(), -1);
@@ -8169,7 +7790,7 @@ namespace h3d {
                     m_dropTake[n] = 1;
         }
 
-        // material variants: a batch takes the material of the last variant in effect that has one for it
+        // material variants: the last active variant mapping a batch wins
         if (md.variants.empty()) {
             m_batchMat.clear();
             return;
@@ -8300,7 +7921,7 @@ namespace h3d {
 
     void CAvatarAnimator::setPhysics(bool on) {
         if (on && !m_physics)
-            m_springLive = false; // from where the animation has them
+            m_springLive = false; // restart from the animated pose
         m_physics = on;
     }
 
@@ -8311,7 +7932,7 @@ namespace h3d {
         return g;
     }
 
-    // VRM 1.0's node constraints, as its spec has them
+    // VRM 1.0 node constraints
     void CAvatarAnimator::constrain(std::vector<STRS>& pose) const {
         const auto& md = *m_model;
         for (const auto& c : md.constraints) {
@@ -8320,7 +7941,7 @@ namespace h3d {
             switch (c.type) {
                 case SNodeConstraint::ROTATION: target = dstRest * (srcRest.conj() * pose[c.source].r); break;
                 case SNodeConstraint::ROLL: {
-                    // the source's turn from its rest, in the node's rest space: the part of it around the axis
+                    // source turn from rest in the node's rest space, around the axis only
                     const Quat d = dstRest.conj() * pose[c.source].r * srcRest.conj() * dstRest;
                     target       = dstRest * arc(d.rotate(c.axis), c.axis) * d;
                     break;
@@ -8344,10 +7965,7 @@ namespace h3d {
         constexpr float SPRING_STEP = 1.f / 60; // seconds
     }
 
-    // spring bones, stepped 60 times a second whatever the frame rate: the avatar's move over the frame is spread over
-    // the steps, and so is its pose's (a step between two frames goes by where what the springs hang from was by then:
-    // in first person the arms turn with the camera, frame by frame); what's shown is a step as far on into the next one
-    // as the frame is, from where it all is now (a sleeve on an arm goes with it as the arm goes, not as it was going)
+    // springs step at 60 Hz, interpolating the avatar's move and pose; the shown pose is a partial step from now
     void CAvatarAnimator::springs(const SAvatarMotion& m) {
         const auto& md = *m_model;
         if (md.springJoints.empty())
@@ -8357,7 +7975,7 @@ namespace h3d {
             return;
         }
         constexpr float STEP      = SPRING_STEP;
-        constexpr int   MAX_STEPS = 8; // slower than that and it slows down
+        constexpr int   MAX_STEPS = 8; // below 7.5 fps springs run slow
         const STRS      body      = decompose(m.world * M4::translation({0, m_lift, 0}));
         if (!m_springLive || m.dt > 0.25f || length(body.t - m_springBody.t) > 2.f + 20.f * m.dt || m_springWas.size() != m_pose.size()) {
             // the first frame, or it jumped
@@ -8367,7 +7985,7 @@ namespace h3d {
             m_springLive = true;
         } else if (m.dt > 0) {
             const float from  = m_springAcc;
-            int         steps = (int)((from + m.dt) / STEP + 1e-3f); // a frame of 1/60 s is a step, not most of one
+            int         steps = (int)((from + m.dt) / STEP + 1e-3f); // a 1/60 s frame is one full step
             m_springAcc       = std::max(0.f, from + m.dt - steps * STEP);
             const bool slow   = steps > MAX_STEPS;
             if (slow) {
@@ -8375,17 +7993,17 @@ namespace h3d {
                 m_springAcc = 0;
             }
             for (int s = 1; s <= steps; ++s) {
-                // where the avatar was by then, and how it stood
+                // avatar transform at this step
                 const float u = slow ? (float)s / steps : std::clamp((s * STEP - from) / m.dt, 0.f, 1.f);
                 const STRS  at{lerp(m_springBody.t, body.t, u), slerp(m_springBody.r, body.r, u), lerp(m_springBody.s, body.s, u)};
                 const M4    now = at.matrix();
-                m_springMove    = now * m_springStepAt.inverse(); // (the last step can be frames back)
+                m_springMove    = now * m_springStepAt.inverse(); // may be frames back
                 m_springStepAt  = now;
                 springPass(SP_STEP, now * md.fix, STEP, u < 1.f ? springPoseAt(u) : m_global);
             }
         }
         const M4 world = body.matrix() * md.fix;
-        m_springMove   = body.matrix() * m_springStepAt.inverse(); // (since the last step)
+        m_springMove   = body.matrix() * m_springStepAt.inverse(); // since the last step
         springPass(SP_SHOW, world, m_springAcc / STEP, m_global);
         m_springBody = body;
         m_springWas  = m_pose;
@@ -8395,8 +8013,7 @@ namespace h3d {
                 m_global[n] = inv * m_springGlobal[n];
     }
 
-    // m_global as the springs go by it, u of the way from the last frame's pose to this one's (only what they read of it,
-    // and what's above that)
+    // m_global u of the way from last frame's pose, for the nodes the springs read
     const std::vector<M4>& CAvatarAnimator::springPoseAt(float u) {
         const auto& nodes = m_model->nodes;
         for (int n : m_springUp) {
@@ -8417,7 +8034,7 @@ namespace h3d {
         for (size_t s = 0; s < md.springs.size(); ++s)
             if (const int c = md.springs[s].carrier; c >= 0) {
                 const M4 at      = world * pose[c];
-                m_carrierMove[s] = pass == SP_START ? M4::identity() : at * m_carrierAt[s].inverse(); // (since the last step)
+                m_carrierMove[s] = pass == SP_START ? M4::identity() : at * m_carrierAt[s].inverse(); // since the last step
                 if (pass != SP_SHOW)
                     m_carrierAt[s] = at;
             }
@@ -8425,7 +8042,7 @@ namespace h3d {
             const auto& k   = md.springColliders[c];
             m_colliderAt[c] = {world.point(pose[k.node].point(k.offset)), world.point(pose[k.node].point(k.tail)), k.radius, k.kind, k.disc};
         }
-        // (shown: f of a step, of dt seconds, none of it kept)
+        // SP_SHOW: a fraction f of a step, not kept
         const float f = pass == SP_STEP ? 1.f : t, dt = pass == SP_STEP ? t : t * SPRING_STEP;
         for (size_t n = m_springFrom; n < md.nodes.size(); ++n) {
             const int j = m_springOf[n];
@@ -8443,19 +8060,19 @@ namespace h3d {
                 const V3    rest = G.point(J.tail) - O; // where the animation has it point
                 const float len  = length(rest);
                 const M4    Pi   = P.inverse();
-                // its limit, after the swing and after each collider's push, as VRMC_springBone_limit has it
+                // VRMC_springBone_limit, after the swing and each collider push
                 const Quat L       = J.limit != LIMIT_NONE ? (rotationOf(G) * J.limitFrame).normalized() : Quat{};
                 auto       limited = [&](const V3& p) { return springLimit(J, L, O, p); };
-                // its length again, within its limit, out of the colliders
+                // back to its length, within the limit, out of colliders
                 auto pushed = [&](V3 next) {
                     next = limited(O + normalize(next - O) * len);
                     for (int k : sp.colliders) {
                         if (md.springColliders[k].body & J.startsIn)
-                            continue; // (one of the body's, that it starts inside of: its limit keeps it out)
+                            continue; // starts inside: the limit keeps it out
                         const auto& c  = m_colliderAt[k];
                         const V3    ab = c.b - c.a;
                         if (c.kind == COLLIDER_PLANE) {
-                            // to its side, as far as the bone's radius
+                            // onto its positive side, by the bone radius
                             const V3    n = normalize(ab);
                             const float h = dot(next - c.a, n);
                             if (h < J.radius)
@@ -8463,8 +8080,7 @@ namespace h3d {
                             continue;
                         }
                         if (c.kind == COLLIDER_DISC) {
-                            // out of what's within its radius of the nearest point of the disc: off its face, or round
-                            // its edge (on it: off the face it's on, its normal's side if right in it)
+                            // out of the disc's radius: off its face or round its edge
                             const V3    n = normalize(ab);
                             const float h = dot(next - c.a, n);
                             V3          f = next - c.a - n * h;
@@ -8494,8 +8110,7 @@ namespace h3d {
                         next = O + rest;
                     return next;
                 };
-                // (the pushes needn't leave it where they found it: colliders that overlap push it into each other, or
-                // into its limit. What they'd do to it again where it is, so what's shown starts from there: see below)
+                // pushes can move it again (overlapping colliders, the limit): `again` is taken off the shown pose
                 auto again = [&](const V3& at) { return Pi.dir(pushed(at) - at); };
                 if (pass == SP_START) {
                     m_carried[j] = {};
@@ -8506,17 +8121,14 @@ namespace h3d {
                 }
                 const V3 cur = C.point(m_tail[j]), prev = C.point(m_tailPrev[j]);
                 const V3 byBody = m_springMove.point(cur) - cur;
-                // a PhysBone's Immobile (All Motion): carried along with all its carrier does, as much (and where the avatar
-                // goes no less than its own immobile); its own swing goes on, the carrying doesn't: the last step's is taken
-                // out of how it was going
+                // PhysBone Immobile (All Motion): moves with its carrier; the swing excludes the last step's carry
                 const V3 carried = sp.center < 0 && sp.carrier >= 0 ?
                     byBody * std::max(sp.immobile, sp.parentImmobile) + (m_carrierMove[J.spring].point(cur) - cur - byBody) * sp.parentImmobile :
                     V3{};
                 V3 next = cur + carried + (cur - prev - m_carried[j]) * ((1 - J.drag) * f) + normalize(rest) * (J.stiffness * dt * J.scale) +
                     J.gravityDir * (J.gravity * dt * J.scale);
                 if (sp.center < 0 && sp.carrier < 0)
-                    // the drag is of the air, and that moves along with the avatar some: going somewhere at a steady
-                    // speed swings it less than starting, stopping and turning do
+                    // drag against air moving partly with the avatar: steady motion swings it less
                     next += byBody * (J.drag * sp.immobile);
                 next = pushed(next);
                 if (pass == SP_STEP) {
@@ -8525,7 +8137,7 @@ namespace h3d {
                     m_tail[j]     = m_centerInv[J.spring].point(next);
                     m_again[j]    = again(next);
                 } else
-                    // shown: less what pushing it again where the step left it would do, less and less on into the next step
+                    // shown: less the re-push (`again`), fading over the step
                     next = limited(next - P.dir(m_again[j]) * (1 - f));
                 // turned from where the animation points it to the tail
                 const V3 a = normalize(Pi.dir(rest)), d = normalize(Pi.dir(next - O));
@@ -8623,17 +8235,14 @@ namespace h3d {
                 m_pose[i] = {lerp(m_from[i].t, m_target[i].t, w), slerp(m_from[i].r, m_target[i].r, w), lerp(m_from[i].s, m_target[i].s, w)};
         } else
             m_pose = m_target;
-        // where the pose changed all at once: what was shown going on as it went (its turns and moves last frame) and
-        // settling into the new one (see m_settleRate)
-        // (jumping off or landing the body's own move changes all at once, a frame after landing: the hips, k of them,
-        // go on as they went, the root's move past what its speed last frame took it and that speed's change taken off
-        // them; the speed's after this frame's step)
+        // where the pose changed at once, the shown pose keeps its motion and settles in (m_settleRate); carry(k) does
+        // the same for the root at takeoff and landing
         int  liftHips = -1;
         V3   liftV;
         auto carry = [&](float k) {
             const int hips = md.human[HB_HIPS];
             const V3 root = origin(m.world);
-            // (not when it was put somewhere else)
+            // not after a teleport
             if (k <= 0 || hips < 0 || !m_settleRootSet || m.dt <= 1e-4f || m_settleT.size() != m_pose.size() || length(root - m_settleRoot) > 2.f)
                 return;
             const V3  rootV = (root - m_settleRoot) * (1.f / m.dt);
@@ -8654,7 +8263,7 @@ namespace h3d {
                     rv = rotationVector(m_settleNow[i].r * m_settleWas[i].r.conj()) * (1.f / was);
                     tv = (m_settleNow[i].t - m_settleWas[i].t) * (1.f / was);
                 }
-                m_settleRV[i] = length(rv) > 30.f ? rv * (30.f / length(rv)) : rv; // (not what a snap just before would give)
+                m_settleRV[i] = length(rv) > 30.f ? rv * (30.f / length(rv)) : rv; // ignore a snap just before
                 m_settleTV[i] = length(tv) > 5.f ? tv * (5.f / length(tv)) : tv;
             }
             if (was > 0)
@@ -8668,8 +8277,7 @@ namespace h3d {
         if (m_settleRate > 0 && m_settleR.size() == m_pose.size()) {
             const float dt   = std::clamp(m.dt, 0.f, 0.05f);
             float       left = 0;
-            // (the frame after: less how fast the new pose goes, so what's shown goes on at its own speed, not that and
-            // the new pose's too)
+            // the frame after: take off the new pose's own velocity
             if (m_settleFresh && m_settleNew.size() == m_pose.size() && m.dt > 1e-4f) {
                 for (size_t i = 0; i < m_pose.size(); ++i) {
                     V3 rv = rotationVector(m_pose[i].r * m_settleNew[i].r.conj()) * (1.f / m.dt), tv = (m_pose[i].t - m_settleNew[i].t) * (1.f / m.dt);
@@ -8712,8 +8320,7 @@ namespace h3d {
         firstPersonState(m, emoteW);
         attackState(m);
         hands(m.dt, m_pose);
-        // (first person: the trunk turned to the camera, the head only the rest of the way; an attack's turn on that, the
-        // head going with it more than looking about)
+        // first person: trunk to the camera, head the rest; an attack turns on top
         const float twist = firstPersonTrunk(m, m_pose);
         attackTrunk(m_pose);
         look(m, m_pose, (1.f - emoteW) * (1.f - ATTACK_LOOK * smoothstep01(m_attackW)), twist);
@@ -8723,8 +8330,7 @@ namespace h3d {
         constrain(m_pose);
         globals(m_pose, m_global);
 
-        // emotes keep the feet on the ground but for jumps and falls; clips have the hips where they want them, and
-        // walking puts the feet where they step
+        // grounded emotes keep the feet down; clips and walking place them themselves
         const float ground = m_restFootY - lowestFoot(m_global);
         float       lift   = 0.f;
         if (emoteW > 0)
@@ -8776,7 +8382,7 @@ namespace h3d {
     int CAvatarAnimator::addEmote(std::shared_ptr<const SAvatarEmote> emote) {
         if (!m_model || !emote)
             return -1;
-        // made for this model: its nodes and expressions are
+        // made for this model: indices in range
         const auto& md = *m_model;
         if (std::ranges::any_of(emote->anim.channels, [&](const SAnimChannel& c) { return c.node < 0 || c.node >= (int)md.nodes.size(); }) ||
             std::ranges::any_of(emote->faces, [&](const SAnimChannel& c) { return c.node < 0 || c.node >= (int)md.expressions.size(); }))
@@ -8794,7 +8400,7 @@ namespace h3d {
     void CAvatarAnimator::playEmote(int emote, int loop) {
         if (!m_model || emote < 0 || emote >= (int)m_emotes.size())
             return;
-        // one after another: from where the last one has the body
+        // replacing an emote: blend from its pose
         if (m_emote >= 0 && m_emoteW > 0 && m_emoteNow.size() == m_pose.size()) {
             m_emoteFrom = m_emoteNow;
             m_emoteSwap = 0;
@@ -8814,8 +8420,7 @@ namespace h3d {
         m_emoteClock = -1;
     }
 
-    // the emote's pose, faded in over the pose, and its faces; done, it fades out. Its time goes on with the frames, or
-    // is where its sound is heard (setEmoteClock())
+    // emote pose faded over the pose, plus faces; time from the frames or its sound (setEmoteClock())
     void CAvatarAnimator::emotePose(float dt, std::vector<STRS>& pose) {
         const SAvatarEmote& em  = *m_emotes[m_emote];
         const float         dur = em.anim.duration;

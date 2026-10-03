@@ -92,24 +92,19 @@ add('i_firipinjin', 'i', 'い', 'い', 'い', 'kana reading', 'isolated', 'kana 
 
 # --- word: the first vowel of a word, cut before a voiceless stop/affricate closure (more speakers for あ and う) ---
 t, r = ll('葵心', 'アタック')
-# dropped: too short: 65 ms of vowel after trimming (two short ア)
-# add('a_aoishin-atakku', 'a', 'あ', 'アタック', 'あたっく', 'attack', 'word', 'both ア of アタック: word-initial (before /t/) and after /t/', 'aoishin', commons(t, r), take=[0, 1])
+# dropped a_aoishin-atakku: too short, 65 ms of vowel after trimming (two short ア)
 t, r = ll('葵心', '一月')
-# dropped: too short: 75 ms of vowel after trimming
-# add('i_aoishin-ichigatsu', 'i', 'い', '一月', 'いちがつ', 'January', 'word', 'both い of いちがつ: word-initial (before /tɕ/) and after /tɕ/', 'aoishin', commons(t, r), take=[0, 1])
+# dropped i_aoishin-ichigatsu: too short, 75 ms of vowel after trimming
 t, r = ll('葵心', '宇宙')
 add('u_aoishin-uchuu', 'u', 'う', '宇宙', 'うちゅう', 'space', 'word', 'the う of うちゅう: word-initial (before /tɕ/) and the long ゅう after /tɕ/', 'aoishin', commons(t, r), take=[0, 1])
 t, r = ll('Zsrtrgh', 'あか')
-# dropped: too short: 55 ms of vowel after trimming
-# add('a_zsrtrgh-aka', 'a', 'あ', 'あか', 'あか', 'red', 'word', 'both あ of あか: word-initial (before /k/) and after /k/', 'zsrtrgh', commons(t, r), take=[0, 1])
+# dropped a_zsrtrgh-aka: too short, 55 ms of vowel after trimming
 add('a_marsian-aka', 'a', 'あ', '赤', 'あか', 'red', 'word', 'both あ of あか: word-initial (before /k/) and after /k/', 'marsian', commons('File:Ja-aka-red.ogg', 'raw/Ja-aka-red.ogg'), take=[0, 1])
 add('u_marsian-utsu', 'u', 'う', '打つ', 'うつ', 'to hit', 'word', 'both う of うつ: word-initial (before /ts/) and after /ts/', 'marsian', commons('File:Ja-utsu.ogg', 'raw/Ja-utsu.ogg'), take=[0, 1])
-# dropped: 60 Hz hum at -33 dBFS (SNR ~18 dB) and a 40 ms first vowel
-# add('a_takasugi-atatakai', 'a', 'あ', '暖かい', 'あたたかい', 'warm', 'word', 'word-initial あ before /t/ (あたたかい)', 'takasugi', commons('File:Ja-atatakai.ogg', 'raw/Ja-atatakai.ogg'))
+# dropped a_takasugi-atatakai: 60 Hz hum at -33 dBFS (SNR ~18 dB) and a 40 ms first vowel
 add('u_doughaque-kuuki', 'u', 'う', '空気', 'くうき', 'air', 'word', 'the long う [ɯː] of くうき, between /k/ and /k/', 'doughaque', commons('File:Ja-kuuki.ogg', 'raw/Ja-kuuki.ogg'), take=[0])
 t, r = ll('Higa4', 'お寺')
-# dropped: too short: 50 ms of vowel after trimming
-# add('o_higa4-otera', 'o', 'お', 'お寺', 'おてら', 'temple', 'word', 'word-initial お before /t/ (おてら)', 'higa4', commons(t, r), take=[0])
+# dropped o_higa4-otera: too short, 50 ms of vowel after trimming
 add('a_tofugu-m-aka', 'a', 'あ', '赤', 'あか', 'red', 'word', 'both あ of あか: word-initial (before /k/) and after /k/', 'tofugu-m', github('赤【あか】.ogg'), take=[0, 1])
 add('a_tofugu-f-atsui', 'a', 'あ', '厚い', 'あつい', 'thick', 'word', 'word-initial あ before /ts/ (あつい)', 'tofugu-f', github('厚い【あつい】.ogg'), take=[0])
 add('u_tofugu-m-utsu', 'u', 'う', '打つ', 'うつ', 'to hit', 'word', 'both う of うつ: word-initial (before /ts/) and after /ts/', 'tofugu-m', github('打つ【うつ】.ogg'), take=[0, 1])
@@ -117,8 +112,7 @@ add('u_tofugu-f-utsu', 'u', 'う', '撃つ', 'うつ', 'to shoot', 'word', 'both
 add('e_tofugu-f-ekken', 'e', 'え', '越権', 'えっけん', 'overstepping authority', 'word', 'word-initial え before /kk/ (えっけん)', 'tofugu-f', github('越権【えっけん】.ogg'), take=[0])
 add('i_tofugu-m-ichi', 'i', 'い', '一', 'いち', 'one', 'word', 'both い of いち: word-initial (before /tɕ/) and after /tɕ/', 'tofugu-m', github('一【いち】.ogg'), take=[0, 1])
 
-# dropped: the first あ of Akiko is a 30 ms blip
-# add('a_quatrogatos-akiko', 'a', 'あ', '映子', 'あきこ', 'given name Akiko (若林映子, given name first)', 'word', 'word-initial あ before /k/ (あきこ)', 'quatrogatos', commons('File:Akiko Wakabayashi.ogg', 'raw/Akiko_Wakabayashi.ogg'))
+# dropped a_quatrogatos-akiko: the first あ of Akiko is a 30 ms blip
 add('e_quatrogatos-eiko', 'e', 'え', '英子', 'えいこ', 'given name Eiko (松田英子, given name first)', 'word', 'word-initial long え [eː] before /k/ (えいこ)', 'quatrogatos', commons('File:Eiko Matsuda.ogg', 'raw/Eiko_Matsuda.ogg'), take=[0])
 add('i_wadakuramon-ishizuchi', 'i', 'い', '石鎚山', 'いしづちさん', 'Mount Ishizuchi', 'word', 'word-initial い before /ɕ/ (いしづち)', 'wadakuramon', commons('File:Ishizuchi-san.ogg', 'raw/Ishizuchi-san.ogg'), take=[0])
 

@@ -13,8 +13,7 @@
 
 struct cgltf_data;
 
-// What loading maps and avatars have in common: opening a glTF file, reading
-// its materials and decoding the textures they use.
+// glTF loading shared by maps and avatars: opening a file, reading its materials and decoding their textures.
 
 namespace h3d::gltf {
 
@@ -26,12 +25,11 @@ namespace h3d::gltf {
     std::string lower(std::string s);
     bool        readFile(const std::string& path, std::vector<uint8_t>& out);
 
-    // a number from a file as an integer, held to lo..hi (NaN: the fallback). Casting a double an int can't hold is
-    // undefined, and a file can say 1e999
+    // a file's number as an int clamped to lo..hi, NaN -> fallback (casting an out-of-range double to int is UB)
     inline int fileInt(double v, int fallback, int lo = -(1 << 30), int hi = 1 << 30) {
         return v == v ? (int)std::clamp(v, (double)lo, (double)hi) : fallback;
     }
-    // and as a float, finite (NaN and infinities: the fallback)
+    // as a finite float; NaN and infinities -> fallback
     inline float fileFloat(double v, float fallback) {
         return std::isfinite(v) ? (float)std::clamp(v, -1e30, 1e30) : fallback;
     }
@@ -60,15 +58,13 @@ namespace h3d::gltf {
 
     using DataPtr = std::unique_ptr<cgltf_data, void (*)(cgltf_data*)>;
 
-    // parses `path` and loads its buffers; on failure returns null and says why
-    // (`what` names the file in messages: "map", "avatar")
+    // parses `path` and loads its buffers; null on failure, with `error` set (`what` names the file: "map", "avatar")
     DataPtr open(const std::string& path, const std::string& what, std::string& error);
-    // ... the same of a GLB in memory (one built in): its buffer must be its own, in it
+    // the same for a built-in GLB in memory, which can't reference external buffers
     DataPtr openMemory(const void* bytes, size_t size, const std::string& what, std::string& error);
 
-    // the materials of a file in the renderer's terms. The images are only
-    // described, decodeImages() fills in their pixels. Without surfaceMaps, normal
-    // and metallic-roughness textures are left out (models without tangents).
+    // a file's materials in the renderer's terms; decodeImages() fills in the images' pixels. Without surfaceMaps,
+    // normal and metallic-roughness textures are skipped (models without tangents)
     struct SMaterials {
         std::vector<SMapImage>    images;
         std::vector<SMapMaterial> materials;       // one per glTF material, then a default one
@@ -78,12 +74,11 @@ namespace h3d::gltf {
     };
     SMaterials readMaterials(cgltf_data* data, bool surfaceMaps = true);
 
-    // decodes every image in `images` (slots maps glTF images to them), on a few threads; with
-    // `compress` (eTexCompression), block compresses what the GPU takes, with all their mip levels
+    // decodes `images` on a few threads (`slots` maps glTF images to them); with `compress` (eTexCompression), block
+    // compresses what the GPU supports, with all mip levels
     void decodeImages(cgltf_data* data, const std::string& dir, std::vector<SMapImage>& images, const std::vector<int>& slots, const std::atomic<bool>& cancel,
                       std::vector<std::string>& log, int compress = 0);
 
-    // HYPR3D_lighting (see tools/cs2map.py): the lighting a game baked for the map, decoded. Returns
-    // false when the file has none. out.skyImage is left as the file's image index.
+    // decodes HYPR3D_lighting (tools/cs2map.py); false if the file has none. out.skyImage stays a file image index
     bool readLighting(cgltf_data* data, const std::string& dir, SMapLighting& out, const std::atomic<bool>& cancel, std::vector<std::string>& log);
 }

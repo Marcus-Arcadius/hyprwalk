@@ -3,52 +3,26 @@
 
     python3 tools/cs2map.py MAP [options]
 
-MAP is a map name such as de_mirage, looked up in the CS2 install Steam knows about, or the path
-of a map's .vpk. The map is exported with the command line version of Source 2 Viewer
-(Source2Viewer-CLI, https://github.com/ValveResourceFormat/ValveResourceFormat) and then made
-to suit hypr3d:
-
-  - the 3D skybox (the town around the playable area) is put in at its real size
-  - the sky texture goes on a dome (reading its .exr needs Blender; without it hypr3d's own sky
-    shows)
-  - CS2's own lighting comes along: the lightmaps and light probes the map was baked with (for the
-    3D skybox too), the sun, the fog and the map's exposure range and tone curve (hypr3d's
-    HYPR3D_lighting extension, the _LIGHTMAP_UV vertex attribute; needs Blender to read the HDR
-    lightmaps)
-  - materials keep their normal, roughness and metalness maps, and what CS2's shaders do beyond
-    glTF: detail textures, self-illumination, which ones have specular, decals that multiply
-    (hypr3d's HYPR3D_materials_source2 extension)
-  - blended materials keep their second layer, painted in by the vertices the way the game does
-    (hypr3d's HYPR3D_materials_blend extension and a _BLEND vertex attribute)
-  - foliage drops the wind data Valve keeps in its vertex colours
-  - decals (the bombsite letters, stains, posters) lie 1 cm off what they're on: Source 2 Viewer 20
-    lifts them 39 cm
-  - entities that start disabled (the Retakes barriers, for one) are left out
-  - there's a start point (hypr3d_spawn) at a team's spawn, and the desktop's wall when you give
-    one (hypr3d_desktop); otherwise hypr3d looks for a wall itself
-
-Source 2 Viewer has to be able to read the shaders of your CS2 build, or materials lose their
-transparency and tint. When it can't, cs2map gets a newer one: the latest release if that is newer,
-else it builds the current source (which needs git, and the .NET 10 SDK or nix).
+MAP is a map name such as de_mirage, from the CS2 install Steam knows about, or a map's .vpk. It is exported with
+Source2Viewer-CLI (https://github.com/ValveResourceFormat/ValveResourceFormat), with the 3D skybox, the sky and CS2's
+baked lighting (the sky and the HDR lightmaps need Blender). If Source 2 Viewer can't read your CS2 build's shaders,
+cs2map gets the latest release, else builds the current source (needs git, and the .NET 10 SDK or nix).
 
 options:
   -o OUT.glb            where to write (default ~/.local/share/hypr3d/maps/MAP.glb)
-  --game DIR            the CS2 folder (".../Counter-Strike Global Offensive"), default: found
-                        through Steam's library list
-  --vrf PATH            Source2Viewer-CLI to use (default: $SOURCE2VIEWER_CLI, then PATH, then
-                        the newest in ~/.cache/hypr3d/source2viewer/*/, else the latest release is
-                        downloaded there)
+  --game DIR            the CS2 folder (".../Counter-Strike Global Offensive"), default: found through Steam
+  --vrf PATH            Source2Viewer-CLI to use (default: $SOURCE2VIEWER_CLI, then PATH, then the newest in
+                        ~/.cache/hypr3d/source2viewer/*/, else the latest release, downloaded there)
   --no-lighting         leave CS2's lighting out (hypr3d then lights the map itself)
-  --spawn WHERE         where hypr3d starts you: t or ct (a team's spawn, default t), or X,Y,Z,YAW
-                        in the map's own units and degrees (the numbers Hammer and the game's
-                        getpos show)
+  --spawn WHERE         where hypr3d starts you: t or ct (a team's spawn, default t), or X,Y,Z,YAW in the map's
+                        units and degrees (as Hammer and getpos show them)
   --desktop X,Y,Z,YAW   the middle of the desktop, on a wall, and the way it faces, likewise
   --no-skybox           leave the 3D skybox out
   --no-sky              leave the sky dome out
   --keep DIR            export into DIR and leave the raw export there
   --list                list the maps in the install and stop
 
-Maps are Valve's: this only reads the copy of the game you have, for your own use.
+Maps are Valve's: this only reads your copy of the game, for your own use.
 """
 
 import sys, os, re, io, json, math, struct, shutil, subprocess, tempfile, argparse, glob, zipfile, time, bisect
@@ -62,16 +36,15 @@ REPO = 'https://github.com/ValveResourceFormat/ValveResourceFormat'
 RELEASES = 'https://api.github.com/repos/ValveResourceFormat/ValveResourceFormat/releases/latest'
 # what Source 2 Viewer logs when the game's shaders are newer than it knows
 VCS_ERROR = 'Only VCS file versions'
-# the lightmaps hypr3d reads: CS2's lightmap format 8.2 (irradiance, its main direction, baked shadows)
+# lightmaps hypr3d reads (CS2 lightmap format 8.2): irradiance, its dominant direction, baked shadows
 LIGHTMAPS = ('irradiance', 'directional_irradiance', 'direct_light_shadows')
-# glTF accessors: struct's letter for each component type, and how many numbers each type has
+# glTF component type -> struct letter; accessor type -> component count
 COMPONENT = {5120: 'b', 5121: 'B', 5122: 'h', 5123: 'H', 5125: 'I', 5126: 'f'}
 WIDTH = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'MAT2': 4, 'MAT3': 9, 'MAT4': 16}
 
-# where to start and where the desktop goes, for maps that have been looked at: in the map's own
-# units, as --spawn and --desktop take them
+# default --spawn and --desktop per map, in the map's units
 PRESETS = {
-    # T spawn, facing the big yellow wall by the gate, with the spawn's streets behind
+    # T spawn, facing the yellow wall by the gate
     'de_mirage': {'spawn': '1249,447,-262,0', 'desktop': '1375,447,-197,180'},
 }
 
@@ -124,8 +97,7 @@ def linear_to_srgb(c):
 
 
 def source_rotation(angles):
-    """Source's AngleMatrix for pitch, yaw, roll in degrees: its columns are the forward, left and up
-    axes of something turned that way"""
+    """Source's AngleMatrix for pitch, yaw, roll in degrees: columns are the forward, left and up axes"""
     p, y, r = (math.radians(a) for a in angles)
     sp, cp, sy, cy, sr, cr = math.sin(p), math.cos(p), math.sin(y), math.cos(y), math.sin(r), math.cos(r)
     return [[cp * cy, sr * sp * cy - cr * sy, cr * sp * cy + sr * sy],
@@ -175,7 +147,7 @@ def node_matrix(nd):
 
 
 def invert_affine(m):
-    """the inverse of an affine 4x4 (row-major), or None when it flattens space"""
+    """inverse of a row-major affine 4x4, or None when singular"""
     a, b, c = m[0][:3], m[1][:3], m[2][:3]
     cof = [[b[1] * c[2] - b[2] * c[1], a[2] * c[1] - a[1] * c[2], a[1] * b[2] - a[2] * b[1]],
            [b[2] * c[0] - b[0] * c[2], a[0] * c[2] - a[2] * c[0], a[2] * b[0] - a[0] * b[2]],
@@ -257,7 +229,7 @@ def list_maps(game):
 # ---------------------------------------------------------------- Source 2 Viewer
 
 class ShadersTooNew(Exception):
-    """Source 2 Viewer can't read the game's shaders, so its materials would come out wrong"""
+    """Source 2 Viewer can't read the game's shaders, so materials would come out wrong"""
 
 
 class VRF:
@@ -282,8 +254,7 @@ class VRF:
         raise Fail(f"{self.exe} doesn't run here (on NixOS it needs nix-ld or steam-run)")
 
     def run(self, args, logfile, watch=False):
-        """runs it with its output in logfile. With watch, it's stopped as soon as it says it can't read
-        the game's shaders (which it does at the first material) and ShadersTooNew is raised."""
+        """runs it, output to logfile; with watch, kills it and raises ShadersTooNew at the first unreadable shader"""
         with open(logfile, 'w') as f:
             p = subprocess.Popen(self.prefix + [self.exe] + args, env=self.env, stdout=f, stderr=subprocess.STDOUT)
         tail = ''
@@ -319,7 +290,7 @@ def find_vrf(arg):
             if not os.path.isfile(c):
                 raise Fail(f'{c} not found')
             return VRF(c)
-    # the newest one there: a build made because a release was too old is newer than that release
+    # newest first: a source build made because a release was too old is newer than that release
     found = sorted(glob.glob(os.path.join(cache_dir(), '*', 'Source2Viewer-CLI')), key=os.path.getmtime, reverse=True)
     if found:
         return VRF(found[0])
@@ -327,7 +298,7 @@ def find_vrf(arg):
 
 
 def version_key(v):
-    """'20.0', 'v21.1', '20.0.6980+a06886f' -> (20, 0): releases are numbered major.minor, builds add to that"""
+    """'v21.1', '20.0.6980+a06886f' -> (major, minor)"""
     m = re.match(r'v?(\d+)\.(\d+)', v or '')
     return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
 
@@ -358,7 +329,7 @@ def download_vrf(rel):
 
 
 def build_vrf(work):
-    """builds Source2Viewer-CLI from the current source into the cache, returns it"""
+    """builds Source2Viewer-CLI from the current source into the cache; returns its path"""
     git = shutil.which('git')
     if not git:
         raise Fail('building Source 2 Viewer needs git')
@@ -401,8 +372,7 @@ def build_vrf(work):
 
 
 def newer_vrf(current, work):
-    """one that can read the shaders `current` can't: the latest release if it's newer, else a build of
-    the current source"""
+    """a Source 2 Viewer that reads what `current` can't: the latest release if newer, else a source build"""
     try:
         rel = latest_release()
         if version_key(rel.get('tag_name')) > version_key(current.version):
@@ -473,10 +443,8 @@ def num(e, key, default):
 
 
 def sun_channel(sun):
-    """the channel (0-3) of the sun's baked shadow in the lightmaps' direct_light_shadows and the probes' atlas, or -1.
-    CS2's shaders shadow the sun by (1 - dot(those, a mask with a 1 at that channel)) times its realtime shadow on every
-    surface, so with no channel (the key missing, as it is for Dynamic suns and fully baked ones) only the realtime
-    shadow is left. A Baked sun (directlight 1) without baked_light_indexing is fully baked and has none either"""
+    """the sun's baked shadow channel (0-3) in direct_light_shadows and the probe atlas, or -1. CS2 multiplies the
+    realtime sun shadow by (1 - that channel); Dynamic suns and fully baked ones (no baked_light_indexing) have none"""
     if not sun or 'bakedshadowindex' not in sun:
         return -1
     if int(num(sun, 'directlight', 1)) == 1 and not truthy(sun.get('baked_light_indexing', 'true')):
@@ -486,9 +454,8 @@ def sun_channel(sun):
 
 
 def sun_runtime(sun):
-    """whether CS2 lights with the sun at run time: a Dynamic (2) or Stationary (3) one, or a Baked (1) one with a baked
-    shadow channel ("Stationary Light Shadows"). A fully baked sun's direct light is in the lightmaps and the probes
-    already; a disabled or dark one gives none"""
+    """whether CS2 lights with the sun at run time: Dynamic (2), Stationary (3), or Baked (1) with a shadow channel; a
+    fully baked sun is already in the lightmaps and probes"""
     if not sun or not truthy(sun.get('enabled', 'true')) or num(sun, 'brightness', 1) * num(sun, 'brightnessscale', 1) <= 0:
         return False
     dl = int(num(sun, 'directlight', 1))
@@ -497,16 +464,11 @@ def sun_runtime(sun):
 
 # ---------------------------------------------------------------- tints
 
-# A tint put on a mesh in Hammer ends up in its draw call's m_vTintColor, which the map compiler stores linear:
-# (rgb / 255) to the power of 2.2 (de_dust2's clouds: 253 247 225 -> 0.982826 0.932277 0.7593). Source 2 Viewer's own
-# renderer and its map extract know that; its glTF export takes it for a gamma one and linearizes it again, with the
-# instance's tint and g_vColorTint. A prop merged into an aggregate by the compiler has its own tint, 0-255 gamma, per
-# fragment.
+# Hammer mesh tints are stored linear ((rgb / 255)^2.2) in the draw call's m_vTintColor; Source 2 Viewer's glTF export
+# linearizes them again, with the instance's tint and g_vColorTint. Aggregate fragments have their own 0-255 gamma tint
 
 def parse_draw_calls(text):
-    """Source 2 Viewer's dump of models' MDAT blocks (-b MDAT) -> {model file name: [(material, tint), ...]}, the draw
-    calls of each model's mesh in order (an aggregate's fragments number them that way), names in lower case, tints
-    linear"""
+    """-b MDAT dump -> {model name: [(material, linear tint), ...]} in draw call order, names lower case"""
     calls, cur, tint = {}, None, None
     for line in text.splitlines():
         m = re.match(r'\[\d+/\d+\] (\S+)', line)
@@ -526,8 +488,7 @@ def parse_draw_calls(text):
 
 
 def parse_fragments(text):
-    """Source 2 Viewer's dump of world nodes (-b DATA) -> {aggregate model file name: [(draw call, tint or None), ...]},
-    its fragments in order (Source 2 Viewer's glTF names their meshes ..._fragment1, _fragment2, ...), tints 0-1 gamma"""
+    """-b DATA dump -> {aggregate model name: [(draw call, 0-1 gamma tint or None), ...]} in _fragmentN order"""
     frags, cur = {}, None
     for line in text.splitlines():
         if 'm_aggregateMeshes' in line:
@@ -551,17 +512,14 @@ def parse_fragments(text):
 
 
 def tinted_base_color(f, draw, inst, amount, color_tint):
-    """the base color CS2 draws with, from the one Source 2 Viewer wrote (f: srgb_to_linear of (the instance's tint
-    times the draw call's, lerped from white by g_flModelTintAmount) times g_vColorTint, clamped), the draw call's linear
-    tint and, when known, the instance's (gamma; None: worked out from f). CS2 packs the draw call's tint back to gamma
-    with the instance's, as Source 2 Viewer's renderer does, and linearizes each factor on its own:
-    mix(1, lin(inst * gamma(draw)), amount) * lin(g_vColorTint). None when f isn't what Source 2 Viewer's formula gives
-    (a Source 2 Viewer that gets it right)"""
+    """CS2's base color, mix(1, lin(inst * gamma(draw)), amount) * lin(g_vColorTint), from the one Source 2 Viewer
+    wrote: f = lin(clamp(mix(1, inst * draw, amount) * g_vColorTint)). inst is gamma, or None to solve it from f;
+    returns None when f doesn't fit that formula (a fixed Source 2 Viewer)"""
     out = []
     for c in range(3):
         d, t = draw[c], color_tint[c]
         if inst is None:
-            # f = lin(clamp((1 - amount + amount * inst * draw) * g_vColorTint)): inst from that, 1 when it's clamped
+            # inst from f; 1 when clamped
             s = 1.0
             if f[c] < 0.99999 and t > 1e-6 and amount > 1e-6 and d > 1e-6:
                 s = (linear_to_srgb(f[c]) / t - 1 + amount) / (amount * d)
@@ -583,7 +541,7 @@ class Doc:
     def __init__(self, path=None):
         self.j = {'asset': {'version': '2.0'}, 'scenes': [{'nodes': []}], 'scene': 0}
         self.buffers = []  # bytes, one per glTF buffer
-        self.images = []   # per glTF image: a file, or None when it's in a buffer
+        self.images = []   # a file per image, None when in a buffer
         if path:
             self.load(path)
 
@@ -617,7 +575,7 @@ class Doc:
         return self.add('bufferViews', bv)
 
     def read(self, ai):
-        """an accessor's numbers, row after row, in one flat tuple"""
+        """an accessor's values, row after row, as one flat tuple"""
         a = self.j['accessors'][ai]
         fmt, n = COMPONENT[a['componentType']], WIDTH[a['type']]
         if 'bufferView' not in a:
@@ -631,7 +589,7 @@ class Doc:
         return tuple(x for i in range(a['count']) for x in row.unpack_from(buf, at + i * stride))
 
     def write(self, ai, values):
-        """new numbers for an accessor, in place (laid out as read gives them), with its min and max"""
+        """overwrites an accessor's values in place (flat, as read returns them) and updates its min and max"""
         a = self.j['accessors'][ai]
         fmt, n = COMPONENT[a['componentType']], WIDTH[a['type']]
         bv = self.j['bufferViews'][a['bufferView']]
@@ -648,7 +606,7 @@ class Doc:
             a['max'] = [max(values[k::n]) for k in range(n)]
 
     def placed(self):
-        """(node, its matrix in the scene) for every node of the scene"""
+        """(node, world matrix) for every node of the scene"""
         stack = [(r, affine()) for r in self.roots]
         while stack:
             n, parent = stack.pop()
@@ -729,7 +687,7 @@ class Doc:
                         t[k] += off['accessors']
             self.list('meshes').append(me)
         for n in o.get('nodes', []):
-            n = {k: v for k, v in n.items() if k not in ('extensions', 'skin', 'camera')}  # its own sun, bones
+            n = {k: v for k, v in n.items() if k not in ('extensions', 'skin', 'camera')}  # drop its own sun, bones and camera
             if 'mesh' in n:
                 n['mesh'] += off['meshes']
             if 'children' in n:
@@ -739,8 +697,7 @@ class Doc:
         self.roots.append(self.add('nodes', {'name': name, 'matrix': matrix, 'children': [r + off['nodes'] for r in roots]}))
 
     def compact(self):
-        """only what the scene uses, renumbered: the new JSON, the buffer views as (view, bytes) and the
-        images as (image, file or bytes)"""
+        """keeps only what the scene uses, renumbered; returns (JSON, [(view, bytes)], [(image, file or bytes)])"""
         j = self.j
         nodes, stack = [], list(reversed(self.roots))
         seen = set()
@@ -763,7 +720,7 @@ class Doc:
         matmap = remap(mats)
         texs = sorted({r['index'] for m in mats for r in texture_refs(j['materials'][m])})
         tmap = remap(texs)
-        # images that aren't a material's texture: the lightmaps and probes
+        # images outside materials: the lightmaps and probes
         extra = list(image_refs(j.get('extensions', {})))
         imgs = sorted({j['textures'][t]['source'] for t in texs if 'source' in j['textures'][t]} | {r['image'] for r in extra})
         imap = remap(imgs)
@@ -843,10 +800,9 @@ class Doc:
         return out, views, images
 
     def write_glb(self, path):
-        """one .glb with every buffer and image in it, written as it goes (the images alone can be
-        hundreds of MB)"""
+        """writes one .glb with every buffer and image, streamed (the images can be hundreds of MB)"""
         out, views, images = self.compact()
-        pieces, size = [], 0  # (bytes or file, length) in the order they go in the binary chunk
+        pieces, size = [], 0  # (bytes or file, length) in BIN chunk order
 
         def place(data, length):
             nonlocal size
@@ -889,7 +845,7 @@ class Doc:
 
 
 def texture_refs(m):
-    """the {"index": n} texture references of a material, including ours"""
+    """a material's {"index": n} texture references, including the HYPR3D extensions'"""
     for key in ('normalTexture', 'occlusionTexture', 'emissiveTexture'):
         if key in m:
             yield m[key]
@@ -946,18 +902,17 @@ class Export:
         self.out = os.path.abspath(os.path.expanduser(args.output or os.path.join(
             os.environ.get('XDG_DATA_HOME') or os.path.expanduser('~/.local/share'), 'hypr3d', 'maps', self.name + '.glb')))
         self.vrf = find_vrf(args.vrf)
-        self.stuck = False  # no Source 2 Viewer that reads the game's shaders to be had
-        self.skybox = None  # the 3D skybox, when there is one: its .vpk, map path, entities and placement
+        self.stuck = False  # no Source 2 Viewer can read the game's shaders
+        self.skybox = None  # 3D skybox if any: vpk, path, ents, placement
         log(f'{self.name} from {self.vpk}, with Source2Viewer-CLI {self.vrf.version}')
-        # everything the game can read files from, for textures that aren't in the map's own .vpk
+        # every .vpk the game reads files from, for textures outside the map's own
         self.paks = [self.vpk] + [p for p in (os.path.join(self.game, d, 'pak01_dir.vpk') for d in ('csgo', 'csgo_imported', 'csgo_core', 'core')) if os.path.isfile(p)]
 
     def vrf_export(self, vpk, path, out, logname):
         args = ['-i', vpk, '-f', path, '--game', self.gameinfo, '-o', out, '-d', '--gltf_export_format', 'gltf', '--gltf_export_materials',
                 '--gltf_textures_adapt', '--gltf_export_extras']
         logfile = os.path.join(self.work, logname)
-        # a Source 2 Viewer older than the game's shaders gets a newer one: the latest release, or a build
-        # of the current source when that's older too
+        # a Source 2 Viewer older than the game's shaders is upgraded (at most twice); failing that, it exports anyway
         upgrades = 0
         while True:
             try:
@@ -984,7 +939,7 @@ class Export:
         for i, pak in enumerate(self.paks):
             if not left:
                 break
-            # (a few hundred paths at a time: one argument can't be longer than 128 KB)
+            # 400 paths per run: a single argument can't exceed 128 KB
             for k in range(0, len(left), 400):
                 self.vrf.run(['-i', pak, '-f', ','.join(left[k:k + 400]), '-d', '-o', outdir],
                              os.path.join(self.work, f'{logname}{i}{"" if k == 0 else f"_{k // 400}"}.log'))
@@ -999,9 +954,8 @@ class Export:
         return found
 
     def vrf_vmats(self, paths, outdir, logname):
-        """decompiles materials (x.vmat_c) without their textures: straight from a .vpk, Source 2 Viewer also decodes
-        and writes every texture they use (1 GB, 107 s on de_dust2), so they are copied out as they are and decompiled
-        where no gameinfo.gi is above them; returns {path: local .vmat}"""
+        """decompiles materials (x.vmat_c) without the textures that decompiling from a .vpk also writes (1 GB on
+        de_dust2): copies them out raw and decompiles them away from any gameinfo.gi; returns {path: .vmat}"""
         raw, left = outdir + '_c', list(paths)
         for i, pak in enumerate(self.paks):
             if not left:
@@ -1082,7 +1036,7 @@ class Export:
     # ------------------------------------------------ entities that start disabled
 
     def entity_nodes(self, doc):
-        """the nodes of the scene that come from entity models, by the model's file name"""
+        """root nodes by lower-case name stem (an entity model's file name)"""
         by = {}
         for r in doc.roots:
             name = doc.j['nodes'][r].get('name', '')
@@ -1129,7 +1083,7 @@ class Export:
         s = float(cam.get('scale', 16) or 16)
         c = to_gltf(vec(cam, 'origin'))
         o = to_gltf(vec(ref, 'origin'))
-        # what's at the sky camera in the skybox is at the reference's origin in the map, s times bigger
+        # the sky_camera's spot in the skybox lands on the skybox_reference origin, s times bigger
         t = [o[k] - c[k] * s for k in range(3)]
         doc.merge(sky, 'hypr3d_backdrop', [s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, t[0], t[1], t[2], 1])
         self.skybox = {'vpk': vpk, 'path': os.path.splitext(target)[0], 'ents': sents, 'scale': s, 'offset': t}
@@ -1137,14 +1091,11 @@ class Export:
 
     # ------------------------------------------------ decals
 
-    # Source 2 Viewer lifts decals (the materials it takes for overlays) 1 cm off what they're on, along
-    # their normals, so that viewers without depth bias don't show the surface through them. Since release
-    # 20 puts the meters into the vertices, what it adds, 1 cm in Source's inches (0.01 / 0.0254), comes
-    # out as that many meters: the bombsite letters float 39 cm above the floor (a step you walk up onto),
-    # and the 3D skybox's, 16 times bigger, stand 6 m off its walls.
+    # Source 2 Viewer lifts decals (overlay materials) 1 cm along their normals, as 0.01 / INCH units; since release 20
+    # writes meters that's 39 cm (6 m in the 16x 3D skybox)
     DECAL_LIFT = 0.01
     DECAL_LIFT_WRONG = 0.01 / INCH
-    DECAL_REACH = 0.6  # how far behind a decal to look for what it's on, in its mesh's meters
+    DECAL_REACH = 0.6  # search depth behind a decal, mesh meters
 
     @staticmethod
     def is_decal(v):
@@ -1155,8 +1106,7 @@ class Export:
 
     @staticmethod
     def decal_rays(doc, p, m, count=3):
-        """rays from the middles of a decal's biggest triangles back to what it's on, in the scene: (origin,
-        normal there), the normal as long as the mesh's are in the scene"""
+        """(origin, normal) in the scene at the middles of a decal's biggest triangles; normals keep the node's scale"""
         P = doc.read(p['attributes']['POSITION'])
         N = doc.read(p['attributes']['NORMAL'])
         I = doc.read(p['indices']) if 'indices' in p else range(len(P) // 3)
@@ -1176,25 +1126,24 @@ class Export:
         return out
 
     def decal_gaps(self, doc, rays, targets):
-        """for each ray (origin o, normal v), how many normals back along it (o - t v) the nearest of the
-        targets' triangles is, up to DECAL_REACH; None when there's none"""
+        """for each ray (o, v): the smallest t up to DECAL_REACH where o - t v hits a target triangle, or None"""
         j = doc.j
         near, far = 0.002, self.DECAL_REACH
         boxes = []
         for o, v in rays:
             ends = [[o[i] - t * v[i] for i in range(3)] for t in (near, far)]
             boxes.append(([min(e[i] for e in ends) for i in range(3)], [max(e[i] for e in ends) for i in range(3)]))
-        # sorted by where they start along x, to find those that reach a mesh
+        # sorted by min x, to find the rays that reach a mesh's box
         order = sorted(range(len(rays)), key=lambda k: boxes[k][0][0])
         xs = [boxes[k][0][0] for k in order]
         widest = max((hi[0] - lo[0] for lo, hi in boxes), default=0)
         gaps = [None] * len(rays)
-        # the world's meshes share vertices by the hundred: each set of them once, in each place it's in
+        # world meshes share position accessors: test each (accessor, matrix) pair once
         groups = {}
         for p, m in targets:
             key = (p['attributes']['POSITION'], tuple(x for row in m[:3] for x in row))
             groups.setdefault(key, (m, []))[1].append(p)
-        spaces = {}  # by matrix: its inverse, and the rays already moved into it
+        spaces = {}  # matrix -> (inverse, rays moved into it)
         for (ai, mkey), (m, prims) in groups.items():
             a = j['accessors'][ai]
             if 'min' not in a or 'max' not in a:
@@ -1211,8 +1160,7 @@ class Export:
             inv, moved = spaces[mkey]
             if not inv:
                 continue
-            # the rays in the mesh's own space, where t still counts the same: their boxes first, sorted by
-            # where they start along x
+            # rays in the mesh's space (same t): box first, so they sort by min x
             local = []
             for k in mine:
                 if k not in moved:
@@ -1235,8 +1183,7 @@ class Export:
 
     @staticmethod
     def cast_rays(P, I, local, starts, wide, box, near, far, gaps):
-        """the triangles (flat positions P, indices I) against rays in their space, sorted as decal_gaps
-        sorts them: the nearest hit of each goes in gaps"""
+        """triangles (flat positions P, indices I) vs decal_gaps' local rays: each ray's nearest hit goes in gaps"""
         x0, x1, y0, y1, z0, z1 = box
         for t in range(0, len(I) - 2, 3):
             a, b, c = 3 * I[t], 3 * I[t + 1], 3 * I[t + 2]
@@ -1277,8 +1224,7 @@ class Export:
                     gaps[k] = hit
 
     def fix_decals(self, doc):
-        """puts the decals Source 2 Viewer lifted 39 cm back to 1 cm off what they're on. Whether it did is
-        measured, from each decal back along its normals, so that one that gets it right is left alone."""
+        """moves decals Source 2 Viewer lifted 39 cm back to 1 cm, after measuring that it did"""
         j = doc.j
         decal = {i for i, m in enumerate(doc.list('materials')) if self.is_decal(vmat(m))}
         if not decal:
@@ -1297,8 +1243,7 @@ class Export:
                     rays += r
                     owner += [placed] * len(r)
                     placed += 1
-        # each decal by its middle ray (they differ where a decal wraps a corner or a step); the lift adds to
-        # what a decal stood off its surface already (de_dust2's window insets: up to 2 cm)
+        # median gap per decal (rays differ where it wraps a corner); some decals already stand up to 2 cm off
         found = [[] for _ in range(placed)]
         for who, gap in zip(owner, self.decal_gaps(doc, rays, targets)):
             if gap is not None:
@@ -1326,16 +1271,14 @@ class Export:
 
     @staticmethod
     def detail_params(shader, v):
-        """a material's detail texture as HYPR3D_materials_source2's "detail" has it, with the vmat's
-        texture paths in "texture" and "mask", or None"""
+        """HYPR3D_materials_source2's "detail" for a material (vmat texture paths in "texture" and "mask"), or None"""
         ip, fp, vp, tp = v.get('IntParams', {}), v.get('FloatParams', {}), v.get('VectorParams', {}), v.get('TextureParams', {})
 
         def vec2(key, default):
             x = vp.get(key)
             return [float(x[0]), float(x[1])] if isinstance(x, list) and len(x) >= 2 else default
 
-        # csgo_lightmappedgeneric: the first layer's detail, times two, tinted, at a multiple of the
-        # colour's uvs (F_DETAILBLENDMODE 0; the other modes aren't used on the maps)
+        # csgo_lightmappedgeneric: layer 1's detail, tinted mod2x at scaled uvs (maps only use F_DETAILBLENDMODE 0)
         if shader.startswith('csgo_lightmappedgeneric') and int(ip.get('F_DETAILTEXTURE', 0)) and tp.get('g_tLayer1Detail'):
             if int(ip.get('F_DETAILBLENDMODE', 0)) != 0:
                 return None
@@ -1343,11 +1286,10 @@ class Export:
             sx, sy = vec2('g_vLayer1DetailScale', [1.0, 1.0])
             xf = [sx, 0.0, 0.0, sy, 0.0, 0.0]
             if int(ip.get('F_TEXTURETRANSFORMS', 0)):
-                xf = compose(xf, Export.uv_transform(v, 'Layer1TexCoord'))  # (of the first layer's uvs)
+                xf = compose(xf, Export.uv_transform(v, 'Layer1TexCoord'))  # on top of layer 1's uv transform
             return {'texture': tp['g_tLayer1Detail'], 'mode': 'mod2x', 'blend': float(tb[3]), 'tint': [float(c) for c in tb[:3]],
                     'transform': xf}
-        # csgo_vertexlitgeneric and friends: F_DETAIL_TEXTURE 1 is mod2x, 2 and 4 an overlay (3 and 4's
-        # detail normals aren't done), through a mask, with its own uv transform
+        # csgo_vertexlitgeneric etc.: F_DETAIL_TEXTURE 1 = mod2x, 2 and 4 = overlay (without detail normals), masked
         mode = int(ip.get('F_DETAIL_TEXTURE', 0))
         if mode not in (1, 2, 4) or not tp.get('g_tDetail'):
             return None
@@ -1359,7 +1301,7 @@ class Export:
         col0, col1 = [sx * c, sy * s], [-sx * s, sy * c]
         off = [0.5 + ox - 0.5 * (col0[0] + col1[0]), 0.5 + oy - 0.5 * (col0[1] + col1[1])]
         second = int(ip.get('F_FORCE_UV2', 0)) or (int(ip.get('F_SECONDARY_UV', 0)) and int(ip.get('g_bUseSecondaryUvForDetailMask', 1)))
-        # csgo_vertexlitgeneric's decal variants read the detail texture and its mask with the second uv set unless told not to
+        # csgo_vertexlitgeneric's decal variants read the detail and its mask with the second uv set unless told not to
         decal = shader.startswith('csgo_vertexlitgeneric') and int(ip.get('F_DECAL_TEXTURE', 0))
         if decal:
             second = int(ip.get('g_bUseSecondaryUvForDetailMask', 1))
@@ -1375,10 +1317,7 @@ class Export:
 
     @staticmethod
     def uv_transform(v, name):
-        """a uv transform of CS2's shaders (g_v<name>Scale, Offset and Center, g_fl<name>Rotation: scaled and turned about the
-        center, then moved, as their g_v<name>Xform0/1 expressions have it; csgo_unlitgeneric's second color texture is
-        Tex2Coord, csgo_lightmappedgeneric's layers Layer1TexCoord, Layer2TexCoord and BlendModulateTexCoord), as mat2
-        columns and an offset"""
+        """CS2's uv transform <name> (g_v<name>Scale/Offset/Center, g_fl<name>Rotation) as mat2 columns and an offset"""
         fp, vp = v.get('FloatParams', {}), v.get('VectorParams', {})
 
         def vec2(key, default):
@@ -1392,8 +1331,7 @@ class Export:
 
     @staticmethod
     def base_transform(m, xf):
-        """puts a uv_transform (turned, then scaled) on a material's base color as KHR_texture_transform, which hypr3d's
-        other textures of it follow"""
+        """sets uv_transform xf as the base color's KHR_texture_transform (hypr3d uses it for the other textures too)"""
         base = m.get('pbrMetallicRoughness', {}).get('baseColorTexture')
         if xf == IDENTITY_XF or base is None:
             return
@@ -1408,9 +1346,7 @@ class Export:
 
     @staticmethod
     def mask_uv(shader, ip, what):
-        """the uv set (0 or 1) CS2 reads a material's tint mask or decal texture with. csgo_vertexlitgeneric's decal variants
-        read the decal with the second one unless g_bUseSecondaryUvForDecal is off, and the tint mask with it only when
-        g_bUseSecondaryUvForTintMask is on; its other variants read the tint mask with the first"""
+        """the uv set (0 or 1) CS2 reads a material's tint mask or decal texture with"""
         decal = what == 'decal'
         if shader.startswith('csgo_vertexlitgeneric'):
             if decal:
@@ -1421,8 +1357,7 @@ class Export:
 
     @staticmethod
     def effect_params(v, texture):
-        """csgo_effects as HYPR3D_materials_source2's "effect" has it: the color times three scrolling masks,
-        faded by distance and by how square on it's seen"""
+        """csgo_effects for HYPR3D_materials_source2's "effect": 3 scrolling masks, distance and fresnel fades"""
         ip, fp, vp, tp = v.get('IntParams', {}), v.get('FloatParams', {}), v.get('VectorParams', {}), v.get('TextureParams', {})
 
         def vec2(key, default):
@@ -1443,17 +1378,15 @@ class Export:
                 'fresnel': [f('g_flFresnelExponent', 0.001), f('g_flFresnelFalloff', 1), f('g_flFresnelMin', 0), f('g_flFresnelMax', 1)]}
 
     def map_tints(self, vpk, key):
-        """the draw calls' tints of a map's (or its 3D skybox's) own models, and its aggregates' fragments: what
-        fix_tints takes"""
+        """draw call and aggregate fragment tints of a map's (or 3D skybox's) models, for fix_tints"""
         calls = parse_draw_calls(self.vrf.run(['-i', vpk, '-e', 'vmdl_c', '-b', 'MDAT'], os.path.join(self.work, key + '_meshes.log')))
         frags = parse_fragments(self.vrf.run(['-i', vpk, '-e', 'vwnod_c', '-b', 'DATA'], os.path.join(self.work, key + '_nodes.log')))
         return calls, frags
 
     @staticmethod
     def fix_tints(doc, tables):
-        """puts the tints of draw calls into the base colors as CS2 has them (see parse_draw_calls). tables: (the root
-        node its nodes are under, or None for the rest; draw calls, fragments), the 3D skybox's first. Returns how many
-        materials changed, and how many meshes have tinted draw calls that couldn't be told apart"""
+        """puts draw call tints into the base colors as CS2 draws them; tables: (root node or None, draw calls,
+        fragments), the 3D skybox's first. Returns (materials changed, meshes with ambiguous tints)"""
         mats, nodes, meshes = doc.list('materials'), doc.list('nodes'), doc.list('meshes')
         which = {}
         for root, calls, frags in tables:
@@ -1464,8 +1397,8 @@ class Export:
                     which[n] = (calls, frags)
                     if root is not None:
                         stack.extend(nodes[n].get('children', []))
-        new = {}  # (material, its base color) -> the material the primitives get
-        uses = {}  # material -> the base colors its primitives want (None: as it is)
+        new = {}  # (material, base color) -> material to use
+        uses = {}  # material -> wanted base colors (None: unchanged)
         todo, unsure = [], 0
         for n, node in enumerate(nodes):
             if 'mesh' not in node or n not in which:
@@ -1507,7 +1440,7 @@ class Export:
             if uses[mi] == {color}:
                 mats[mi].setdefault('pbrMetallicRoughness', {})['baseColorFactor'] = list(color)
             else:
-                # the same material with another tint elsewhere: a copy for this one
+                # used with another tint elsewhere: tint a copy
                 if (mi, color) not in new:
                     m = json.loads(json.dumps(mats[mi]))
                     m.setdefault('pbrMetallicRoughness', {})['baseColorFactor'] = list(color)
@@ -1522,15 +1455,14 @@ class Export:
         ints = [vmat(m).get('IntParams', {}) for m in mats]
         foliage = {i for i, s in enumerate(shader) if s.startswith('csgo_foliage')}
 
-        # nothing hypr3d can't draw: even the effects shader's clouds, dust sheets and sun glows come
-        # along (their scrolling masks, without the softening where they meet the ground)
+        # nothing is dropped: hypr3d draws even csgo_effects' clouds and glows (scrolling masks, no soft ground edge)
         drop, odd = set(), set()
         for i, s in enumerate(shader):
             m = mats[i]
             blend = int(ints[i].get('F_BLEND_MODE', 0))
             if s.startswith(('csgo_static_overlay', 'csgo_unlitgeneric')):
-                # F_BLEND_MODE: 1 translucent, 2 alpha tested, 3 mod2x, 4 added (de_dust2's clouds; a static overlay's
-                # blends like 1), 5 multiplied, 6 multiplied then added; Source 2 Viewer leaves them all opaque
+                # F_BLEND_MODE: 1 translucent, 2 alpha tested, 3 mod2x, 4 additive (a static overlay's blends like 1),
+                # 5 multiply, 6 multiply then add; Source 2 Viewer leaves them all opaque
                 if blend in (1, 3, 4):
                     m['alphaMode'] = 'BLEND'
                 elif blend == 2:
@@ -1566,9 +1498,8 @@ class Export:
         if dropped_prims:
             log(f'left out {dropped_prims} parts with effects: {", ".join(sorted({mats[i]["name"] for i in drop}))}')
 
-        # blended layers: Source 2 paints the second layer in per vertex (TEXCOORD4's x), sharpened by a
-        # modulation texture: g is where the layers meet and r how soft the edge is (F_FANCY_BLENDING 1),
-        # or g with a fixed softness (2), or alpha with a fixed softness (3)
+        # blended layers: layer 2 is painted in per vertex (TEXCOORD4's x), sharpened by a modulation texture;
+        # F_FANCY_BLENDING 1: g = the edge, r = its softness; 2: g, fixed softness; 3: alpha, fixed softness
         layered, detailed, tinted, decaled, second, wanted = {}, {}, {}, {}, {}, set()
         for i, m in enumerate(mats):
             v = vmat(m)
@@ -1585,12 +1516,12 @@ class Export:
                 wanted.update(p + '_c' for p in (detail['texture'], detail.get('mask')) if p)
             if shader[i].startswith('csgo_effects'):
                 wanted.update(tp[k] + '_c' for k in ('g_tMask1', 'g_tMask2', 'g_tMask3') if tp.get(k))
-            # the tint mask (where the tint goes) and the decal texture (grime, stencils), which Source 2 Viewer leaves out
+            # tint mask and decal texture (grime, stencils), which Source 2 Viewer leaves out
             for flag, key, into in (('F_TINT_MASK', 'g_tTintMask', tinted), ('F_DECAL_TEXTURE', 'g_tDecal', decaled)):
                 if int(ip.get(flag, 0)) and tp.get(key) and '/default/' not in tp[key] and not shader[i].startswith('csgo_effects') and i not in layered:
                     into[i] = tp[key]
                     wanted.add(tp[key] + '_c')
-            # the unlit shader's second color texture, which the first is multiplied by (de_dust2's clouds)
+            # csgo_unlitgeneric's second color texture, multiplied into the first
             if shader[i].startswith('csgo_unlitgeneric') and int(ip.get('F_TWOTEXTURE', 0)) and tp.get('g_tColor2'):
                 second[i] = tp['g_tColor2']
                 wanted.add(tp['g_tColor2'] + '_c')
@@ -1617,7 +1548,7 @@ class Export:
             ext = {'texture': {'index': tex}}
 
             def linear_tint(key):
-                """a tint parameter, which CS2's shader has linear (SrgbGammaToLinear(this)); None when white"""
+                """a tint parameter, linearized as CS2's shader does (SrgbGammaToLinear); None when white"""
                 t = vp.get(key)
                 if isinstance(t, list) and len(t) >= 3 and [float(x) for x in t[:3]] != [1.0, 1.0, 1.0]:
                     return [srgb_to_linear(float(x)) for x in t[:3]]
@@ -1632,7 +1563,7 @@ class Export:
             if isinstance(scale, list) and len(scale) >= 2 and scale[:2] != [1, 1]:
                 ext['uvScale'] = [float(x) for x in scale[:2]]
             if int(ip.get('F_TEXTURETRANSFORMS', 0)):
-                # every layer's uvs from layer 1's (transformed) ones, as its vertex shader chains them
+                # every layer's uvs derive from layer 1's transformed ones, as the vertex shader chains them
                 one = self.uv_transform(v, 'Layer1TexCoord')
                 ext['transform'] = compose(self.uv_transform(v, 'Layer2TexCoord'), one)
                 ext['maskTransform'] = compose(self.uv_transform(v, 'BlendModulateTexCoord'), one)
@@ -1642,7 +1573,7 @@ class Export:
                 ext['maskTexture'] = {'index': mtex}
                 if fancy in (2, 3):
                     ext['softness'] = float(fp.get('g_flBlendSoftness', 0.5))
-                    # the border tint: layer 1 tinted in a band along the edge between the layers
+                    # border tint: layer 1 tinted in a band along the edge between the layers
                     tint = linear_tint('g_vLayerBorderTint')
                     strength = float(fp.get('g_flLayerBorderStrength', 0.5))
                     if tint and strength > 0:
@@ -1650,7 +1581,7 @@ class Export:
                                          'offset': float(fp.get('g_flLayerBorderOffset', 0))}
                 if fancy == 3:
                     ext['maskChannel'] = 3
-            # its normal map, with the roughness in alpha (Source 2 Viewer decodes them that way)
+            # layer 2's normal map, roughness in alpha (as Source 2 Viewer decodes it)
             ntex = texture(normal)
             if ntex is not None:
                 ext['normalTexture'] = {'index': ntex}
@@ -1666,7 +1597,7 @@ class Export:
             s, ip, fp, vp = shader[i], v.get('IntParams', {}), v.get('FloatParams', {}), v.get('VectorParams', {})
             # Valve's normal maps point y down the bitangent; Source 2 Viewer leaves them that way
             ext = {'normalYDown': True}
-            # the legacy shaders only have the specular a material asks for; the others always do
+            # legacy shaders have only the specular a material enables; unlit ones none; the rest always both
             if s.startswith(('csgo_lightmappedgeneric', 'csgo_vertexlitgeneric')):
                 ext['specular'] = [bool(int(ip.get('F_SPECULAR_DIRECT', 0))), bool(int(ip.get('F_SPECULAR_INDIRECT', 0)))]
             elif s.startswith(('csgo_unlitgeneric', 'csgo_black_unlit', 'csgo_static_overlay', 'generic')):
@@ -1678,23 +1609,22 @@ class Export:
                 if blend == 3:
                     ext['blendMode'] = 'mod2x'  # multiplies what's under it by twice its colour
                     if s.startswith('csgo_unlitgeneric'):
-                        ext['mod2xLinear'] = True  # (its colour read as sRGB: it leaves things as they are at linear 0.5)
+                        ext['mod2xLinear'] = True  # neutral at linear 0.5, not sRGB 0.5
                 elif blend == 4 and s.startswith('csgo_unlitgeneric'):
-                    # (csgo_static_overlay's 4, "Additive", blends by alpha like 1: its DstBlend is F_BLEND_MODE==3 ? ONE :
-                    # INV_SRC_ALPHA, and its pixel shader is 1's)
+                    # csgo_static_overlay's 4 ("Additive") blends like 1: its DstBlend is ONE only for mode 3
                     ext['blendMode'] = 'add'
             if not s.startswith('csgo_effects') and not int(ip.get('g_bFogEnabled', 1)):
-                ext['fog'] = False  # (de_dust2's clouds: the fog would add the sky to them)
+                ext['fog'] = False  # e.g. clouds: fog would add the sky to them
             if int(ip.get('F_NOTINT', 0)):
-                # the shader leaves out the model's tint and g_vColorTint, which Source 2 Viewer puts in the base color
+                # the shader skips the model's tint and g_vColorTint, which Source 2 Viewer put in the base color
                 pbr = m.get('pbrMetallicRoughness', {})
                 if 'baseColorFactor' in pbr:
                     pbr['baseColorFactor'] = [1.0, 1.0, 1.0] + list(pbr['baseColorFactor'][3:4] or [1.0])
-            # what the vertex colors are to the shader (Source 2 Viewer passes them on as they are)
+            # how the shader uses vertex colors (Source 2 Viewer passes them through)
             if s.startswith(('csgo_vertexlitgeneric', 'csgo_lightmappedgeneric')):
-                ext['vertexColor'] = 'none'  # (their vertex shaders take no color, whatever F_VERTEX_COLOR says)
+                ext['vertexColor'] = 'none'  # ignored, whatever F_VERTEX_COLOR says
             elif s.startswith('csgo_complex'):
-                # Hammer's vertex paint: part of the tint, as it is (so under the tint mask; all 0 is unpainted)
+                # Hammer's vertex paint is part of the tint (under the tint mask; all 0 = unpainted)
                 ext['vertexColor'] = 'tint' if int(ip.get('F_PAINT_VERTEX_COLORS', 0)) else 'none'
             elif s.startswith('csgo_environment'):
                 ext['vertexColor'] = 'paint'  # tints by rgb as much as alpha says
@@ -1719,8 +1649,7 @@ class Export:
             if tex is not None:
                 ext['texture2'] = {'texture': {'index': tex}, 'transform': self.uv_transform(v, 'Tex2Coord')}
             if s.startswith('csgo_lightmappedgeneric') and EXT not in m.get('extensions', {}):
-                # one layer (or a second one that didn't come along): its color still gets the first layer's tint
-                # and uv transform
+                # one layer (or layer 2 missing): the color still gets layer 1's tint and uv transform
                 t = vp.get('g_vLayer1Tint')
                 if isinstance(t, list) and len(t) >= 3 and [float(x) for x in t[:3]] != [1.0, 1.0, 1.0]:
                     pbr = m.setdefault('pbrMetallicRoughness', {})
@@ -1731,8 +1660,7 @@ class Export:
             if s.startswith('csgo_effects'):
                 ext['effect'] = self.effect_params(v, texture)
             if s.startswith('csgo_glass'):
-                # Source 2 Viewer leaves it white and opaque: see-through and tinted, with reflections that
-                # don't fade with its opacity
+                # glass comes out white and opaque: make it see-through and tinted, reflections not faded by opacity
                 tint = (vp.get('GlassTintColor') or [1, 1, 1])[:3]
                 m.setdefault('pbrMetallicRoughness', {})['baseColorFactor'] = [srgb_to_linear(float(c)) for c in tint] + [0.2]
                 m['alphaMode'] = 'BLEND'
@@ -1740,8 +1668,7 @@ class Export:
             # self-illumination: Source 2 Viewer exports the mask as the emissive texture
             if int(ip.get('F_SELF_ILLUM', 0)) and s.startswith(('csgo_vertexlitgeneric', 'csgo_complex', 'generic')):
                 tint = [float(c) for c in (vp.get('g_vSelfIllumTint') or [1, 1, 1])[:3]]
-                # (csgo_vertexlitgeneric's and csgo_complex's shaders have it linear and 2^g_flSelfIllumBrightness
-                # brighter, generic's as it is)
+                # csgo_vertexlitgeneric and csgo_complex: tint linear, times 2^g_flSelfIllumBrightness; generic: as is
                 generic = s.startswith('generic')
                 m['emissiveFactor'] = [min(max(c if generic else srgb_to_linear(c), 0.0), 1.0) for c in tint]
                 strength = (1.0 if generic else 2.0 ** float(fp.get('g_flSelfIllumBrightness', 0))) * float(fp.get('g_flSelfIllumScale', 1))
@@ -1771,9 +1698,8 @@ class Export:
                     blends += 1
         log(f'{count} blended materials on {blends} meshes, foliage colours fixed on {dropped} meshes')
 
-    # a material's DynamicParams: expressions CS2 evaluates every frame, which Source 2 Viewer's glTF leaves out (its
-    # decompiled .vmat has them). The ones hypr3d does: a constant g_vTexCoordScale/Offset (KHR_texture_transform on the
-    # base color) and an offset moving with time (HYPR3D_materials_source2's "scroll"), as de_dust2's clouds have them
+    # DynamicParams: per-frame expressions, only in the decompiled .vmat; hypr3d does a constant g_vTexCoordScale/Offset
+    # (KHR_texture_transform) and an offset moving with time (HYPR3D_materials_source2's "scroll")
     DYN_CONST = re.compile(r'^return\s+(?:float2\(\s*([-+.\deE]+)\s*,\s*([-+.\deE]+)\s*\)|([-+.\deE]+))\s*;$')
     DYN_SCROLL = re.compile(r'^return\s+(?:frac\(\s*)?float2\(\s*([-+.\deE]+)\s*,\s*([-+.\deE]+)\s*\)\s*\*\s*time\(\)\s*\)?\s*;$')
 
@@ -1814,8 +1740,8 @@ class Export:
             def vec2(x, default):
                 return [float(x[0]), float(x[1])] if isinstance(x, list) and len(x) >= 2 and [float(c) for c in x[:2]] != default else None
             scroll = vec2(vp.get('g_vTexCoordScrollSpeed'), [0.0, 0.0])
-            # the base color's own uv transform (scaled from the origin, then moved), which a dynamic parameter replaces a
-            # part of; csgo_lightmappedgeneric has its first layer's instead, csgo_effects none
+            # base color uv transform (scale about the origin, then offset), partly replaced by dynamic params;
+            # csgo_lightmappedgeneric uses layer 1's instead, csgo_effects none
             xf = {}
             if not s.startswith(('csgo_lightmappedgeneric', 'csgo_effects')):
                 scale, offset = vec2(vp.get('g_vTexCoordScale'), [1.0, 1.0]), vec2(vp.get('g_vTexCoordOffset'), [0.0, 0.0])
@@ -1853,8 +1779,7 @@ class Export:
     PROBE_VOLUMES = ('env_light_probe_volume', 'env_combined_light_probe_volume')
 
     def lighting_set(self, vpk, path, ents, key):
-        """decompiles the lightmaps and probe atlas of a map (or of its 3D skybox); returns what they came
-        out as, and the probe volumes, or None when it has none hypr3d can read"""
+        """decompiles a map's (or 3D skybox's) lightmaps and probe atlas; returns {files, probes} or None"""
         listing = self.vrf.run(['-i', vpk, '--vpk_list', '-f', path + '/lightmaps/'], os.path.join(self.work, key + '_list.log'))
         have = set(re.findall(r'^(\S+\.vtex_c)\s', listing, re.M))
         lightmaps = {n: f'{path}/lightmaps/{n}.vtex_c' for n in LIGHTMAPS}
@@ -1893,8 +1818,7 @@ class Export:
 
     @staticmethod
     def probe_volume(e, to_map):
-        """a light probe volume as HYPR3D_lighting has it: from world space (glTF) into the volume's box,
-        normalized to 0..1, and where its probes are in the atlas (in texels)"""
+        """HYPR3D_lighting's probe volume: world (glTF) -> 0..1 box matrix, world bounds, atlas placement in texels"""
         rot = source_rotation(vec(e, 'angles'))
         origin = vec(e, 'origin')
         lo, hi = vec(e, 'box_mins'), vec(e, 'box_maxs')
@@ -1937,7 +1861,7 @@ class Export:
                 return  # the skybox alone isn't worth it
             found.append((key, got, sents, to_map))
 
-        # the conversions, all in one Blender
+        # all conversions in one Blender run
         work = os.path.join(self.work, 'lighting')
         os.makedirs(work, exist_ok=True)
         jobs = []
@@ -1955,7 +1879,7 @@ class Export:
             if got['probes']:
                 p = got['probes']
                 jobs.append({'op': 'atlas_rgbe', 'src': p['irradiance'], 'dst': os.path.join(work, f'{key}_probes.png'), 'cols': 16})
-                # (no channel: no probe shadows either, rather than another light's)
+                # no channel: no probe shadows either, rather than another light's
                 if 0 <= channel < 4:
                     jobs.append({'op': 'atlas_channel', 'src': p['shadows'], 'dst': os.path.join(work, f'{key}_probe_shadows.png'), 'cols': 16,
                                  'channel': channel})
@@ -1991,8 +1915,8 @@ class Export:
                         del entry['probes']['shadows']
             light['sets'].append(entry)
 
-        # the sun: its colour times its brightness, linear, the way CS2's shaders have it; black when CS2 doesn't light
-        # with it at run time (hypr3d would light a map without one with its own)
+        # sun: linear colour times brightness, as CS2's shaders have it; black when CS2 doesn't use it at run time
+        # (without a sun hypr3d would add its own)
         sun = next((e for e in ents if e.get('classname') == 'light_environment' and truthy(e.get('enabled', 'true'))), None)
         sun = sun or next((e for e in ents if e.get('classname') == 'light_environment'), None)
         if sun:
@@ -2054,7 +1978,7 @@ class Export:
                      'm_flLinearAngle': 'linearAngle', 'm_flToeStrength': 'toeStrength', 'm_flToeNum': 'toeNum', 'm_flToeDenom': 'toeDenom',
                      'm_flWhitePoint': 'whitePoint'}
             light['tonemap'] = {v: float(params[k]) for k, v in names.items() if k in params}
-        # colour correction: a 32x32x32 table; hypr3d leaves it out, which only matters when it isn't neutral
+        # colour correction (a 32x32x32 table) isn't done by hypr3d: warn when it isn't neutral
         raw = re.search(r'm_fileName\s*=\s*"([^"]+\.raw)"', text)
         lut = os.path.join(os.path.dirname(path), os.path.basename(raw.group(1))) if raw else None
         if lut and os.path.isfile(lut):
@@ -2069,17 +1993,15 @@ class Export:
 
     @staticmethod
     def uv_sets(v):
-        """how many uv sets a material's shader reads itself (its vertex shader takes the lightmap's after them): a
-        second one, for its masks and decal, with F_FORCE_UV2 or F_SECONDARY_UV, and in csgo_vertexlitgeneric with
-        F_DECAL_TEXTURE (csgo_complex's decal is on the first unless F_SECONDARY_UV)"""
+        """how many uv sets a material's shader reads itself (the lightmap's come after): 2 with F_FORCE_UV2,
+        F_SECONDARY_UV, or csgo_vertexlitgeneric's F_DECAL_TEXTURE"""
         ip = v.get('IntParams', {})
         keys = ('F_FORCE_UV2', 'F_SECONDARY_UV') + (('F_DECAL_TEXTURE',) if v.get('ShaderName', '').startswith('csgo_vertexlitgeneric') else ())
         return 2 if any(int(ip.get(k, 0)) for k in keys) else 1
 
     def lightmap_uvs(self, doc):
-        """names the lightmap uvs of the world's meshes _LIGHTMAP_UV: of the uv sets after those their material
-        reads, the last one inside 0..1 (Source 2 Viewer has fitted them to the lightmap). Entities and world
-        meshes without one are lit by the light probes (de_dust2's tower edges have only their own two)."""
+        """renames world meshes' lightmap uvs to _LIGHTMAP_UV: the last uv set past the material's own that lies in
+        0..1. Entities and meshes without one are lit by the probes"""
         j = doc.j
         accs = j['accessors']
         mats = j.get('materials', [])
@@ -2109,7 +2031,6 @@ class Export:
                 if not cands:
                     continue
                 at['_LIGHTMAP_UV'] = at.pop(max(cands, key=lambda s: int(s.split('_')[1])))
-                # the others stay numbered from 0 up
                 rest = sorted((int(s.split('_')[1]), s) for s in at if s.startswith('TEXCOORD_'))
                 for i, (old, s) in enumerate(rest):
                     if i != old:
@@ -2120,7 +2041,7 @@ class Export:
     # ------------------------------------------------ the sky
 
     def add_sky(self, doc, ents):
-        """the sky dome; returns what HYPR3D_lighting's "sky" says about it (its image, how bright it is), or None"""
+        """adds the sky dome; returns HYPR3D_lighting's "sky" (image, color), or None"""
         sky = next((e for e in ents if e.get('classname') == 'env_sky' and not truthy(e.get('startdisabled', 'false'))), None)
         vm = resource(sky.get('skyname', '')) if sky else ''
         if not vm:
@@ -2153,7 +2074,6 @@ class Export:
             return None
         image = self.sky_dome(doc, png)
         log(f'sky dome with {os.path.basename(m.group(1))}')
-        # the sky shader's exposure bias and the env_sky's brightness and tint
         bias = re.search(r'"g_flBrightnessExposureBias"\s+"([-\d.e]+)"', text)
         k = 2.0 ** float(bias.group(1) if bias else 0) * float(sky.get('brightnessscale', 1) or 1)
         tint = [c / 255.0 for c in vec(sky, 'tint_color')] if 'tint_color' in sky else [1.0, 1.0, 1.0]
@@ -2201,7 +2121,7 @@ class Export:
                 warn(f'no {cls} in the map, hypr3d will pick a start')
                 at = None
             else:
-                # the one nearest the middle of the team's spawn, facing the way it does
+                # highest priority, then nearest the middle of the team's spawns, facing its way
                 pts = [vec(e, 'origin') for e in cands]
                 mid = [sum(p[k] for p in pts) / len(pts) for k in range(3)]
                 best = min(cands, key=lambda e: (-int(e.get('priority', 0) or 0), math.dist(vec(e, 'origin'), mid)))
@@ -2240,7 +2160,7 @@ out.save()
 '''
 
 
-# the lightmaps and probe atlases -> PNGs, inside Blender (it reads the .exr files, and has numpy)
+# lightmaps and probe atlases -> PNGs, inside Blender (it reads .exr and has numpy)
 LIGHTING_TOOL = r'''
 # Converts CS2's decompiled lightmaps and probe atlases into the PNGs hypr3d reads: HDR data as RGBE
 # (8-bit mantissas, a shared exponent in alpha), single channels as greyscale, 3D atlases as their

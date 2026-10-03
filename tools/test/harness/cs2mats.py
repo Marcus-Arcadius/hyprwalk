@@ -1,20 +1,18 @@
-# cs2mats.py OUTDIR: Cs2Mats.glb, a map for cs2mat_check.sh with what tools/cs2map.py writes for CS2's material details
-# (HYPR3D_materials_source2's tintMask, decal, texture2, blendMode "add" and fog false; plain python3, built with
-# tools/test/vm/litmap.py's pieces). A grey wall 4.5 m north of the eye, and in front of it, each 1.2 m wide, split down
-# the middle by 2x1 textures drawn nearest:
-#   A  a tint mask on the first uv set: the tint (red) only on its left half
-#   B  a decal multiplied, on the second uv set, which runs the other way: its dark half on the right
-#   C  a decal mixed in by its alpha, on the first uv set: blue on the left, nothing on the right
-#   D  unlit, times a second color texture: green on the left
-#   E  unlit and added to the wall (east of D), which it brightens
-# and 60 m out, over the wall, two red unlit quads past the fog's end: F (east) with its fog off stays red, G (west) is
-# all fog. A second row above the first:
-#   H  vertex paint in the tint (csgo_complex's, "vertexColor": "tint"): blue, only where the tint mask is (its left half)
+# cs2mats.py OUTDIR: Cs2Mats.glb, a map for cs2mat_check.sh with the HYPR3D_materials_source2 details tools/cs2map.py
+# writes for CS2. Panels 1.2 m wide before a grey wall 4.5 m north of the eye, split down the middle by 2x1 nearest-filtered
+# textures; one uniform lightmap and a black sun, so the halves differ by their textures alone:
+#   A  tint mask on uv 0: red tint on the left half only
+#   B  multiplied decal on uv 1, which runs the other way: dark half on the right
+#   C  decal mixed in by alpha on uv 0: blue left, nothing right
+#   D  unlit, times a second color texture: green left
+#   E  unlit, added to the wall east of D: brightens it
+#   F  red unlit quad 60 m out past the fog's end, fog off: stays red (G, west of it, is all fog)
+#   H  vertex paint as tint (csgo_complex "vertexColor": "tint"): blue, only on the tint mask's left half
 #   I  the same with all-0 paint, which is none
-#   J  unlit mod2x in linear light (csgo_unlitgeneric's "mod2xLinear"): its left half, sRGB 188 (linear 0.5), leaves the
-#      wall as it is; its right half, sRGB 128, darkens it
-# and past the fog, in front of G, L: unlitgeneric's grey light added, which fades out in the fog. One uniform lightmap lights
-# everything, and the sun is black, so the halves differ by their textures alone.
+#   J  unlit mod2x in linear light (csgo_unlitgeneric "mod2xLinear"): left sRGB 188 (linear 0.5) leaves the wall as it
+#      is, right sRGB 128 darkens it
+#   L  unlitgeneric's grey light added past the fog, in front of G: fades out in the fog
+# H, I and J are a row above A-D.
 import os, sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vm'))
@@ -79,7 +77,7 @@ def cs2mats(path):
 
     def quad(x0, x1, y0, y1, z, mat, name, color=None):
         def attrs(s, t, p):
-            # the second uv set runs the other way; every surface on the one flat chart
+            # uv 1 runs the other way; every surface on the one flat lightmap chart
             return dict({'TEXCOORD_0': (s, 1.0 - t), 'TEXCOORD_1': (1.0 - s, 1.0 - t), '_LIGHTMAP_UV': flat(s, t)},
                         **({'COLOR_0': color} if color else {}))
         part = rect((x0, y0, z), (x1 - x0, 0.0, 0.0), (0.0, y1 - y0, 0.0), (0, 1), (0, 1), attrs)
@@ -94,7 +92,7 @@ def cs2mats(path):
     quad(-2.7, -1.5, 2.3, 3.3, -4.4, mats['H'], 'node005_panel_H', color=(0.15, 0.3, 1.0, 1.0))
     quad(-1.3, -0.1, 2.3, 3.3, -4.4, mats['I'], 'node005_panel_I', color=(0.0, 0.0, 0.0, 0.0))
     quad(0.1, 1.3, 2.3, 3.3, -4.4, mats['J'], 'node005_panel_J')
-    quad(-25.0, -12.0, 28.0, 38.0, -55.0, mats['L'], 'node007_far_unlit_added')  # (in front of G, over the wall)
+    quad(-25.0, -12.0, 28.0, 38.0, -55.0, mats['L'], 'node007_far_unlit_added')  # in front of G, over the wall
     g.place('hypr3d_spawn', translation=[0.0, 0.0, 0.0])
 
     ims = [g.image('map_' + k, d) for k, d in zip(('irradiance', 'directional', 'shadows'), lm.images())]

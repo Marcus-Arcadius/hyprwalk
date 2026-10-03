@@ -28,13 +28,13 @@ namespace h3d {
         SP<Render::ITexture>   tex;
         CBox                   box; // logical, relative to the panel's top-left
         Vector2D               uvTL{0, 0}, uvBR{1, 1};
-        WP<CWLSurfaceResource> surface; // what it shows (none: the app's cursor, drawn over it)
+        WP<CWLSurfaceResource> surface; // null: the app's cursor, drawn over it
     };
 
     // where a panel is in the world
     struct SPanelPose {
         V3    origin;             // top-left corner
-        V3    right{1, 0, 0};     // unit vectors along the panel's x and y (y going down)
+        V3    right{1, 0, 0};     // unit x and y axes (y down)
         V3    down{0, -1, 0};
         V3    normal{0, 0, 1};    // the side the content is visible from
         float scale = 1.f / 450;  // meters per logical px
@@ -42,8 +42,7 @@ namespace h3d {
         V3    at(const Vector2D& local) const {
             return origin + right * (float)(local.x * scale) + down * (float)(local.y * scale);
         }
-        // panel-local logical px where a ray crosses the panel's plane; false when it
-        // runs parallel or the plane is behind the ray
+        // panel-local logical px where a ray hits the panel's plane; false if parallel or behind the ray
         bool intersect(const V3& eye, const V3& dir, float& t, Vector2D& local, bool frontOnly = true) const {
             const float denom = dot(dir, normal);
             if (frontOnly ? denom > -1e-5f : std::abs(denom) < 1e-5f)
@@ -57,10 +56,9 @@ namespace h3d {
         }
     };
 
-    // Everything that is a separate rectangle on the desktop becomes a panel:
-    // each window, each layer surface and each popup.
+    // a separate rectangle on the desktop: a window, layer surface or popup
     struct SPanel {
-        uintptr_t    key  = 0; // stable identity, used to keep GPU resources between frames
+        uintptr_t    key  = 0; // stable id; keys GPU resources across frames
         ePanelKind   kind = PANEL_WINDOW;
         PHLWINDOWREF window; // the window, or the window owning a popup
 
@@ -72,33 +70,28 @@ namespace h3d {
         float        alpha    = 1;
         bool         focused  = false;
 
-        // input: the surface tree to hit-test, and how panel-local coordinates
-        // map into it (surface local = panelLocal * hitScale - hitOffset)
+        // hit testing: surface local = panelLocal * hitScale - hitOffset
         SP<CWLSurfaceResource> hitRoot;
         Vector2D               hitScale{1, 1};
         Vector2D               hitOffset{0, 0};
 
         std::vector<SPanelSurface> surfaces;
 
-        // filled in after collecting, by whoever lays the panels out in the world
+        // set after collecting, by whatever lays the panels out in the world
         SPanelPose pose;
         CBox       clip;           // visible part, panel-local logical px
         bool       placed = false; // somewhere in the world rather than on the desktop wall
         bool       held   = false; // being carried around
-        bool       depthWrite = false; // hides what's behind it by depth instead of drawing order
-        bool       front    = false; // drawn over everything, the world included (the window played, and its popups)
+        bool       depthWrite = false; // occludes by depth, not drawing order
+        bool       front    = false; // over everything (the played window and its popups)
         float      sortDist = 0;   // drawing order among placed panels (far first)
-        uintptr_t  group    = 0;   // the placed window this panel belongs to (itself or its popup's owner)
+        uintptr_t  group    = 0;   // placed window it belongs to (itself or popup owner)
     };
 
-    // collects the panels visible on a monitor, sorted back to front on the
-    // desktop wall; `spacing` is the distance between stacking levels in meters.
-    // Windows in `always` are included even when their workspace isn't shown.
-    // `inWorld`: 0 on the flat 2D desktop .. 1 fully in 3D. In 3D a fullscreen (or maximized) window hides the rest of
-    // its workspace only on the desktop wall, while it's on the wall itself: out in the world (in `always`) it covers
-    // nothing there, and the windows out in the world are never under it
+    // the panels visible on a monitor, back to front on the wall; `spacing`: metres between stacking levels; windows in
+    // `always` are included even when their workspace isn't shown; `inWorld`: 0 flat 2D .. 1 fully 3D
     std::vector<SPanel> collectPanels(PHLMONITOR mon, float spacing, const std::unordered_set<uintptr_t>& always = {}, float inWorld = 0.f);
 
-    // the window an X11 override-redirect one (a menu, a tooltip) belongs to, null = none (a window of its own)
+    // owner of an X11 override-redirect window (menu, tooltip), null = none
     PHLWINDOW x11Owner(const PHLWINDOW& w);
 }

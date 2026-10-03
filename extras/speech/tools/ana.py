@@ -117,7 +117,7 @@ def lowband_ratio(x, sr, n, hop=0.005, cut=1000):
     return (FL ** 2).sum(1) / ((FA ** 2).sum(1) + 1e-20)
 
 def find_nuclei(x, sr, hop=0.005, dip=8.0, extent=12.0):
-    """vowel nuclei: voiced stretches split at level dips of >= dip dB; each spans the frames within extent dB of its peak"""
+    """vowel nuclei: voiced runs split at dips >= dip dB; each spans the frames within extent dB of its peak"""
     t, db, per, f0 = analyse(x, sr, hop)
     n = len(t)
     ratio = lowband_ratio(x, sr, n, hop)
@@ -134,7 +134,7 @@ def find_nuclei(x, sr, hop=0.005, dip=8.0, extent=12.0):
             runs.append([i, i])
     parts = []
     for a, b in runs:
-        # split the run at valleys: a fall of >= dip below the running maximum, then a rise of >= dip above the valley floor
+        # split at valleys: a fall of >= dip below the running max, then a rise of >= dip above the valley
         cuts, runmax, valley = [a], dbs[a], None
         for j in range(a, b + 1):
             if valley is None:

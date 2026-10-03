@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""blend2vrma: a humanoid's animation in Blender, as a VRM animation (.vrma) hypr3d plays: an emote, or its attacks.
+"""blend2vrma: a humanoid's Blender animation as a VRM animation (.vrma) for hypr3d: an emote, or its attacks.
 
-In Blender (the GUI's Python console or Text Editor, Blender's MCP, or in the background):
+In Blender (Python console, Text Editor, Blender's MCP, or in the background):
     blender -b FILE.blend --python tools/blend2vrma.py -- OUT.vrma [--armature NAME] [--humanoid SETTINGS.json]
             [--frames START END] [--bones all|upper] [--fingers] [--name NAME]
     import blend2vrma; blend2vrma.export("OUT.vrma", armature="Armature", humanoid="Miku.hypr3d.json")
 
-It goes through the scene's frames (START..END, the scene's range by default) as Blender shows them, constraints and
-IK and all, at the scene's frame rate. Each humanoid bone's turn from the armature's T pose (worked out as hypr3d does:
-the arms out to the sides, the legs straight down, from where the joints are at rest) goes on a T pose of the
-armature's own proportions, straightened, to the centimeter, with no turn of its own at rest, as VRM animations have it:
-so it plays the same on any humanoid. The hips' move goes with it when they move. Which bone is which: a hypr3d settings
-file's "humanoid" (the converter writes one), else the bones' names (VRM's, Unity's, Blender's .L/.R, Mixamo's).
---bones upper leaves out the hips and legs (an attack: hypr3d plays it over the walking); the fingers only with
---fingers (else the avatar's own gestures make the hands). The scene's markers go in the animation's extras, as seconds
-from START: {"markers": {"hit": 0.2, ...}} (hypr3d's attacks read "ready", "hit" and "next").
+  --armature NAME           default: the scene's first armature
+  --humanoid SETTINGS.json  bones from a hypr3d settings file (default: guessed from VRM/Unity/.L.R/Mixamo names)
+  --frames START END        default: the scene's range
+  --bones upper             no hips or legs (an attack, played over the walking)
+  --fingers                 keep the fingers (else the avatar's own gestures make the hands)
+  --name NAME               clip name (default: the action's)
+
+Frames are evaluated with constraints and IK at the scene's frame rate. Bone turns from the armature's T pose (as
+hypr3d works it out) go on a straightened T pose of its own proportions, so the clip plays the same on any humanoid.
+Scene markers go in the extras as seconds from START: {"markers": {"hit": 0.2, ...}}; attacks read ready, hit, next.
 """
 import json
 import math
@@ -26,10 +27,10 @@ import sys
 try:
     import bpy
     from mathutils import Matrix, Quaternion, Vector
-except ImportError:  # (only in Blender)
+except ImportError:  # only inside Blender
     bpy = None
 
-# VRM 1.0's bone names, hypr3d's order (avatar.hpp's eHumanBone), and the bone above each as the limbs count
+# VRM 1.0 bone names in hypr3d's order (avatar.hpp's eHumanBone)
 BONES = ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head',
          'leftUpperLeg', 'leftLowerLeg', 'leftFoot', 'rightUpperLeg', 'rightLowerLeg', 'rightFoot',
          'leftShoulder', 'leftUpperArm', 'leftLowerArm', 'leftHand', 'rightShoulder', 'rightUpperArm', 'rightLowerArm',
@@ -38,7 +39,7 @@ FINGERS = [f'{s}{f}{p}' for s in ('left', 'right') for f, ps in (('Thumb', ('Met
            tuple((f, ('Proximal', 'Intermediate', 'Distal')) for f in ('Index', 'Middle', 'Ring', 'Little')) for p in ps]
 UPPER = {'spine', 'chest', 'upperChest', 'neck', 'head', 'leftShoulder', 'leftUpperArm', 'leftLowerArm', 'leftHand',
          'rightShoulder', 'rightUpperArm', 'rightLowerArm', 'rightHand'} | set(FINGERS)
-FACE = {'leftEye', 'rightEye', 'jaw'}  # (left to the avatar's face: where it looks, lip sync)
+FACE = {'leftEye', 'rightEye', 'jaw'}  # left to the avatar's gaze and lip sync
 
 
 def parent_of(b, has):
@@ -65,9 +66,8 @@ def parent_of(b, has):
 # --- which bone is which
 
 def vrm_name(name, vrm1=False):
-    """a humanoid bone name as a settings file, Unity or VRM has it ("LeftUpperArm", "Left Thumb Proximal", "upperChest")
-    as VRM 1.0's, None if it isn't one. Unless vrm1, the thumb's proximal, intermediate and distal are VRM 1.0's
-    metacarpal, proximal and distal (Unity's and VRM 0.x's names)"""
+    """a settings file's, Unity's or VRM's humanoid bone name ("Left Thumb Proximal") as VRM 1.0's, or None. Unless
+    vrm1, thumb proximal/intermediate/distal are the old names for VRM 1.0's metacarpal/proximal/distal"""
     n = re.sub(r'[\s_]', '', name)
     if not vrm1 and 'thumb' in n.lower():
         n = re.sub('(?i)thumbproximal', 'ThumbMetacarpal', n)
@@ -75,7 +75,7 @@ def vrm_name(name, vrm1=False):
     return {b.lower(): b for b in BONES + FINGERS}.get(n.lower())
 
 
-GUESS = [  # (a pattern for the bone's name, lowered, with its side taken out; the bone) for rigs without a settings file
+GUESS = [  # (name pattern without side, lower case; bone)
     (r'^(hips|pelvis|hip)$', 'hips'), (r'^(spine|spine1|abdomen)$', 'spine'), (r'^(chest|spine2)$', 'chest'),
     (r'^(upperchest|spine3)$', 'upperChest'), (r'^neck$', 'neck'), (r'^head$', 'head'),
     (r'^(upperleg|thigh|upleg)$', 'UpperLeg'), (r'^(lowerleg|calf|shin|leg|knee)$', 'LowerLeg'),
@@ -89,7 +89,7 @@ def guess(names):
     """{VRM 1.0 bone: the rig's bone} by names"""
     out = {}
     for nm in names:
-        n = re.sub(r'^.*:', '', nm).lower()  # (mixamorig:LeftArm)
+        n = re.sub(r'^.*:', '', nm).lower()  # drop the namespace (mixamorig:LeftArm)
         side = None
         for pat, s in ((r'(^left|^l_|_l$|\.l$|\bl$| l$)', 'left'), (r'(^right|^r_|_r$|\.r$|\br$| r$)', 'right')):
             if re.search(pat, n):
@@ -119,9 +119,8 @@ def arc(a, b):
 
 
 def tpose_of(rest, has, facing):
-    """per bone, the turn taking it from rest to a T pose (model space), as hypr3d's rigOf() works it out: the arms
-    out to the sides and the legs down by where their joints are; the hand toward its middle finger (else another);
-    what's below a limb's bone as that bone; the rest none"""
+    """per bone, the model-space turn from rest to a T pose, as hypr3d's rigOf(): arms out sideways, legs down, hands
+    toward the middle finger (else another); bones below a limb bone turn with it, the rest not at all"""
     tp = {b: Quaternion() for b in has}
     own = set()
     for side, sx in (('left', 1.0), ('right', -1.0)):
@@ -144,7 +143,7 @@ def tpose_of(rest, has, facing):
                 tp[b] = arc(d, facing @ want)
                 own.add(b)
     torso = {'hips', 'spine', 'chest', 'upperChest', 'neck', 'head'}
-    for b in BONES + FINGERS:  # (parents first: BONES lists the limbs down from their roots)
+    for b in BONES + FINGERS:  # BONES lists parents first
         if b in has and b not in own:
             p = parent_of(b, has)
             limb = p is not None and p not in torso and not b.endswith('Shoulder') and b not in ('leftEye', 'rightEye', 'jaw')
@@ -153,8 +152,7 @@ def tpose_of(rest, has, facing):
 
 
 def straight_tpose(rest, has, tp, facing_inv):
-    """the T pose the animation goes on: each joint off the one above it as the rig has it at rest, turned as that one
-    turns into its T pose (so the limbs go straight out along it), turned to face +Z, to the centimeter"""
+    """T pose the clip goes on: rest offsets turned by the parent's T pose turn (straight limbs), facing +Z, to 1 cm"""
     pos = {}
     for b in [b for b in BONES + FINGERS if b in has]:
         p = parent_of(b, has)
@@ -177,7 +175,7 @@ def write_glb(path, js, binc):
 
 
 def export(path, armature=None, humanoid=None, frames=None, bones='all', fingers=False, name=None, log=print):
-    """write the scene's animation of the armature as a VRM animation at `path`; returns what it wrote"""
+    """writes the armature's scene animation as a VRM animation at `path`; returns a summary"""
     sc = bpy.context.scene
     ob = bpy.data.objects[armature] if armature else next(o for o in sc.objects if o.type == 'ARMATURE')
     names = [b.name for b in ob.data.bones]
@@ -216,13 +214,12 @@ def export(path, armature=None, humanoid=None, frames=None, bones='all', fingers
     height = rest['hips'].y - feet if rest['hips'].y - feet > 0.1 * legs else max(legs, 1e-4)
 
     keep = [b for b in BONES + FINGERS if b in has and b not in FACE and (fingers or b not in FINGERS) and (bones == 'all' or b in UPPER)]
-    # the T pose it goes on: the whole humanoid (a player takes it for one by its legs and arms), its eyes (where first
-    # person's camera is: hypr3d puts its attacks' hands in the view by them), the fingers when they're kept; what isn't
-    # kept has no curves (players leave those bones as they are)
+    # T pose nodes: the whole humanoid (players recognize it by its legs and arms), the eyes (hypr3d places attack hands
+    # in the first person view by them) and kept fingers; bones not kept get no curves
     nodes_b = {b for b in has if (b not in FACE or b.endswith('Eye')) and (fingers or b not in FINGERS)}
     order = [b for b in BONES + FINGERS if b in nodes_b]
     tpos = straight_tpose(rest, nodes_b, tp, facing.inverted())
-    vheight = height  # (the T pose has the rig's hips height, near enough: moves in hips heights)
+    vheight = height  # T pose ~ the rig's hips height; moves in hip heights
 
     start, end = frames if frames else (sc.frame_start, sc.frame_end)
     fps = sc.render.fps / sc.render.fps_base
@@ -238,7 +235,7 @@ def export(path, armature=None, humanoid=None, frames=None, bones='all', fingers
         for b in nodes_b:
             m = W @ ev.pose.bones[rig[b]].matrix
             world[b] = (C @ m.to_translation(), (Cq @ m.to_quaternion() @ Cq.inverted()).normalized())
-        # each bone's turn from the T pose, in the frame the avatar faces +Z in (hypr3d's canonical())
+        # each bone's turn from the T pose, avatar facing +Z (hypr3d's canonical())
         t = {b: (Rc @ world[b][1] @ rest_q[b].inverted() @ tp[b].inverted() @ facing).normalized() for b in nodes_b}
         for b in keep:
             p = parent_of(b, nodes_b)

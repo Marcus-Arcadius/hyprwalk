@@ -4,9 +4,8 @@
 #include <map>
 #include <tuple>
 
-// A small, procedurally built desert courtyard (loosely inspired by the
-// classic sandstone maps, no copyrighted assets). Everything is axis aligned
-// boxes, which keeps both collision and the baked ambient occlusion trivial.
+// The built-in courtyard: a small procedural desert yard (no copyrighted assets) made of axis-aligned boxes, which
+// keeps collision and the baked ambient occlusion trivial.
 
 namespace h3d {
 

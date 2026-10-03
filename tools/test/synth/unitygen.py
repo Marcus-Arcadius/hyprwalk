@@ -1,7 +1,7 @@
-# unitygen.py: writing Unity assets from Blender for the converter's test generators (make.py, booth.py):
-# Unity's YAML, .meta files, textures, FBX models read back the way the converter reads them, animator
-# controllers, VRChat and Modular Avatar components, prefab variants, and .unitypackage / Booth .zip packing.
-# Runs inside Blender (numpy and bpy); the caller puts tools/ on sys.path first.
+# unitygen.py: Unity assets from Blender for the converter's test generators (make.py, booth.py): YAML, .meta files,
+# textures, FBX models read back as the converter reads them, animator controllers, VRChat, Modular Avatar and VRCFury
+# components, prefab variants, .unitypackage and Booth .zip packing. Runs inside Blender; the caller puts tools/ on
+# sys.path first.
 import bpy, bmesh, os, io, math, hashlib, random, struct, tarfile, gzip, zipfile
 import numpy as np
 from mathutils import Matrix, Vector
@@ -280,8 +280,8 @@ class Rig:
         return bb.head_local, bb.tail_local
 
     def skin(self, ob, bones, blend=0.0):
-        """every vertex to its nearest bone of `bones`; with blend > 0, shared with the ones up to blend metres
-        further (at most four), for smooth joints. `bones` is a list, or {part name: list} with Parts.index"""
+        """each vertex to its nearest bone of `bones`, shared with those up to `blend` m further (at most four) for
+        smooth joints"""
         ob.parent = self.ob
         ob.modifiers.new('Armature', 'ARMATURE').object = self.ob
         per_vertex = None
@@ -324,7 +324,7 @@ class Parts:
         self.bm = bmesh.new()
         self.uv = self.bm.loops.layers.uv.new('UVMap')
         self.parts = {}
-        self.flat = set()  # parts whose faces keep the way they were made (decals); make() turns the rest outward
+        self.flat = set()  # parts whose faces keep their winding (decals)
 
     def add(self, name, kind, M, mi=0, **kw):
         bm = self.bm
@@ -345,8 +345,7 @@ class Parts:
         return vs
 
     def loft(self, rings, seg, M, caps, uv_v):
-        """a tube through rings [(z, rx, ry[, dy])] (elliptic sections around Z, centred at y=dy), u round it and
-        v along it; caps close the ends"""
+        """a tube through elliptic rings [(z, rx, ry[, dy])] around Z, centred at y = dy; u round, v along"""
         bm, uv = self.bm, self.uv
         rows = []
         for r in rings:
@@ -382,8 +381,8 @@ class Parts:
                     loop[self.uv].uv = uv
 
     def uv_planar(self, name, center, size, axis='y', back=None):
-        """a part's UVs projected along the Y (front) or X axis onto a square `size` wide around `center`;
-        faces turned away (their normal along +axis) go to `back` if given"""
+        """a part's UVs projected along Y (front) or X onto a `size` square around `center`; faces facing +axis get
+        `back` if given"""
         vs = set(self.parts[name])
         k = 'xyz'.index(axis)
         a, b = [i for i in range(3) if i != k]
@@ -457,8 +456,8 @@ def shape_key_to(ob, name, moved):
 
 
 def export_fbx(path, scale='FBX_SCALE_NONE'):
-    """scale: Blender's apply_scale_options; FBX_SCALE_NONE gives the 100x bone scale of many Blender exports,
-    FBX_SCALE_ALL a model with scale 1 throughout"""
+    """scale: apply_scale_options; FBX_SCALE_NONE gives the 100x bone scale of many Blender exports, FBX_SCALE_ALL scale
+    1 throughout"""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     bpy.ops.object.select_all(action='DESELECT')
     bpy.ops.export_scene.fbx(filepath=path, use_selection=False, object_types={'ARMATURE', 'MESH'},
@@ -570,11 +569,10 @@ def model_importer(materials, human=None, internal=()):
 # ---------------------------------------------------------------- animation clips and controllers
 
 def clip_yaml(name, curves, pptr=(), vectors=()):
-    """a clip holding values for a frame: curves [(path, class id, attribute, value)], a value may be keys [(time,
-    value)] instead (straight lines between them); pptr [(path, class id, attribute, [(time, reference)])], the
-    object curves that put materials in slots; vectors [(kind, path, [(time, (x, y, z[, w]))])], a Transform's
-    'position', 'rotation' (a quaternion), 'euler' (degrees) or 'scale' curves, which Unity keeps as vectors and as
-    floats among the editor curves"""
+    """a clip, one frame unless keyed: curves [(path, class id, attribute, value or [(time, value)] keys, linear)]; pptr
+    [(path, class id, attribute, [(time, reference)])] for material slots; vectors [(kind, path, [(time, (x, y, z[,
+    w]))])], Transform 'position', 'rotation' (quaternion), 'euler' (degrees) or 'scale', kept by Unity as vector and
+    editor float curves"""
     fc = []
     stop = 0.016666668
     vec = {'position': [], 'rotation': [], 'euler': [], 'scale': []}
@@ -894,8 +892,8 @@ def ma_item(name='', param='', value=1, default=0, auto=1, kind=102, saved=1, sy
 # ---------------------------------------------------------------- prefab variants
 
 class Variant:
-    """a prefab kept as a variant of another prefab or a model: its PrefabInstance, what it changes, stubs of the
-    objects its own point at, and its own objects"""
+    """a prefab variant of another prefab or a model: PrefabInstance, modifications, stubs of the objects its own point
+    at, and its own objects"""
     KINDS = {1: 'GameObject', 4: 'Transform', 137: 'SkinnedMeshRenderer', 33: 'MeshFilter', 23: 'MeshRenderer',
              114: 'MonoBehaviour', 95: 'Animator'}
 
@@ -975,9 +973,9 @@ class Variant:
 # ---------------------------------------------------------------- packages
 
 def unitypackage(root, prefixes, out, pathname_extra=''):
-    """a .unitypackage of the assets under root whose paths start with one of prefixes (folders included):
-    a gzipped tar of <guid>/asset, <guid>/asset.meta and <guid>/pathname; a folder has no asset.
-    pathname_extra is what some Unity versions put after the path (a line with 00)"""
+    """a .unitypackage of the assets under root within prefixes (folders included): a gzipped tar of <guid>/asset (none
+    for folders), <guid>/asset.meta and <guid>/pathname; pathname_extra is what some Unity versions append (a line
+    with 00)"""
     entries = []
     for dp, dns, fns in os.walk(os.path.join(root, 'Assets')):
         for n in dns + fns:

@@ -1,4 +1,4 @@
-# the user's Hyprland's aquamarine (zaneyos's hyprland-astroland input's), with extra patches
+# aquamarine from zaneyos's hyprland-astroland input, with extra patches
 { patches ? [ ] }:
 let
   zaneyos = builtins.getFlake "git+file:///home/monero/zaneyos";

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# usage: api.sh <outfile> key=value ... ; polite GET on a MediaWiki API (API env var, default Commons).
-# Without contact info in the UA we count as "unidentified" (10 req/min), so keep >= 7 s between requests.
+# usage: api.sh <outfile> key=value ... ; polite GET on a MediaWiki API (API env var, default Commons)
+# a UA without contact info counts as "unidentified" (10 req/min): keep >= 7 s between requests
 out=$1; shift
 UA='hypr3d-lipsync-vowel-survey/0.1 (one-off research script for a lip sync test set) curl'
 args=()

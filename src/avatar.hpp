@@ -15,14 +15,11 @@
 #include <string_view>
 #include <vector>
 
-// The body seen in third person: a skinned glTF / GLB / VRM the user brings.
-// Its own clips play when their names say what they are (idle, walk, run,
-// jump, fall); humanoids without them walk procedurally: steps planted where
-// the feet land, the body carried over them as people walk and run.
+// The player's avatar: a skinned glTF / GLB / VRM model and its animator (named clips, else procedural for humanoids).
 
 namespace h3d {
 
-    // skinned vertex: pos and normal are in the space of the mesh, joints index SAvatarModel::joints
+    // skinned vertex in mesh space; joints index SAvatarModel::joints
     struct SAvatarVertex {
         float    pos[3];
         float    normal[3];
@@ -37,9 +34,8 @@ namespace h3d {
         int      material = 0;
         int      part     = 0;
         uint32_t first = 0, count = 0; // in indices
-        int      variants = 0;         // SAvatarModel::variantMaps: the materials it has in material variants, 0 = none
-        // first person, the camera in the eyes: its indices but the head's (and its hair's), a copy of them after all the
-        // batches' own (theirs stay as they were, in order); fpCount UINT32_MAX: it has none of the head's, all of it
+        int      variants = 0;         // variantMaps index, 0 = none
+        // first person copy without the head's triangles, after all batches' indices; fpCount UINT32_MAX = draw it all
         uint32_t fpFirst = 0, fpCount = UINT32_MAX;
     };
 
@@ -48,7 +44,7 @@ namespace h3d {
         std::string name;
         int         node = -1, gltfNode = -1;
         size_t      triangles = 0;
-        bool        hidden    = false; // until shown (the settings file's "hidden")
+        bool        hidden    = false; // settings "hidden", until shown
     };
 
     struct STRS {
@@ -61,8 +57,7 @@ namespace h3d {
         }
     };
 
-    // a node a toggle or a slider puts elsewhere (a VRChat animation of its Transform, converted): what it sets of
-    // the node's own translation, rotation and scale
+    // node pose a toggle or slider sets (a converted VRChat Transform animation)
     struct SNodePose {
         enum : uint8_t {
             T = 1,
@@ -74,30 +69,27 @@ namespace h3d {
         STRS    trs;
     };
 
-    // a toggle's smooth loop (VRCFury's Smooth Loop, like breathing): from a to b and back every `seconds` while it's on
+    // VRCFury Smooth Loop: A to B and back every `seconds` while the toggle is on
     struct SAvatarLoop {
         float                              seconds = 0; // 0 = none
         std::vector<std::pair<int, float>> shapesA, shapesB;
         std::vector<SNodePose>             posesA, posesB;
     };
 
-    // an outfit toggle from the avatar's settings file (VRChat's, converted)
+    // outfit toggle from the settings file (converted from VRChat)
     struct SAvatarToggle {
         std::string                        name, group; // group: the first of groups
-        std::vector<std::string>           groups;      // exclusive with every toggle that shares one of these
-        bool                               on = false;  // at first
-        std::vector<int>                   show, hide;  // parts: hidden unless a toggle that shows them is on; hidden while on
+        std::vector<std::string>           groups;      // exclusive with toggles sharing one
+        bool                               on = false;
+        std::vector<int>                   show, hide;  // parts; show ones stay hidden unless shown
         std::vector<std::pair<int, float>> shapes;      // morph weights while on
-        std::vector<int>                   variants;    // material variants in effect while on
-        std::vector<SNodePose>             poses;       // nodes put elsewhere while on
-        SAvatarLoop                        loop;        // plays while on
-        std::vector<int>                   drop;        // nodes that stay in the world where they were when it turned on
+        std::vector<int>                   variants;
+        std::vector<SNodePose>             poses;
+        SAvatarLoop                        loop;
+        std::vector<int>                   drop;        // nodes fixed in the world from turn-on
     };
 
-    // a slider from the settings file (a VRChat radial puppet, converted): 0..1 through its keys. Morph weights and
-    // node poses go in straight lines from key to key; parts and material variants are as the last key at or below the
-    // value has them. A 2D one (a puppet's two axes) goes -1..1 each way over a grid of keys, blended between the four
-    // around the value; parts and variants as the nearest has them
+    // radial puppet slider (settings file): morphs and poses lerp between keys, parts and variants step; 2D: -1..1 grid
     struct SAvatarSlider {
         struct SKey {
             float                              at = 0, atY = 0;
@@ -106,9 +98,9 @@ namespace h3d {
             std::vector<SNodePose>             poses;
         };
         std::string       name;
-        float             value = 0, valueY = 0; // at first
-        int               grid  = 0;             // 2D: grid x grid keys, row by row from the bottom; 0 = 1D
-        std::vector<SKey> keys;                  // by where they are
+        float             value = 0, valueY = 0;
+        int               grid  = 0;             // 2D: grid x grid keys, rows from the bottom; 0 = 1D
+        std::vector<SKey> keys;                  // sorted by position
     };
 
     struct SAvatarNode {
@@ -117,8 +109,7 @@ namespace h3d {
         STRS        rest;
     };
 
-    // skinning matrix = global(node) * inverseBind. Meshes that aren't skinned
-    // hang off a joint of their own with an identity inverseBind.
+    // skinning matrix = global(node) * inverseBind; unskinned meshes get their own joint with identity inverseBind
     struct SAvatarJoint {
         int node = 0;
         M4  inverseBind = M4::identity();
@@ -147,7 +138,7 @@ namespace h3d {
     struct SAnimClip {
         std::string               name;
         float                     duration = 0;
-        float                     naturalSpeed = 0; // m/s the feet move at when played at rate 1, 0 = unknown
+        float                     naturalSpeed = 0; // feet speed at rate 1 (m/s), 0 = unknown
         std::vector<SAnimChannel> channels;
     };
 
@@ -172,7 +163,7 @@ namespace h3d {
         HB_R_UPPER_ARM,
         HB_R_LOWER_ARM,
         HB_R_HAND,
-        // optional, after the ones the limbs count along
+        // optional; after the limb bones, which code takes by range
         HB_L_EYE,
         HB_R_EYE,
         HB_JAW,
@@ -191,7 +182,7 @@ namespace h3d {
         FINGER_LITTLE,
         FINGER_COUNT,
     };
-    // hand 0 left, 1 right; segment 0..2 out from the palm (the thumb's 0 is its metacarpal, VRM 0.x's proximal)
+    // hand 0 left, 1 right; segment 0..2 from the palm (thumb 0 = metacarpal, VRM 0.x's proximal)
     constexpr int fingerBone(int hand, int finger, int segment) {
         return HB_FINGERS + (hand * FINGER_COUNT + finger) * 3 + segment;
     }
@@ -205,34 +196,29 @@ namespace h3d {
         CLIP_COUNT,
     };
 
-    // a humanoid's foot as it stands at rest, in avatar space (meters, facing -Z) from its ankle: where the heel and
-    // the ball of the foot touch the ground, and the tips of the toes. Walking rolls the foot over the heel as it
-    // lands and over the ball as it pushes off
+    // humanoid foot at rest, from the ankle (avatar space, meters, facing -Z): heel and ball ground contacts, toe tip
     struct SFootShape {
         V3   heel{0, -0.07f, 0.05f}, ball{0, -0.07f, -0.12f}, toe{0, -0.07f, -0.17f};
-        bool measured = false; // from the mesh, else a guess from the height
+        bool measured = false; // else guessed from the height
     };
 
-    // What a humanoid's arms keep clear of, from its skin at rest (avatar space, meters): how far out the body goes (a
-    // skirt, a coat, the hips) round a line up through the hips' joint, by height over that joint and bearing; and how
-    // thick each arm's skin is (a sleeve, a glove) round its bones
+    // arm clearance (rest skin, avatar space, meters): body radius by height and bearing round the hips joint
     struct SBodyClearance {
-        float              y0 = 0, dy = 0.02f; // row i is the heights y0 + dy * i .. + dy
+        float              y0 = 0, dy = 0.02f; // row i: heights y0 + dy * i .. + dy
         int                rows = 0, bearings = 48; // column k: atan2(z, x) from -π + 2π k / bearings
-        std::vector<float> out;                     // rows * bearings, 0 = nothing there
-        // per arm (left, right), for the upper arm, the forearm and the hand, by quarter along it from its joint: how far
-        // its skin goes out round the line through it
+        std::vector<float> out;                     // rows * bearings, 0 = none
+        // per arm and bone (upper arm, forearm, hand), per quarter from its joint: skin radius
         std::array<std::array<std::array<float, 4>, 3>, 2> arm{};
-        std::array<float, 2>                                hand{}; // how far the hand's skin goes on from the wrist
+        std::array<float, 2>                                hand{}; // hand length past the wrist
         bool                                                measured = false;
     };
 
-    // a morph target (blend shape) of one mesh node; its deltas are sparse
+    // morph target (blend shape) of one mesh node, sparse deltas
     struct SAvatarMorph {
         std::string name;
         int         gltfNode = -1, gltfMesh = -1; // what VRM expressions refer to it by
         int         target = 0;                   // index in the mesh
-        float       rest   = 0;                   // the mesh's default weight
+        float       rest   = 0;                   // mesh default weight
         uint32_t    first = 0, count = 0;         // in SAvatarModel::morphDeltas
     };
 
@@ -241,7 +227,7 @@ namespace h3d {
         float    pos[3], normal[3];
     };
 
-    // VRM 1.0's preset expressions (VRM 0.x's joy, sorrow, fun and a..o are happy, sad, relaxed and aa..oh)
+    // VRM 1.0 presets (VRM 0.x joy, sorrow, fun, a..o = happy, sad, relaxed, aa..oh)
     enum eExpressionPreset : uint8_t {
         EX_HAPPY,
         EX_ANGRY,
@@ -265,7 +251,7 @@ namespace h3d {
     };
     const char* expressionPresetName(int preset);
 
-    // what an expression does to the automatic blinking, looking around and mouth while it shows
+    // an expression's override of automatic blinking, look-at and mouth
     enum eOverride : uint8_t {
         OVERRIDE_NONE,
         OVERRIDE_BLOCK, // off while it shows at all
@@ -292,8 +278,8 @@ namespace h3d {
         std::vector<SMorphBind>    morphs;
         std::vector<SMaterialBind> materials;
         bool                       binary   = false; // all or nothing
-        bool                       shapeKey = false; // one of the model's morphs by its own name, not an expression it defines
-        bool                       viseme   = false; // a consonant's mouth, for lip sync (SAvatarModel::consonant)
+        bool                       shapeKey = false; // raw morph, not a defined expression
+        bool                       viseme   = false; // lip sync consonant (SAvatarModel::consonant)
         eOverride                  overrideBlink = OVERRIDE_NONE, overrideLookAt = OVERRIDE_NONE, overrideMouth = OVERRIDE_NONE;
     };
 
@@ -301,11 +287,10 @@ namespace h3d {
     struct SLookAt {
         enum eType : uint8_t {
             NONE,
-            BONES,       // the eye bones turn
+            BONES,
             EXPRESSIONS, // lookUp/Down/Left/Right
         } type = NONE;
-        // horizontal inner, horizontal outer, vertical down, vertical up: the angle (degrees)
-        // at which it's all the way, and how far that is (degrees of the eye bone, or a weight)
+        // per direction (h inner, h outer, v down, v up): input degrees at full, and output (bone degrees or weight)
         float range[4][2] = {{90, 10}, {90, 10}, {90, 10}, {90, 10}};
     };
 
@@ -324,11 +309,9 @@ namespace h3d {
     const char* gestureName(int gesture);
     int         gestureFromName(std::string_view name); // -1 = none
 
-    // spring bones (VRM's, or VRChat's PhysBones converted): hair, skirts, tails and accessories
-    // that swing. A collider is a sphere, or a capsule from offset to tail, that keeps the bones out (or in: PhysBones'
-    // inside bounds), or a plane through offset they keep to the side of that tail - offset points to, or a flat round
-    // disc round offset facing that way, as thick as twice its radius, round at its edge (a tutu, a hat's brim): what
-    // gets on it is pushed off its nearest side, never further in, as a ring of capsules round it would
+    // spring bones (VRM's, or converted VRChat PhysBones). Colliders: sphere or offset..tail capsule keeping bones out
+    // (INSIDE: PhysBones' inside bounds); plane through offset, normal tail - offset; disc round offset, normal tail -
+    // offset, 2 * radius thick, round-edged, pushing out its nearest side
     enum eColliderKind : uint8_t {
         COLLIDER_OUTSIDE,
         COLLIDER_INSIDE,
@@ -337,15 +320,14 @@ namespace h3d {
     };
     struct SSpringCollider {
         int           node = -1;
-        V3            offset, tail; // in the node's space
+        V3            offset, tail; // node space
         float         radius = 0;   // meters
         eColliderKind kind   = COLLIDER_OUTSIDE;
-        uint16_t      body   = 0; // one made up for the humanoid's body: its bit (for SSpringJoint::startsIn), else 0
-        float         disc   = 0; // a disc's: meters from its middle to where its edge starts rounding
+        uint16_t      body   = 0; // body collider bit (startsIn), else 0
+        float         disc   = 0; // disc's flat radius, meters
     };
 
-    // how far a spring's bone may turn (VRMC_springBone_limit's, as VRChat's PhysBones have them): within a cone round
-    // the limit's y, in its yz plane up to an angle from its y (a hinge), or a pitch and yaw from its y (spherical)
+    // spring rotation limit (VRMC_springBone_limit): cone round its y, hinge in its yz plane, or pitch and yaw
     enum eSpringLimit : uint8_t {
         LIMIT_NONE,
         LIMIT_CONE,
@@ -355,81 +337,72 @@ namespace h3d {
 
     struct SSpringJoint {
         int          node = -1, spring = 0;
-        V3           tail;                 // what it points at, in the node's space: its child, or a made-up end
+        V3           tail;                 // node space: its child, or a made-up end
         float        length    = 0;        // meters, to the tail
-        float        radius    = 0;        // meters, how far it keeps from the colliders
-        float        stiffness = 1;        // pull back to where the animation has it
+        float        radius    = 0;        // meters, kept from colliders
+        float        stiffness = 1;        // pull toward the animated pose
         float        drag      = 0.4f;     // 0..1, of its swing each step
-        float        gravity   = 0;        // pull along gravityDir
+        float        gravity   = 0;
         V3           gravityDir{0, -1, 0}; // in the world
         float        scale = 1;            // meters per unit of stiffness and gravity
         eSpringLimit limit = LIMIT_NONE;
-        float        limitA = 0, limitB = 0; // radians: the cone's or the hinge's angle; or the pitch, and the yaw
-        Quat         limitFrame;             // the limit's frame in the node's space: y along the bone, then the limit's own turn
-        uint16_t     startsIn = 0;           // with a limit: the body's colliders (SSpringCollider::body) its tail starts inside of, left out
+        float        limitA = 0, limitB = 0; // radians: cone / hinge angle, or pitch and yaw
+        Quat         limitFrame;             // in node space: y along the bone, then its turn
+        uint16_t     startsIn = 0;           // limited: skip body colliders the tail starts in
     };
 
     struct SSpring {
         std::string      name;
-        int              center = -1; // the node it moves with (the swing is relative to it), -1 = the world
+        int              center = -1; // node the swing is relative to, -1 = the world
         std::vector<int> colliders;
-        float            immobile = 0.9f; // with no center, 0..1: how much of the air it drags in moves along with the avatar
-        // with no center, 0..1: how much of what the node it hangs from (carrier) does beyond where the avatar goes (the walk's
-        // bob and sway, a turn, a dance) it's carried along with, not swung by: VRChat PhysBones' Immobile ("All Motion")
+        float            immobile = 0.9f; // no center: share of the air moving with the avatar
+        // no center: 0..1 of the carrier's own motion the spring rides along with: PhysBones' Immobile (All Motion)
         float parentImmobile = 0;
         int   carrier        = -1;
     };
 
-    // VRM 1.0's node constraints: a node that turns along with another one
+    // VRM 1.0 node constraint: a node turning with another
     struct SNodeConstraint {
         enum eType : uint8_t {
-            ROLL,     // turns around its axis as far as the source does around it
+            ROLL,     // twists about its axis as the source does
             AIM,      // its axis points at the source
-            ROTATION, // turns as the source does
+            ROTATION,
         } type = ROTATION;
         int   node = -1, source = -1;
-        V3    axis{1, 0, 0}; // in the node's space
+        V3    axis{1, 0, 0}; // node space
         float weight = 1;
     };
 
-    // an emote: a clip made for the avatar (from a built in one, a VRM animation, or a clip of its own or
-    // another model's), and the faces and hand gestures it makes
+    // emote retargeted to the avatar (built in, .vrma, or a model's clip), with its faces and hand gestures
     struct SAvatarEmote {
         std::string               name;
-        std::string               from;   // "built in", "own clip", or the file it came from
+        std::string               from;   // "built in", "own clip", or its source file
         SAnimClip                 anim;   // on the avatar's nodes
-        std::vector<SAnimChannel> faces;  // node = an expression, the value's x = its weight
-        std::vector<SAnimChannel> eyes;   // none, or where they look: a turn from straight ahead (+Z) in the head
-        bool                      loop     = false; // over and over (else once)
-        bool                      hold     = false; // its last frame stays till the avatar moves
-        bool                      grounded = false; // the feet stay on the ground (not a jump, a fall)
-        float                     speed    = 1;     // how fast it plays
-        bool                      fingers  = false; // it moves the fingers
+        std::vector<SAnimChannel> faces;  // node = expression, value x = weight
+        std::vector<SAnimChannel> eyes;   // look turn from +Z in head space, or none
+        bool                      loop     = false;
+        bool                      hold     = false; // last frame held until the avatar moves
+        bool                      grounded = false; // feet stay on the ground (not a jump or fall)
+        float                     speed    = 1;
+        bool                      fingers  = false;
         std::array<int8_t, 2>     gesture{-1, -1};  // per hand, eGesture; -1 = the player's
-        // what it plays while it plays (the settings file's "sound": a dance's song), from its start and round with it
-        // as it loops; the dance keeps time with what's heard of it. Null = none
+        // settings file "sound" (a dance's song), looped with it; the dance follows its playback clock; null = none
         std::shared_ptr<const SSound> sound;
     };
 
-    // an attack (CAvatarAnimator::attack()): an arm's swing, a clip made for the avatar from one made for any humanoid
-    // (built in, or the settings file's "attack"), on the trunk (spine to head), which it turns as it turns them from
-    // rest over what the body does, and the arms (collarbones to hands), which it has as it has them. When the fists
-    // are up (a swing after another starts there), when it strikes, when the other arm's may start, and when it starts
-    // letting go of the body (seconds)
+    // attack: one arm's swing retargeted from a humanoid clip, adding trunk turns and setting the arms. Seconds: ready
+    // = fists up (where a next swing starts), hit, next = the other arm may start, out = release begins
     struct SAvatarAttack {
         SAnimClip anim;
         float     ready = 0, hit = 0, next = 0, out = 0;
-        // where each wrist (left, right) was from the eyes on the avatar it was made on, in its arm's lengths, the way the
-        // body faced (x its left, y up, z ahead), at times through the clip: first person puts the hands there in the view
-        // whatever the avatar's build (none: as the clip has the arms)
+        // wrists (left, right) from the eyes in arm lengths, body frame (x left, y up, z ahead), at reachT: first
+        // person puts the hands there for any build; empty = the clip's arms
         std::vector<float>             reachT;
         std::vector<std::array<V3, 2>> reach;
     };
 
-    // the walk's or the run's body (but the legs: the walking steps the feet itself), a clip made in Blender
-    // (tools/blender/h3d_walk.py): through one stride (0: the left heel lands, 0.5: the right), every humanoid bone's
-    // turn from the T pose in the frame the walking poses in (+x the body's left, +y up, +z ahead) and the hips' move
-    // (in hips heights), at even steps of it; and the mean of each over the stride
+    // walk / run body clip without legs (tools/blender/h3d_walk.py): over a stride from the left heel strike, bone
+    // turns from the T pose in the gait frame (+x left, +y up, +z ahead), the hips' move in hip heights, and means
     struct SGaitClip {
         std::string                             name;
         std::vector<std::array<Quat, HB_COUNT>> turn;
@@ -446,81 +419,73 @@ namespace h3d {
         std::vector<SMapImage>     images;
         std::vector<SMapMaterial>  materials;
         std::vector<SAvatarBatch>  batches; // opaque and alpha tested, then blended
-        size_t                     blendFrom = 0; // first blended batch
+        size_t                     blendFrom = 0;
         std::vector<SAvatarNode>   nodes;
         std::vector<SAvatarJoint>  joints;
         std::vector<SAnimClip>     clips;
         std::array<int, CLIP_COUNT> clipFor;  // -1 = none
         std::array<int, HB_COUNT>  human;     // node per bone, -1 = none
         bool                       humanoid = false;
-        std::string                humanFrom; // "VRM", "VRM 1.0", "bone names", the settings file's name
-        int                        fingers = 0; // of the 10, how many have all three bones
+        std::string                humanFrom; // "VRM", "VRM 1.0", "bone names" or the settings file
+        int                        fingers = 0; // fingers with all three bones (of 10)
         // model space -> avatar space: feet at y = 0, centered, facing -Z, meters
         M4                         fix = M4::identity();
         float                      scale = 1;  // in fix
         float                      height = 0; // meters, standing
         V3                         forward{0, 0, 1}; // in model space
         size_t                     triangles = 0;
-        std::array<SFootShape, 2>  feet;     // a humanoid's, left and right
-        SBodyClearance             clearance; // a humanoid's
-        // first person (a humanoid's): the eyes, between them, in the head's space (model units), and how far up they
-        // are at rest (avatar space, meters); its batches without the head's triangles: SAvatarBatch::fpFirst
+        std::array<SFootShape, 2>  feet;     // humanoid only; left, right
+        SBodyClearance             clearance; // humanoid only
+        // first person: the point between the eyes in head space (model units), its rest height (avatar space, meters)
         V3                         eyes;
-        float                      eyeHeight = 0; // 0: it can't be seen from inside (not a humanoid with a head and arms)
+        float                      eyeHeight = 0; // 0 = no first person body (needs a head and arms)
 
         std::vector<SAvatarMorph>  morphs;
-        std::vector<SMorphDelta>   morphDeltas;                 // kept: the renderer adds up the morphs on the CPU
-        uint32_t                   morphFirst = 0, morphEnd = 0; // the vertices morphs move
-        std::vector<SExpression>   expressions;                 // the presets it has, its own, then its shape keys
+        std::vector<SMorphDelta>   morphDeltas;                 // kept: morphs are applied on the CPU
+        uint32_t                   morphFirst = 0, morphEnd = 0; // vertex range the morphs touch
+        std::vector<SExpression>   expressions;                 // presets, its own, then its shape keys
         std::array<int, EX_COUNT>  preset;                      // expression per preset, -1 = none
-        std::array<int, VISEME_COUNT - VOWEL_COUNT> consonant{-1, -1, -1, -1}; // lip sync's pp, ff, ss, ch: expression, -1 = none
+        std::array<int, VISEME_COUNT - VOWEL_COUNT> consonant{-1, -1, -1, -1}; // pp, ff, ss, ch visemes: expression, -1 = none
         std::string                expressionsFrom;             // "VRM", "VRM 1.0", "shape key names", "" = none
         SLookAt                    lookAt;
-        // the face each hand's gesture makes (left, right): an expression, -1 = none
+        // expression per hand (left, right) and gesture, -1 = none
         std::array<std::array<int, GESTURE_COUNT>, 2> gestureFace;
-        // the face both hands' gestures make together (left, right), over the one hand's: an expression, -1 = none,
-        // -2 = no such combination
+        // expression per gesture pair (left, right), over one-hand faces; -1 = none, -2 = no such combination
         std::array<std::array<int, GESTURE_COUNT>, GESTURE_COUNT> gestureCombo;
-        // hand poses of its own (the settings file's "hands": a Gesture layer's, converted): per hand and gesture, each
-        // finger bone's local rotation (finger * 3 + segment); where none is set the fingers curl as the gesture's preset
+        // own hand poses (settings file "hands"): finger rotations [finger * 3 + segment]; unset = the preset curl
         std::array<std::array<std::array<Quat, 15>, GESTURE_COUNT>, 2> handPose{};
         std::array<std::array<bool, GESTURE_COUNT>, 2>                 handPoseSet{};
 
         std::vector<SAvatarPart>   parts;
         std::vector<SAvatarToggle> toggles;
         std::vector<SAvatarSlider> sliders;
-        std::vector<int>           fixed; // nodes held in the world (MA's World Fixed Object): where their rest pose was
-                                          // when the avatar appeared
-        std::string                settings; // the settings file it came with ("<name>.hypr3d.json"), "" = none
-        // material variants (KHR_materials_variants): their names, and per batch (SAvatarBatch::variants) the material
-        // it takes in some of them, (variant, material); [0] is none
+        std::vector<int>           fixed; // MA World Fixed Objects: stay where spawned
+        std::string                settings; // its "<name>.hypr3d.json", "" = none
+        // KHR_materials_variants: names; per SAvatarBatch::variants, (variant, material) pairs; [0] = none
         std::vector<std::string>                      variants;
         std::vector<std::vector<std::pair<int, int>>> variantMaps{{}};
 
         std::vector<SSpring>         springs;
         std::vector<SSpringJoint>    springJoints;
         std::vector<SSpringCollider> springColliders;
-        std::string                  springsFrom; // "VRM", "VRM 1.0", the settings file's name, "bone names", "" = none
+        std::string                  springsFrom; // "VRM", "VRM 1.0", settings, "bone names", "" = none
         std::vector<SNodeConstraint> constraints; // sources before what depends on them
 
-        // the built in ones (humanoids), its own clips that aren't for walking about, the settings file's and
-        // those the request brings; a later one of the same name replaces an earlier one
+        // built in (humanoids), own non-walking clips, the settings file's, the request's; later replace same-named
         std::vector<std::shared_ptr<const SAvatarEmote>> emotes;
-        // a humanoid's attacks, per arm (left, right: the left's the right's mirror image), third person's and first
-        // person's (seen from the eyes: the fist up where it shows); no channels: none
+        // attacks per arm (left mirrors right), third and first person (fist raised into view); no channels = none
         std::array<SAvatarAttack, 2> attacks, attacksFirst;
-        std::string                  attacksFrom; // "built in", or the settings file's file
-        // a humanoid's walk and run (walking, running): how its body goes over the steps; none = the walking's own
+        std::string                  attacksFrom; // "built in", or the settings file
+        // walk and run body clips (walking, running); null = the procedural gait's
         std::array<std::shared_ptr<const SGaitClip>, 2> gaitClips;
         std::string                                     gaitFrom; // "built in", the settings file's files, "none"
 
-        // expressions by VRM 1.0's preset names ("happy", "aa", "blinkLeft"), VRM 0.x's ("joy", "a"),
-        // or their own; -1 = none
+        // by VRM 1.0 preset name ("happy", "blinkLeft"), VRM 0.x name ("joy") or own name; -1 = none
         int              findExpression(std::string_view name) const;
         int              findToggle(std::string_view name) const;
         int              findSlider(std::string_view name) const;
         int              findVariant(std::string_view name) const;
-        std::vector<int> findParts(std::string_view name) const;  // all of that name
+        std::vector<int> findParts(std::string_view name) const;
         std::vector<int> findMorphs(std::string_view name) const; // all of that name, or "mesh node/name"
 
         SAvatarModel() {
@@ -533,7 +498,7 @@ namespace h3d {
                 h.fill(-2);
         }
 
-        // the renderer copied everything it needs to the GPU (but the morphs)
+        // call after the renderer's GPU upload; morph data stays
         void releaseCpuData() {
             vertices = {};
             indices  = {};
@@ -544,9 +509,9 @@ namespace h3d {
 
     struct SAvatarRequest {
         std::string              path;
-        float                    height = 0; // meters, 0 = as it comes (or a sensible size if it's far off)
-        std::vector<std::string> emotes;     // files to make emotes of: VRM animations (.vrma), glTF / VRM with clips
-        std::string              attack, attackFirst; // VRM animations for its attacks, over the settings file's and the built in ones
+        float                    height = 0; // meters; 0 = as modeled, rescaled if implausible
+        std::vector<std::string> emotes;     // emote files: .vrma, or glTF / VRM with clips
+        std::string              attack, attackFirst; // .vrma attacks, over settings file's and built in
     };
 
     struct SAvatarResult {
@@ -563,9 +528,9 @@ namespace h3d {
         CAvatarLoader() : CBackgroundLoader(loadAvatar) {}
     };
 
-    // emotes from files, made for an avatar that's loaded
+    // emotes from files, retargeted to a loaded avatar
     struct SEmoteRequest {
-        std::string                         path; // the files, for the messages
+        std::string                         path; // display name for messages
         std::vector<std::string>            files;
         std::shared_ptr<const SAvatarModel> model;
     };
@@ -578,43 +543,40 @@ namespace h3d {
     };
 
     SEmoteResult loadEmotes(const SEmoteRequest& req, const std::atomic<bool>& cancel);
-    bool         isEmoteFile(std::string_view path); // by its extension: .vrma, .glb, .gltf, .vrm
+    bool         isEmoteFile(std::string_view path); // .vrma, .glb, .gltf, .vrm
 
     class CEmoteLoader : public CBackgroundLoader<SEmoteRequest, SEmoteResult> {
       public:
         CEmoteLoader() : CBackgroundLoader(loadEmotes) {}
     };
 
-    // First person with the body: the camera in its eyes (CAvatarAnimator::eyes()), the head not drawn, and the hands
-    // in view as a first person game has them, doing what the player does
+    // first person with the body: camera in its eyes (CAvatarAnimator::eyes()), head hidden, hands in view
     enum eFirstHands : uint8_t {
-        FPH_READY, // held up in front, low in the view; a gesture held up where it shows
-        FPH_TOUCH, // the right one's finger reaching to where the crosshair is (a window clicked, held while pressed)
-        FPH_TYPE,  // lower and nearer together, tapping as keys go down
-        FPH_HOLD,  // both out toward what's carried (a window), the palms to it
-        FPH_DOWN,  // let down, out of the view (playing a game in a window)
+        FPH_READY, // up front, low in view; gestures raised to show
+        FPH_TOUCH, // right index finger reaching to the crosshair
+        FPH_TYPE,  // lower, closer together, tapping on key presses
+        FPH_HOLD,  // both out to a carried window, palms toward it
+        FPH_DOWN,  // lowered out of view (playing a game in a window)
     };
     struct SFirstPerson {
-        bool        on = false; // first person with the body: else the hands are the animation's
-        V3          eye;        // the camera in the eyes (world), and the way it looks (the plugin's: yaw 0 looks -z,
-        float       yaw = 0, pitch = 0; // right > 0; up > 0); while it's off, as it was last (the arms going back)
+        bool        on = false; // else the hands are the animation's
+        V3          eye;        // camera position, world
+        float       yaw = 0, pitch = 0; // yaw 0 = -z, right > 0; up > 0; kept while off
         eFirstHands hands = FPH_READY;
-        float       room = 1e9f;  // how far ahead of the eye there's room for the hands (a wall, a window), meters
-        int         tap  = -1;    // FPH_TYPE: a key went down this frame for that hand to tap (0 left, 1 right)
-        bool        press = false; // FPH_TOUCH: a button went down this frame (the finger pokes)
+        float       room = 1e9f;  // meters ahead of the eye free for the hands
+        int         tap  = -1;    // FPH_TYPE: hand to tap a key this frame (0 L, 1 R)
+        bool        press = false; // FPH_TOUCH: a button went down this frame
     };
 
-    // First person's camera in the eyes (world: CAvatarAnimator::eyes() where the avatar's drawn), going with the body (its
-    // feet) and the camera's yaw at once (the head turns with it), and after the eyes: held still through what moves them
-    // only a little (breathing, a step's bob: the windows in view don't wobble), else eased after them. No further out
-    // from the feet than `reach` across, and `low` to `high` up
+    // first person camera at the eyes (world): follows the feet and yaw at once, the eyes through a dead zone (no
+    // wobble from breathing or bob), eased; within `reach` across and `low`..`high` up
     struct SFirstPersonEye {
-        V3    off, v;  // from the feet, turned back by the camera's yaw (as at yaw 0), and how fast that changes
-        V3    held;    // where the eyes are held (the same frame)
+        V3    off, v;  // offset from the feet in the yaw-0 frame; velocity
+        V3    held;    // dead-zone eye target (same frame)
         bool  live  = false;
         float reach = 1e9f, low = 0.f, high = 1e9f;
         V3    update(const V3& feet, const V3& eyes, float yaw, float dt); // the camera (world)
-        V3    at(const V3& feet, float yaw) const;                         // ... where it is now
+        V3    at(const V3& feet, float yaw) const;                         // ... the camera now, no update
         void  reset() {
             live = false;
         }
@@ -624,19 +586,18 @@ namespace h3d {
     struct SAvatarMotion {
         float dt        = 0;
         float speed     = 0; // horizontal, m/s
-        V3    vel;           // the same as a velocity in the world (horizontal); none = along the body at `speed`
-        V3    wish;          // the velocity the player's keys ask for (horizontal): going on, or back the other way
-        float accel = 10, decel = 14, turnBack = 7; // how quickly `vel` goes to `wish`, m/s² (slower: decel; back the other way: turnBack)
+        V3    vel;           // world, horizontal; zero = along the body at `speed`
+        V3    wish;          // keys' velocity, horizontal
+        float accel = 10, decel = 14, turnBack = 7; // m/s² of vel -> wish: speeding, slowing, reversing
         float vy        = 0;
         bool  onGround  = true;
         bool  flying    = false;
         bool  crouched  = false;
-        bool  run       = false; // the player runs (Shift), else walks
-        float lookPitch = 0; // where the camera looks relative to the body (radians, up > 0)
+        bool  run       = false; // Shift: run, else walk
+        float lookPitch = 0; // camera relative to the body, radians, up > 0
         float lookYaw   = 0; // (right > 0)
-        M4    world = M4::identity(); // avatar space -> world, without lift(): the springs swing as it moves
-        // the ground's height (world y) under a point of the world, looked for near `y`: where a foot can land (a
-        // stair, a slope); none, or a function that finds nothing, is flat at the body's feet
+        M4    world = M4::identity(); // avatar -> world, no lift(); springs react to it
+        // ground height (world y) under (x, z) near `y`, for placing feet; empty or no hit = flat at the feet
         std::function<std::optional<float>(float x, float z, float y)> ground;
         SFirstPerson fp;
     };
@@ -656,36 +617,28 @@ namespace h3d {
         }
         // what's playing, for the status
         std::string playing() const;
-        // the walking: the gait, its phase, each foot planted or in the air (JSON; "null" when it isn't walked)
+        // gait status JSON: gait, phase, each foot planted or not; "null" when not walking procedurally
         std::string gaitStatus() const;
-        // the body's yaw (radians, the plugin's: right turns are positive) turned toward `want` over dt, as people turn:
-        // quickly, but no faster than a few steps allow (and slower running), speeding up into a turn and slowing out of
-        // it (not all at once: a tap of a key doesn't jerk the body round); turning right round while walking, the way
-        // the feet make it without crossing the legs
+        // body yaw (radians, right > 0) turned toward `want` like a person: step-limited, eased so taps don't jerk it
         float turnBody(float yaw, float want, float dt, float speed);
-        // third person, the yaw the body turns to for where the keys take it (m.wish; none when they ask for nothing, or
-        // not in third person): the way it will be going a moment on (walking, right round as soon as they go back the
-        // other way, turning as it slows; running, as it slows down enough to turn); but going back and forth (a key back
-        // the other way again within half a second) the body faces the way it has been going if the taps only slow it
-        // down, else the way W walks (keysYaw), or S if it's turned more that way, and steps from side to side or back
-        // and forth, as people do, till one way is held. Called every frame
+        // third person: the yaw to face for m.wish (none if idle or not third person), the heading a moment ahead; on
+        // quick back-and-forth taps it keeps its facing or faces keysYaw's W or S way and steps until one way is held
         std::optional<float> wayToFace(const SAvatarMotion& m, bool thirdPerson, float bodyYaw, float keysYaw);
-        // how far the body has still to turn (turnBody's, radians, right > 0)
+        // turnBody's remaining turn (radians, right > 0)
         float turnLeft() const {
             return m_turnLeft;
         }
-        // every node's transform this frame, in the model's space
+        // node transforms this frame, model space
         const std::vector<M4>& globals() const {
             return m_global;
         }
-        // first person: where the eyes are this frame, between them (avatar space, before lift()); none when the model
-        // can't be seen from inside (SAvatarModel::eyeHeight)
+        // first person eye point this frame (avatar space, before lift()); none without a first person body
         std::optional<V3> eyes() const;
-        // first person: how much of the pose is its (the trunk turned to the camera, the hands in view), eased in and out
+        // first person pose weight (trunk to the camera, hands in view), eased
         float firstPerson() const {
             return m_fpW;
         }
-        // ... how much of the arms is its (less under an emote, let down, looking far down)
+        // ... the arms' weight (less under emotes, FPH_DOWN, looking far down)
         float firstPersonArms() const {
             return m_fpArmsW;
         }
@@ -696,8 +649,7 @@ namespace h3d {
             return m_held;
         }
         void setGesture(int hand, int gesture); // hand 0 left, 1 right; eGesture
-        // lip sync (CLipSync's): the mouth's aa, ih, ou, ee, oh presets this far, and its consonants where the avatar has
-        // them, under what the face blocks of the mouth
+        // lip sync (CLipSync): vowel presets and the avatar's consonants, under the face's mouth override
         void setVisemes(const SVisemes& weights) {
             m_visemes = weights;
         }
@@ -711,12 +663,12 @@ namespace h3d {
         const std::vector<float>& morphWeights() const {
             return m_morphW;
         }
-        // the model's materials as expressions change them (colors, atlas faces); null when none do
+        // materials as expressions change them; null when none do
         const std::vector<SMapMaterial>* materials() const {
             return m_materials.empty() ? nullptr : &m_materials;
         }
 
-        // the outfit: toggles, and parts and shape keys set by hand over what the toggles say
+        // outfit: toggles, and parts and shape keys set by hand over them
         void setToggle(int toggle, bool on); // turns the others of its group off
         bool toggle(int toggle) const {
             return toggle >= 0 && toggle < (int)m_toggles.size() && m_toggles[toggle];
@@ -724,7 +676,7 @@ namespace h3d {
         void setPart(int part, int shown);        // 1 shown, 0 hidden, -1 as the toggles say
         void resetOutfit();                       // as the settings file has it
         void setShape(int morph, float weight);   // NaN = as the toggles say
-        float shape(int morph) const;             // the weight it has without expressions
+        float shape(int morph) const;             // weight without expressions
         void  setSlider(int slider, float value, float valueY = NAN); // 0..1 (2D: -1..1 each), NaN = where it starts
         float slider(int slider) const;
         float sliderY(int slider) const; // a 2D slider's second axis
@@ -732,7 +684,7 @@ namespace h3d {
         const std::vector<uint8_t>& partsShown() const {
             return m_shown;
         }
-        // per SAvatarModel::batches, the material it's drawn with; null when the model has no material variants
+        // material per batch; null without material variants
         const std::vector<int>* batchMaterials() const {
             return m_batchMat.empty() ? nullptr : &m_batchMat;
         }
@@ -740,8 +692,7 @@ namespace h3d {
             return v >= 0 && v < (int)m_variantOn.size() && m_variantOn[v];
         }
 
-        // spring bones; off, they hang as the animation has them
-        // the walk's and the run's body from the avatar's clips (SGaitClip), or the walking's own
+        // gait style: walk / run body from SGaitClip, else procedural; physics off: spring bones hang as animated
         void setGaitStyle(bool on) {
             m_gaitStyle = on;
         }
@@ -753,19 +704,18 @@ namespace h3d {
             return m_physics;
         }
 
-        // emotes: the model's, and those added since; one plays over the rest till it's done or the avatar moves
+        // emotes: the model's and added ones; one plays over the rest until done or the avatar moves
         const std::vector<std::shared_ptr<const SAvatarEmote>>& emotes() const {
             return m_emotes;
         }
-        int  findEmote(std::string_view name) const;               // by name, loosely, or its number from 1; -1 = none
+        int  findEmote(std::string_view name) const;               // loose name match or number from 1; -1 = none
         int  addEmote(std::shared_ptr<const SAvatarEmote> emote); // made for this model; replaces one of that name
-        void playEmote(int emote, int loop = -1);                  // loop: 1 over and over, 0 once, -1 as the emote has it
+        void playEmote(int emote, int loop = -1);                  // 1 loops, 0 once, -1 = the emote's own
         void stopEmote();
         int  emote() const { // playing, -1 = none
             return m_emoteOut ? -1 : m_emote;
         }
-        // how many have started (one played again counts), whether the one playing goes over and over, and how far into
-        // it it is (seconds of its own)
+        // start count (replays count), looping, and time into it (seconds)
         uint32_t emoteStarts() const {
             return m_emoteStarts;
         }
@@ -775,20 +725,15 @@ namespace h3d {
         float emoteTime() const {
             return m_emoteTime;
         }
-        // for the next update only: how far into its sound is heard (seconds, CSpeaker::clock()'s), for the emote
-        // playing to be there in it (at its speed, round as it loops), as a dance keeps time with its song
+        // next update only: the emote's sound position (seconds, CSpeaker::clock()) for the dance to keep time with
         void setEmoteClock(double seconds) {
             m_emoteClock = seconds;
         }
 
-        // an attack: a punch at what's ahead (SAvatarAttack: the fists up, one struck, the body turned into it, back),
-        // over whatever the legs do (standing, walking, in the air); the way the body faces, and in first person the way
-        // the camera looks. Asked for while one is going, it's the other arm's, as soon as that one has struck (one,
-        // two); after a pause, the right's again. hand: 0 left, 1 right, -1 whichever is next. An emote stops. False: no
-        // arms to swing (not a humanoid with a head, arms and hands)
+        // punch ahead (body facing, or camera in first person) over the legs' motion; asked mid-swing, the other arm
+        // follows the hit. hand: 0 left, 1 right, -1 next; stops an emote; false without arms to swing
         bool        attack(int hand = -1);
-        // (JSON) each arm's swing: how far into it (seconds) and how much of the body is its; the one asked for next, the
-        // last one, how many there have been; how far the chest is turned from the hips (radians, right > 0)
+        // JSON: per arm swing time and body weight, next and last arm, swing count, chest turn from the hips (radians)
         std::string attackStatus() const;
 
       private:
@@ -812,26 +757,21 @@ namespace h3d {
         };
 
         SSource choose(eState st, const SAvatarMotion& m) const;
-        void    gait(const SAvatarMotion& m, bool air, std::vector<STRS>& pose); // walked procedurally (a humanoid)
+        void    gait(const SAvatarMotion& m, bool air, std::vector<STRS>& pose); // procedural walk (humanoids)
         void    fingerAxes(); // m_fingerAxes, m_thumbPose, m_handRig, m_clipFingers
         void    hands(float dt, std::vector<STRS>& pose);
         void    look(const SAvatarMotion& m, std::vector<STRS>& pose, float weight, float yawOff = 0) const;
-        // first person (SFirstPerson): what the hands do and how much it's in, before the fingers (firstPersonState); the
-        // trunk turned toward where the camera looks (the turn given, radians, right > 0); the arms reaching to where
-        // the hands go in view
+        // first person: hand state (firstPersonState), trunk turn toward the camera (returns it), arms to the hands
         void    firstPersonState(const SAvatarMotion& m, float emoteW);
         float   firstPersonTrunk(const SAvatarMotion& m, std::vector<STRS>& pose) const;
         void    firstPersonArms(const SAvatarMotion& m, std::vector<STRS>& pose);
-        // an arm's bones (s: 0 left, 1 right) reaching from its shoulder as posed for a wrist, the elbow toward `elbow`, the
-        // hand pointing `along` with its palm to `palm` (model space), over the pose by w
+        // arm s (0 left) to `wrist`, elbow toward `elbow`, hand along `along`, palm to `palm` (model space), by w
         void    reachArm(std::vector<STRS>& pose, int s, const V3& wrist, const V3& elbow, const V3& along, const V3& palm, float w);
-        // attacks (attack()): the swings on (the fists, the one asked for next) and their pose (m_attackPose); the
-        // trunk turned as they turn it; the arms as they have them (first person: no further ahead than there's room)
+        // attacks: swing state and m_attackPose; trunk turn; arms (first person: within the room ahead)
         void    attackState(const SAvatarMotion& m);
         void    attackTrunk(std::vector<STRS>& pose) const;
         void    attackArms(const SAvatarMotion& m, std::vector<STRS>& pose);
-        // an arm's wrist (s: 0 left, 1 right) moved to `wrist` (model space): the upper arm and forearm turned as little as
-        // takes, in the plane the elbow bends in, the hand turned as it was; w of the way
+        // two-bone IK: arm s's wrist w of the way to `wrist` (model space), elbow in its bend plane, hand rotation kept
         void    armTo(std::vector<STRS>& pose, int s, const V3& wrist, float w) const;
         void    emotePose(float dt, std::vector<STRS>& pose); // the emote over the pose, m_emoteFace
         void    face(const SAvatarMotion& m, std::vector<STRS>& pose);
@@ -839,16 +779,16 @@ namespace h3d {
         void    rotateBone(std::vector<STRS>& pose, int bone, const Quat& d) const;
         void    globals(const std::vector<STRS>& pose, std::vector<M4>& out) const;
         float   lowestFoot(const std::vector<M4>& g) const;
-        void    outfit(); // m_shown and m_shapeBase from the toggles and what's set by hand
+        void    outfit(); // m_shown, m_shapeBase from toggles and overrides
         void    constrain(std::vector<STRS>& pose) const;
         M4      globalOf(const std::vector<STRS>& pose, int node) const;
         void    springs(const SAvatarMotion& m);
         enum eSpringPass : uint8_t {
-            SP_START, // the tails where the bones point
+            SP_START, // tails where the bones point
             SP_STEP,  // a step of t seconds
-            SP_SHOW,  // the bones turned to the tails, t of the way into the next step
+            SP_SHOW,  // bones turned to the tails, t into the next step
         };
-        // world: model space -> the world; pose: m_global, as it was then
+        // world: model space -> world; pose: m_global at that time
         void                   springPass(eSpringPass pass, const M4& world, float t, const std::vector<M4>& pose);
         const std::vector<M4>& springPoseAt(float u);
 
@@ -865,36 +805,33 @@ namespace h3d {
         float                               m_airTime  = 0;
         float                               m_lift = 0, m_restFootY = 0;
         bool                                m_first = true;
-        // the procedural walking's state (avatar.cpp's SGait), made for the model
+        // procedural gait state (avatar.cpp's SGait)
         std::shared_ptr<void>               m_gait;
         bool                                m_gaitUsed = false; // last frame
         bool                                m_flying   = false; // last frame
-        bool                                m_flewOff  = false; // flew since it was last on the ground: in the air at once
-        // Where the pose changes all at once (the walking leaving the ground, landing, taking to the air), what was shown
-        // goes on as it went and settles into the new pose: per node, the turn (a rotation vector) and the move from the
-        // new pose to the one shown, and how fast they change, dying away critically damped at m_settleRate a second
-        // (0: nothing to settle). The gait asks for it with m_settleAsk (the rate), the frame the pose jumps
+        bool                                m_flewOff  = false; // flew since last grounded: airborne at once
+        // pose jumps (leaving the ground, landing, taking off): per node, the shown pose's rotation and offset from the
+        // new one, with rates, decaying critically damped at m_settleRate (0 = none); asked via m_settleAsk
         std::vector<V3>                     m_settleR, m_settleRV, m_settleT, m_settleTV;
-        std::vector<STRS>                   m_settleNow, m_settleWas; // the pose shown (before the look and hands) the last two frames
+        std::vector<STRS>                   m_settleNow, m_settleWas; // shown pose (before look and hands), last two frames
         float                               m_settleRate = 0, m_settleAsk = 0;
-        float                               m_settleLift = 0, m_settleLiftWas = 0; // (asked with it: the body jumped off or landed, the hips going on as they went that much)
-        V3                                  m_settleRoot, m_settleRootV; // where the avatar was last frame (world), and how fast it went
+        float                               m_settleLift = 0, m_settleLiftWas = 0; // jump-off / landing: share of hip motion kept
+        V3                                  m_settleRoot, m_settleRootV; // avatar position last frame (world), velocity
         bool                                m_settleRootSet = false;
-        bool                                m_settleJust = false, m_settleFresh = false; // it started this frame; last frame
-        std::vector<STRS>                   m_settleNew; // the new pose the frame it started (how fast it goes, the frame after)
-        float                               m_settleDt   = 0; // the frame before's
-        int                                 m_turnSide = 0;     // turning right round: 1 right, -1 left
-        float                               m_turnRate = 0;     // how fast the body turns, radians a second
-        float                               m_turnYaw  = 0;     // the yaw turnBody gave last (else it was set: turning afresh)
-        float                               m_turnLeft = 0;     // how far it has still to turn, radians (the way it turns)
-        bool                                m_turnKnown = false; // turnBody ran since the walking last looked
-        // wayToFace's: the way the keys asked last, the time, when they last went back the other way, since when they ask
-        // for this way, whether the body holds its facing
+        bool                                m_settleJust = false, m_settleFresh = false; // started this frame; last frame
+        std::vector<STRS>                   m_settleNew; // new pose when it started (for its rate next frame)
+        float                               m_settleDt   = 0; // previous frame's dt
+        int                                 m_turnSide = 0;     // turning round: 1 right, -1 left
+        float                               m_turnRate = 0;     // body turn rate, radians/s
+        float                               m_turnYaw  = 0;     // last turnBody result; a different yaw restarts
+        float                               m_turnLeft = 0;     // remaining turn, radians, in its direction
+        bool                                m_turnKnown = false; // turnBody ran since the gait last checked
+        // wayToFace: last key way, clock, last reversal, since when this way, holding the facing
         V3                                  m_wayLast;
         float                               m_wayClock = 0, m_wayBack = -1e9f, m_waySince = 0;
         bool                                m_wayHold = false;
         float                               m_wayYaw  = 0;
-        V3                                  m_wayMean; // the body's velocity, the last moment (see WAY_MEAN)
+        V3                                  m_wayMean; // body velocity averaged over WAY_MEAN
 
         // face
         std::vector<float>                  m_exprW;   // per expression: held and gesture faces, fading
@@ -916,36 +853,36 @@ namespace h3d {
         // fingers: the gesture's pose over the animation's
         struct SHandPose {
             std::array<float, FINGER_COUNT> curl{}, spread{}; // 1 = a fist; spread toward the thumb
-            std::array<Quat, 3>             thumb{};          // the thumb's bones' turns, at rest
+            std::array<Quat, 3>             thumb{};          // thumb bone rotations at rest
         };
         struct SFingerAxes {
-            V3 curl, spread; // model space, at rest: turning the bone toward the palm, toward the thumb
+            V3 curl, spread; // rest model space: toward palm, toward thumb
         };
         std::array<std::array<SFingerAxes, FINGER_COUNT * 3>, 2>       m_fingerAxes{};
         std::array<std::array<std::array<Quat, 3>, GESTURE_COUNT>, 2> m_thumbPose{}; // per hand and gesture, as thumb
         std::array<bool, 2>                 m_handRig{};
         std::array<SHandPose, 2>            m_hand{};
-        std::array<float, 2>                m_handW{}; // how much of the gesture's pose is over the animation's
-        std::array<std::array<Quat, 15>, 2> m_handQ{};      // the hand's own pose (SAvatarModel::handPose), eased in
-        std::array<float, 2>                m_handCustom{}; // how much of that is over the preset's
-        std::vector<uint8_t>                m_clipFingers; // per clip: moves the fingers
+        std::array<float, 2>                m_handW{}; // gesture pose weight over the animation
+        std::array<std::array<Quat, 15>, 2> m_handQ{};      // own hand pose (SAvatarModel::handPose), eased in
+        std::array<float, 2>                m_handCustom{}; // its weight over the preset
+        std::vector<uint8_t>                m_clipFingers; // per clip: animates the fingers
 
         // outfit
-        std::vector<uint8_t>                m_toggles;   // per toggle, on
+        std::vector<uint8_t>                m_toggles;
         std::vector<float>                  m_sliders;   // per slider, 0..1 (2D: x, -1..1)
         std::vector<float>                  m_slidersY;  // per slider: a 2D one's y
         std::vector<int8_t>                 m_partSet;   // per part: 1 shown, 0 hidden, -1 as the toggles say
         std::vector<float>                  m_shapeSet;  // per morph, NaN = as the toggles say
-        std::vector<uint8_t>                m_shown;     // per part
+        std::vector<uint8_t>                m_shown;
         std::vector<float>                  m_shapeBase; // per morph: rest, toggles, sliders, set by hand
-        std::vector<uint8_t>                m_variantOn; // per material variant
+        std::vector<uint8_t>                m_variantOn;
         std::vector<int>                    m_batchMat;  // per batch, when the model has material variants
-        std::vector<STRS>                   m_nodePose;  // per node, its rest as the toggles and sliders have it; empty = the rest
-        std::vector<int>                    m_loops;     // the toggles that are on and have a loop
+        std::vector<STRS>                   m_nodePose;  // per node rest from toggles, sliders; empty = rest
+        std::vector<int>                    m_loops;     // toggles on with a loop
         std::vector<int>                    m_dropBy;    // per node dropped in the world: the toggle, else -1
-        std::vector<M4>                     m_dropAt;    // per node dropped: where in the world
-        std::vector<uint8_t>                m_dropTake;  // per node: dropped just now, take where it is
-        void                                loopPoses(std::vector<STRS>& pose) const; // the loops' node poses
+        std::vector<M4>                     m_dropAt;    // per dropped node: its world placement
+        std::vector<uint8_t>                m_dropTake;  // per node: just dropped, take its current place
+        void                                loopPoses(std::vector<STRS>& pose) const;
         void                                drops(const SAvatarMotion& m);          // nodes left in the world
 
         // emotes
@@ -954,42 +891,37 @@ namespace h3d {
         float                               m_emoteTime = 0;
         bool                                m_emoteLoop = false;
         bool                                m_emoteOut  = false; // fading out: done, stopped, or the avatar moved
-        float                               m_emoteW    = 0;     // how much of it is over the rest
-        float                               m_emoteSwap = 1;     // 0 -> 1 from m_emoteFrom to it (one after another)
+        float                               m_emoteW    = 0;     // its weight over the rest
+        float                               m_emoteSwap = 1;     // 0 -> 1 from m_emoteFrom (chained emotes)
         uint32_t                            m_emoteStarts = 0;
         double                              m_emoteClock  = -1; // setEmoteClock()'s, -1 = none
         std::vector<STRS>                   m_emoteNow, m_emoteFrom;
-        std::vector<float>                  m_emoteFace; // per expression, its weight in
-        float                               m_emoteEyes = 0, m_emoteYaw = 0, m_emotePitch = 0; // how much its eyes are in; degrees
+        std::vector<float>                  m_emoteFace; // per expression weight
+        float                               m_emoteEyes = 0, m_emoteYaw = 0, m_emotePitch = 0; // its eyes' weight; degrees
 
-        // first person: how much it's in (eased; under an emote, which has the arms), and each hand: where its wrist
-        // goes in the camera's frame (x right, y up, -z ahead; in arm lengths, shoulder to wrist), eased as a spring
-        // (and how fast it goes), the way it points and its palm faces (the same frame, eased), a key's tap
+        // first person weights; per hand, a sprung wrist target in camera space (x right, y up, -z ahead; arm lengths)
         struct SFpHand {
             V3    at, v;
             V3    along, palm;
-            float pitch = 0; // its frame's (the camera's pitched less, but touching and holding as it is), eased
-            float tap   = 0; // seconds since a key went down for it (typing), large: none
+            float pitch = 0; // frame pitch: the camera's for touch / hold, else less
+            float tap   = 0; // seconds since its last key tap; large = none
         };
-        float                  m_fpW = 0, m_fpArmsW = 0; // in at all (the camera); the arms (less: emotes, FPH_DOWN)
-        float                  m_fpTrunkW = 0;           // the trunk turned to the camera (less: emotes)
+        float                  m_fpW = 0, m_fpArmsW = 0; // overall (camera); arms (less: emotes, FPH_DOWN)
+        float                  m_fpTrunkW = 0;           // trunk turn to the camera (less: emotes)
         std::array<SFpHand, 2> m_fpHand{};
-        bool                   m_fpLive = false;    // the hands have been placed (else they start where they go)
+        bool                   m_fpLive = false;    // hands placed (else they start at their targets)
         float                  m_fpYaw = 0, m_fpPitch = 0; // the camera last frame
         V3                     m_fpEye;             // ... where it was (world)
-        // the camera the hands and the trunk go by this frame (SFirstPerson's; while it's off, as it was last: its eye
-        // kept in avatar space and its yaw from the body's, so they go back from where they were as the body moves)
+        // camera the hands and trunk follow; while off, the last one (eye in avatar space, yaw relative to the body)
         V3                     m_fpViewEye, m_fpEyeAt;
         float                  m_fpViewYaw = 0, m_fpViewPitch = 0, m_fpYawFrom = 0;
-        V3                     m_fpLag, m_fpLagV;   // the hands behind the camera's turns and moves (its frame, arm lengths)
-        float                  m_fpPoke = 1;        // seconds since a button went down (touching): the finger pokes
-        float                  m_fpPhase = 0;       // a stride's phase for the hands' bob, when the walking isn't procedural
-        std::array<int8_t, 2>  m_fpGesture{-1, -1}; // the fingers first person gives the hands (pointing, open), -1 = the player's
+        V3                     m_fpLag, m_fpLagV;   // hand lag behind camera turns and moves (arm lengths)
+        float                  m_fpPoke = 1;        // seconds since a button press (touch): finger poke
+        float                  m_fpPhase = 0;       // stride phase for hand bob without procedural gait
+        std::array<int8_t, 2>  m_fpGesture{-1, -1}; // first person finger gestures; -1 = the player's
 
-        // attacks: the swing on (seconds into its clip, < 0: none; whose: its clip's arm; first person's clips), the
-        // one before it, going on under it as this one takes over (m_swingCross of the way, eased, over ATTACK_CROSS);
-        // how much of the body they have (eased in as one starts, out as the last lets go); per node, what of it the
-        // attacks have (ATTACK_TRUNK, ATTACK_ARM) and its pose, theirs this frame
+        // attacks: current swing (seconds into its clip, < 0 = none) and the previous one under it (m_swingCross, eased
+        // over ATTACK_CROSS); body weight; per node what attacks set (ATTACK_TRUNK, ATTACK_ARM), their pose
         struct SSwing {
             float t    = -1;
             int   hand = 1;
@@ -997,8 +929,8 @@ namespace h3d {
         };
         SSwing                m_swing, m_swingWas;
         float                 m_swingCross = 1, m_attackW = 0;
-        int                   m_swingNext = -1; // asked for while one winds up: this arm's, once that one has struck
-        int                   m_swingLast = 0;  // the arm that swung last
+        int                   m_swingNext = -1; // arm queued during a swing, after its hit
+        int                   m_swingLast = 0;
         float                 m_swingAgo  = 1e9f; // seconds since a swing last started
         int                   m_swings    = 0;
         std::array<bool, 2>   m_swingFist{};    // the hands made fists for it
@@ -1009,28 +941,28 @@ namespace h3d {
 
         // springs, stepped at a fixed rate
         struct SColliderAt {
-            V3            a, b; // the ends of the capsule, in the world (a plane or a disc: a point on it, and that plus its normal)
+            V3            a, b; // world capsule ends; plane / disc: point, + normal
             float         radius;
             eColliderKind kind;
-            float         disc; // (a disc's flat part's radius)
+            float         disc; // disc's flat radius
         };
         bool                                m_physics = true;
         bool                                m_gaitStyle = true;
         std::vector<int>                    m_springOf;   // per node: its joint, -1 = none, -2 = below one
         int                                 m_springFrom = 0; // the first node the springs move
-        std::vector<V3>                     m_tail, m_tailPrev; // per joint, in its spring's center's space
-        std::vector<V3>                     m_carried;          // per joint: how far its spring's carrier carried it the last step (the world)
-        std::vector<V3>                     m_again;            // per joint: what pushing it again would do where the last step left it (its parent's frame)
-        std::vector<M4>                     m_carrierAt, m_carrierMove; // per spring: its carrier in the world at the last step; its move over this one
-        std::vector<M4>                     m_springGlobal;     // per node the springs move: in the world
+        std::vector<V3>                     m_tail, m_tailPrev; // per joint, in its spring center's space
+        std::vector<V3>                     m_carried;          // per joint: carrier's carry last step (world)
+        std::vector<V3>                     m_again;            // per joint: what re-pushing it would do (parent frame)
+        std::vector<M4>                     m_carrierAt, m_carrierMove; // per spring: carrier at last step (world); its move
+        std::vector<M4>                     m_springGlobal;     // per spring-moved node, world
         std::vector<M4>                     m_centerAt, m_centerInv; // per spring: center -> world
         std::vector<SColliderAt>            m_colliderAt; // per collider, in the world
-        std::vector<int>                    m_springUp;   // the nodes the springs go by of the pose, and all above them
+        std::vector<int>                    m_springUp;   // nodes the springs read, and their ancestors
         std::vector<STRS>                   m_springWas;  // the pose (m_pose) last frame
         std::vector<M4>                     m_springPose; // m_global between the two (springPoseAt())
         float                               m_springAcc  = 0; // time into the next step
         bool                                m_springLive = false;
-        STRS                                m_springBody;                    // model space (feet on the ground) -> the world, the last frame
+        STRS                                m_springBody;                    // model space (feet on ground) -> world, last frame
         M4                                  m_springStepAt = M4::identity(); // the same at the last step
         M4                                  m_springMove   = M4::identity(); // the avatar's move in the world over this step
     };

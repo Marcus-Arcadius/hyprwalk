@@ -15,7 +15,7 @@ for fn in files:
     act = (db > max(peak - 30, floor + 10)) & (per > 0.6)
     f0v = f0[act & (f0 > 0)]
     med = np.median(f0v) if len(f0v) else 0
-    # 20 ms coarse envelope: digit = dB above floor / 6, '.' unvoiced
+    # 20 ms envelope: digit = dB above floor / 6; unvoiced: '.' or a letter
     step = 4
     env = ''
     for i in range(0, len(db), step):

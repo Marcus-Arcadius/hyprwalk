@@ -1,7 +1,6 @@
-// main.js: tools/test/vm's Electron app, as Discord is one: a window with page.html, a system notification when it
-// starts, a context menu of its own (Electron has none: an app makes one, a native menu here, as VS Code's), and with
-// H3D_DIALOG a message box (a window of its own, a dialog of the main one) two seconds after it starts. It prints
-// what happens, a line at a time.
+// main.js: tools/test/vm's Electron app (Discord's stack): a window with page.html, a notification at start, its own
+// native context menu (Electron has none by default), and with H3D_DIALOG a message box dialog after 2 s. It prints
+// what happens, a line each.
 const { app, BrowserWindow, Menu, Notification, dialog } = require("electron");
 const path = require("path");
 

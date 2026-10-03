@@ -1,9 +1,8 @@
-# goal_check.py: how far the converter's humanoid maths (HumanAxes.pose) puts an avatar's feet and hands from where a
-# humanoid clip's own IK goal curves (LeftFootT/Q ... RightHandT/Q) say they were. Unity computes those goals from the
-# motion when it imports the clip, so they are a record of the motion made by Unity itself: the nearest thing to ground
-# truth there is without Unity. The goals are in the body's frame (RootT, RootQ) and human scales; a foot's is its sole,
-# the ankle's height in the T pose below the ankle (HumanAxes.plant). Differences come from the maths and from the
-# avatar's proportions not being those of the one the motion was made on. Neither clips nor avatars are in this repo.
+# goal_check.py: how far the converter's humanoid maths (HumanAxes.pose) puts an avatar's feet and hands from a humanoid
+# clip's own IK goal curves (LeftFootT/Q ... RightHandT/Q). Unity computes those on import, so they're the nearest thing
+# to ground truth without Unity. Goals are in the body frame (RootT, RootQ) and human scale; a foot's is its sole, the
+# T-pose ankle height below the ankle (HumanAxes.plant). The avatar's own proportions add differences too. Clips and
+# avatars aren't in this repo.
 #   blender -b --factory-startup --python-exit-code 1 -P goal_check.py -- AVATAR_INPUT CLIP.anim... [--frames N]
 import sys, os, math, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
@@ -23,7 +22,7 @@ av = u.Avatar(db, found)
 human = u.Analysis(db, av).humanoid()
 try:
     axes, names = u.human_tpose(db, av, human, None)
-except TypeError:  # no skeleton in its model's settings: the avatar as it stands, its models imported
+except TypeError:  # no skeleton in model settings: import the models
     from types import SimpleNamespace
     bd = u.Build(db, av, SimpleNamespace(max_texture=256, blend=None, output=None))
     bd.import_models()

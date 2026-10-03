@@ -48,18 +48,18 @@ namespace h3d {
         pw_core*        core     = nullptr;
         pw_registry*    registry = nullptr;
         pw_stream*      stream   = nullptr;
-        pw_node*        source   = nullptr; // the source linked to the stream, bound for its state and its mute
+        pw_node*        source   = nullptr; // linked source, bound for its state and mute
         uint32_t        boundId  = 0;
         spa_hook        coreHook{}, registryHook{}, streamHook{}, sourceHook{};
         int             syncSeq = -1;
         bool            synced  = false;
 
-        // the rest the loop's thread writes and the main thread reads
+        // the rest: written by the loop's thread, read by the main thread
         mutable std::mutex mutex;
         std::vector<float> ring; // the last quarter second at most
         size_t             head = 0, count = 0;
         int                rate = 48000;
-        // PipeWire's graph as the registry tells it: nodes and links (the node they come from, the one they go to)
+        // PipeWire's graph from the registry: nodes, and links as (from node, to node)
         struct SNode {
             std::string name, description, nick, mediaClass;
         };
@@ -67,11 +67,11 @@ namespace h3d {
         std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> links;
         uint32_t    ownId = SPA_ID_INVALID; // the stream's node
         std::string streamState = "unconnected", streamError, target;
-        std::string coreError; // the last PipeWire said that wasn't the stream's (a message to something gone)
+        std::string coreError; // last core error not about the stream
         std::string sourceState, sourceError;
         int         mute = -1, softMute = -1;
         float       volume = -1, channelVolume = -1;
-        // what came
+        // received audio
         Clock::time_point started, lastData;
         bool              anyData = false;
         uint64_t          samples = 0, zeroRun = 0, buffers = 0, emptyBuffers = 0;
@@ -86,7 +86,7 @@ namespace h3d {
             volume = channelVolume = -1;
         }
 
-        uint32_t feeding() const { // the source a link feeds the stream from, 0 = none (with the mutex held)
+        uint32_t feeding() const { // source linked to the stream, 0 = none; mutex held
             if (ownId == SPA_ID_INVALID)
                 return 0;
             uint32_t best = 0;
@@ -96,7 +96,7 @@ namespace h3d {
             return best;
         }
 
-        // in the loop's thread: bind the source the stream is linked to now, for its state and mute
+        // loop thread: bind the currently linked source for its state and mute
         void relink() {
             uint32_t now;
             {
@@ -127,8 +127,8 @@ namespace h3d {
             pw_node_enum_params(source, 0, SPA_PARAM_Props, 0, UINT32_MAX, nullptr);
         }
 
-        // a source node's name for "target": its node.name as is, else the one whose description or nick it is (or
-        // is part of), as wpctl status shows them; none: as it is (WirePlumber won't find it)
+        // node.name for a "target": as is, else the source whose description or nick (as wpctl status shows) is or
+        // contains it; unmatched: unchanged
         std::string resolve(const std::string& want) const {
             std::lock_guard lock(mutex);
             const std::string w = lower(want);
@@ -182,7 +182,7 @@ namespace h3d {
                     m->zeroRun    = x != 0.f ? 0 : m->zeroRun + 1;
                     m->secPeak    = std::max(m->secPeak, (double)std::abs(x));
                     m->secSum2 += (double)x * x;
-                    if (++m->secN >= (uint64_t)m->rate) { // a second's worth: what it was
+                    if (++m->secN >= (uint64_t)m->rate) { // a full second: publish its peak and rms
                         m->peak    = dB(m->secPeak);
                         m->rms     = m->secSum2 > 0 ? std::max(-200.f, (float)(10 * std::log10(m->secSum2 / m->secN)) + 3.01f) : -200.f;
                         m->secPeak = m->secSum2 = 0;
@@ -339,9 +339,9 @@ namespace h3d {
         static void onCoreError(void* data, uint32_t id, int, int res, const char* message) {
             auto* m = (SImpl*)data;
             if (id != PW_ID_CORE)
-                return; // (the stream's own come as its state)
+                return; // the stream's errors arrive as its state
             std::lock_guard lock(m->mutex);
-            if (res == -EPIPE) { // gone; anything else is only said (as the stream itself takes it)
+            if (res == -EPIPE) { // PipeWire gone; other errors are only reported
                 m->streamState = "error";
                 m->streamError = "PipeWire went away";
             } else
@@ -404,7 +404,7 @@ namespace h3d {
             m->registry = pw_core_get_registry(m->core, PW_VERSION_REGISTRY, 0);
             if (m->registry)
                 pw_registry_add_listener(m->registry, &m->registryHook, &SImpl::registryEvents(), m.get());
-            // a source asked for: which it is (the registry's nodes, a round trip away; a second at most)
+            // resolve the target against the registry's nodes (one round trip, a second at most)
             std::string name = target;
             if (!target.empty() && m->registry) {
                 m->syncSeq = pw_core_sync(m->core, PW_ID_CORE, 0);
@@ -417,9 +417,9 @@ namespace h3d {
             }
             pw_properties* props = pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Capture", PW_KEY_MEDIA_ROLE, "Communication", PW_KEY_APP_NAME,
                                                      "hypr3d", PW_KEY_NODE_NAME, "hypr3d-lipsync", PW_KEY_NODE_DESCRIPTION, "hypr3d lip sync", nullptr);
-            // that one; not there, WirePlumber gives it the default one (status() says which it got). (Not with
-            // node.dont-fallback: WirePlumber 0.5.17 sets a stream linked to a target that is the default to follow
-            // the default from then on, and then ends one with dont-fallback, its target "not found")
+            // a missing target gets the default from WirePlumber (status() tells which). Not node.dont-fallback:
+            // WirePlumber 0.5.17 makes a stream whose target is the default follow the default, then ends it with
+            // dont-fallback ("not found")
             if (!name.empty())
                 pw_properties_set(props, PW_KEY_TARGET_OBJECT, name.c_str());
             m->stream = pw_stream_new(m->core, "hypr3d lip sync", props);
@@ -450,7 +450,7 @@ namespace h3d {
     void CMicrophone::stop() {
         if (m->loop)
             pw_thread_loop_stop(m->loop);
-        // (the loop's thread is gone: nothing else touches these)
+        // the loop's thread is stopped: nothing else touches these
         if (m->source) {
             spa_hook_remove(&m->sourceHook);
             pw_proxy_destroy((pw_proxy*)m->source);
@@ -529,7 +529,7 @@ namespace h3d {
         s.silentFor    = m->rate > 0 ? (double)m->zeroRun / m->rate : 0;
         s.sinceData    = m->anyData ? std::chrono::duration<double>(now - m->lastData).count() : -1;
         s.age          = std::chrono::duration<double>(now - m->started).count();
-        if (s.sinceData >= 0 && s.sinceData < 1.5) { // (a second that ended long ago says nothing about now)
+        if (s.sinceData >= 0 && s.sinceData < 1.5) { // stale seconds say nothing about now
             s.peak = m->peak;
             s.rms  = m->rms;
         }

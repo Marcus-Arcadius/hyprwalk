@@ -1,7 +1,5 @@
-// Offscreen test harness for hypr3d: drives the real renderer and avatar
-// animator on a surfaceless EGL context and writes PNGs. No compositor needed.
-//
-// Arguments run in order, each changing the state; --out renders a picture:
+// Offscreen test harness for hypr3d: drives the real renderer and avatar animator on a surfaceless EGL context and
+// writes PNGs; no compositor needed. Arguments run in order, each changing the state; --out renders a picture:
 //   shot --avatar a.vrm --frames 30 --view 0 --out front.png --view 180 --out back.png
 #include "avatar.hpp"
 #include "control.hpp"
@@ -42,7 +40,7 @@ namespace h3d {
 using namespace h3d;
 
 namespace {
-    // a load as the plugin's loader thread runs it (CBackgroundLoader): an exception makes it a failed load
+    // runs a load as CBackgroundLoader does: an exception becomes a failed load
     template <typename Res, typename Req>
     Res guardedLoad(Res (*fn)(const Req&, const std::atomic<bool>&), const Req& req) {
         std::atomic<bool> cancel = false;
@@ -183,49 +181,49 @@ int main(int argc, char** argv) {
 
     std::shared_ptr<SAvatarModel> model;
     CAvatarAnimator               anim;
-    CAvatarAnimator               still; // the same without physics, to measure the swing against
+    CAvatarAnimator               still; // physics off: the reference for --swing and clips
     V3                            move{}, vel{};
-    float                         moveY = 0; // --movey: flying, the velocity up the keys ask for (the plugin's Space and Ctrl, or W looking up or down)
+    float                         moveY = 0; // --movey: vertical velocity while flying
     float                         turn = 0;  // degrees a second
-    float                         accel = 0; // m/s² toward the --move velocity, 0 = at once (the plugin's is 10 on the ground)
-    float                         decel = 0; // m/s² when the --move velocity is slower than now (the plugin's is 14), 0 = accel
-    float                         turnBack = 7; // m/s² when the --move velocity goes back the other way (the plugin's), 0 = accel
-    bool                          face  = false; // --face 1: the body turns to where it goes, as the plugin's third person does
-    bool                          lookCam = false; // --look-cam 1: the head looks as the plugin's third person has it, the camera behind looking -z
-    float                         camLookYaw = 0, camLookPitch = 0; // (that, eased)
-    float                         fpTurnYaw = 0, fpTurnPitch = 0; // --fpturn: the first person camera turning, degrees a second
-    bool                          fpFollow = false, fpBodyTurning = false; // --fpfollow 1: the body turns as in the plugin's first person
-    bool                          camWorld = false; // --view-world: the camera's yaw is the world's
-    bool                          camChest = false; // --view-chest: ... the chest's (where it faces as the animation turns it)
-    bool                          speedSet = false; // --speed: that speed along the body, whatever the velocity
-    FILE*                         trace = nullptr;  // --trace: a line a frame, where the feet are
-    FILE*                         bones = nullptr;  // --bones: a line a frame, where the humanoid's joints are
-    FILE*                         clips = nullptr;  // --clip: a line a frame, how far the arms are inside the body and skirt
-    std::vector<int8_t>           vertexPart;       // (--clip's: per vertex 0 the body, 1 the left forearm and hand, 2 the right's, -1 neither)
-    FILE*                         hairClips = nullptr; // --hairclip: a line a frame, how far the hair is inside the arms
-    std::vector<uint8_t>          vertexHair;          // (--hairclip's: per vertex, it hangs off the head on springs)
-    FILE*                         springClips = nullptr; // --springclip: a line a frame, how far each kind of spring is inside the body
-    FILE*                         springTrace = nullptr; // --springtrace: a line a frame, where the springs' tails are
-    FILE*                         springDump  = nullptr; // --springdump: a line a frame, the springs' bones and colliders in the world
-    FILE*                         bodyClips   = nullptr; // --bodyclip: a line a frame, how far each kind of spring is inside the body, bone by bone
-    struct SBodyShape {                                  // (--bodyclip's: a bone's skin at rest round a line through it)
+    float                         accel = 0; // m/s² toward --move's velocity (plugin: 10), 0 = at once
+    float                         decel = 0; // m/s² slowing down (plugin: 14), 0 = accel
+    float                         turnBack = 7; // m/s² reversing (the plugin's), 0 = accel
+    bool                          face  = false;
+    bool                          lookCam = false;
+    float                         camLookYaw = 0, camLookPitch = 0; // eased look angles
+    float                         fpTurnYaw = 0, fpTurnPitch = 0; // --fpturn, degrees a second
+    bool                          fpFollow = false, fpBodyTurning = false;
+    bool                          camWorld = false; // --view-world
+    bool                          camChest = false; // --view-chest
+    bool                          speedSet = false; // --speed: fixed speed, whatever the velocity
+    FILE*                         trace = nullptr;
+    FILE*                         bones = nullptr;
+    FILE*                         clips = nullptr;
+    std::vector<int8_t>           vertexPart;       // 0 body, 1/2 left/right forearm+hand, -1 neither
+    FILE*                         hairClips = nullptr;
+    std::vector<uint8_t>          vertexHair;          // per vertex: hair hanging off the head on springs
+    FILE*                         springClips = nullptr;
+    FILE*                         springTrace = nullptr;
+    FILE*                         springDump  = nullptr;
+    FILE*                         bodyClips   = nullptr;
+    struct SBodyShape {                                  // a bone's rest skin around a line through it
         int                joint = -1;
-        V3                 o, u, e1, e2; // the line (bind space) and two ways across it
+        V3                 o, u, e1, e2; // the line (bind space) and two axes across it
         float              a0   = 0;     // where its rows start along the line
         int                rows = 0;
-        std::vector<float> out;          // rows * 72: how far out its skin goes, by 1 cm along the line and 5° round it
+        std::vector<float> out;          // rows * 72 radii: per 1 cm along, 5° round
     };
     std::vector<SBodyShape>       bodyShapes;
-    std::vector<int>              vertexBodyKind; // (per vertex: its kind of spring (bodyKinds), -1 the body, -2 neither)
+    std::vector<int>              vertexBodyKind; // per vertex: index in bodyKinds, -1 body, -2 neither
     std::vector<std::string>      bodyKinds;
-    std::string                   springPart;            // (... of the bones with that in their names)
-    std::vector<int>              vertexSpring;          // (--springclip's: per vertex its kind of spring, -1 the body, -2 neither)
-    std::vector<std::string>      springKinds;           // (... the kinds: a spring's name up to its first '.')
+    std::string                   springPart;            // --springtrace's bone name filter
+    std::vector<int>              vertexSpring;          // per vertex: index in springKinds, -1 body, -2 neither
+    std::vector<std::string>      springKinds;           // a spring's name up to its first '.'
     float                         ground  = 0;
     bool                          jumping = false; // --jump: falls back down to ground
-    bool                          walking = false; // --walk: the plugin's body through the world (walker.cpp): its stairs, ledges
+    bool                          walking = false; // --walk: walker.cpp's body (stairs, ledges)
     SWalker                       body;
-    FILE*                         walkLog = nullptr; // --walklog: a line a frame, the body and the gait over the ground
+    FILE*                         walkLog = nullptr;
     SAvatarMotion                 mo;
     std::vector<SPanel>           panels;
     int                           W = 800, H = 800;
@@ -238,12 +236,12 @@ int main(int argc, char** argv) {
     bool  firstPerson = false, eyeSet = false;
     V3    eyeAt{};
     float camYaw = 0, camPitch = 0; // degrees, the plugin's: yaw 0 = -z, 90 = +x
-    // first person with the body (--fpbody): the camera in the avatar's eyes, its head not drawn, its hands in view, as
-    // the plugin has them; drawn from outside too (--third after it: the pose as it is)
+    // --fpbody: camera in the avatar's eyes, head hidden, hands in view as in the plugin; --third after it draws the
+    // pose from outside
     bool            fpBody = false;
     SFirstPersonEye fpEye;
     const float DEG = 180.f / 3.14159265f;
-    // the plugin's adaptExposure(), snapped: how bright it is around the eye (the same functions)
+    // the plugin's adaptExposure() settled at once (the same functions)
     auto autoExposure = [&](const V3& eye, const V3& view) {
         if (!world.model)
             return 1.f;
@@ -255,21 +253,21 @@ int main(int argc, char** argv) {
     bool autoExp = false;
     bool plainTextures = false; // --plain: no block compression (before --map)
     int  bench   = 0; // --bench n: time n more renders of each --out
-    bool outlines = true; // --outlines 0: none of the avatar's toon outlines
+    bool outlines = true; // --outlines 0: no toon outlines
     GLuint outTex = 0;
     int    texW = 0, texH = 0;
 
     // the Action Menu, as the plugin has it (view, fly and respawn only change what it shows)
     bool        third = true, fly = false;
-    float       menuDt = 0.2f; // the time it's had at the next --out: 0.2 = all faded in, the flash gone
-    // what the plugin's hyprctl, menu items and dials do to the avatar: the same code (control.cpp)
+    float       menuDt = 0.2f; // menu age at the next --out; 0.2 = fully faded in
+    // hyprctl, menu items and dials act on the avatar through the plugin's control.cpp
     CAvatarControl ctl(anim);
     CActionMenu    menu([&](const std::string& id) { return actionPage(id, {model.get(), &anim, false, third, fly}); },
                         [&](const SMenuItem& it, float v, float v2) { ctl.dial(it, v, v2); });
     float          wheel  = 0; // a fraction of a notch
     auto           menuDo = [&](const SMenuItem& it) {
         std::string r;
-        switch (it.action) { // (main.cpp's own)
+        switch (it.action) { // as main.cpp handles them
             case MA_VIEW:
                 third = !third;
                 r     = third ? "third" : "first";
@@ -299,10 +297,10 @@ int main(int argc, char** argv) {
         }
     };
     float frameDt = 1.f / 60;
-    // lip sync from a WAV file (--audio), a frame's worth of it each frame, as the plugin does with the microphone
+    // --audio: lip sync gets a frame's worth of the WAV each frame, as the plugin feeds it the microphone
     CLipSync           lip;
     std::optional<float> lipGain; // --lipsync-gain (none: automatic)
-    std::string           badgeText; // --badge
+    std::string           badgeText;
     float                 badgeScale = 1;
     std::vector<uint32_t> badgePixels;
     int                   badgeW = 0, badgeH = 0;
@@ -324,7 +322,7 @@ int main(int argc, char** argv) {
                 anim.setVisemes({});
             }
             if (mo.flying) {
-                // (as the plugin's simulate() flying: toward what the keys ask for, up and down too, at 12 a second)
+                // flying as in simulate(): velocity eases toward the keys' wish, vertically too, at rate 12
                 vel = vel + (V3{move.x, moveY, move.z} - vel) * std::min(1.f, mo.dt * 12.f);
                 mo.vy = vel.y;
             } else if (accel > 0) {
@@ -343,13 +341,13 @@ int main(int argc, char** argv) {
             if (!speedSet) {
                 mo.speed = length(V3{vel.x, 0, vel.z});
                 mo.vel   = {vel.x, 0, vel.z};
-                mo.wish  = mo.flying ? V3{} : V3{move.x, 0, move.z}; // (flying, the plugin has no walk to ask for)
+                mo.wish  = mo.flying ? V3{} : V3{move.x, 0, move.z}; // no walk wish when flying, as in the plugin
                 if (accel > 0)
                     mo.accel = accel, mo.decel = decel > 0 ? decel : accel, mo.turnBack = turnBack > 0 ? turnBack : accel;
             }
             if (walking) {
-                // (as the plugin's simulate(): its gravity, the air's 10 m/s² for the speed is left out)
-                if (length(feet - body.seen()) > 1e-5f) // (put somewhere else: --pos)
+                // as simulate(), with its gravity but not the air's 10 m/s² horizontal acceleration
+                if (length(feet - body.seen()) > 1e-5f) // moved by --pos
                     body.feet = feet, body.seenY = NAN;
                 body.vel.x = vel.x, body.vel.z = vel.z;
                 if (mo.flying)
@@ -365,7 +363,7 @@ int main(int argc, char** argv) {
                 mo.vy       = body.vel.y;
                 mo.speed    = speedSet ? mo.speed : length(V3{vel.x, 0, vel.z});
                 mo.vel      = {vel.x, 0, vel.z};
-                feet        = body.seen(); // (the avatar, the camera: as the plugin draws them)
+                feet        = body.seen(); // smoothed height, as the plugin draws it
             } else if (jumping && !mo.flying) {
                 vel.y -= 20.f * mo.dt;
                 if (feet.y + vel.y * mo.dt <= ground) {
@@ -377,23 +375,23 @@ int main(int argc, char** argv) {
                 mo.vy = vel.y;
             }
             if (!walking) {
-                // (flying: no lower than the ground it took off from; walking on it, nothing up or down)
+                // flying: not below the take-off ground; walking: no vertical motion
                 if (mo.flying && feet.y + vel.y * mo.dt < ground)
                     vel.y = std::max(vel.y, (ground - feet.y) / mo.dt);
                 else if (!mo.flying && !jumping)
                     vel.y = 0;
                 feet += vel * mo.dt;
             }
-            if (face) // (as the plugin's third person: toward where it goes, else it stays; turning on from how fast it turns)
-                if (const auto way = anim.wayToFace(mo, true, bodyYaw, 0.f)) // (W walks toward -z)
+            if (face) // as third person: turn toward travel
+                if (const auto way = anim.wayToFace(mo, true, bodyYaw, 0.f)) // W walks toward -z
                     bodyYaw = anim.turnBody(bodyYaw, *way, mo.dt, mo.speed);
                 else
                     bodyYaw = anim.turnBody(bodyYaw, mo.speed > 0.3f ? std::atan2(vel.x, -vel.z) : bodyYaw, mo.dt, mo.speed);
             else
                 bodyYaw += rad(turn) * mo.dt;
             if (lookCam && model) {
-                // (as the plugin's animateAvatar: where the camera looks, or back at it looking at its face; turning far,
-                // where the body turns to; eased)
+                // as animateAvatar: look where the camera looks, or at the camera when facing it; less while turning
+                // far; eased
                 auto      wrap = [](float a) { return std::remainder(a, 6.2831853f); };
                 float     ly = wrap(0.f - bodyYaw), lp = 0.f;
                 if (std::abs(ly) > 1.75f) {
@@ -408,13 +406,13 @@ int main(int argc, char** argv) {
                 camLookPitch += (std::clamp(lp, -1.1f, 1.1f) - camLookPitch) * k;
                 mo.lookYaw = camLookYaw, mo.lookPitch = camLookPitch;
             }
-            if (fpBody) { // (the mouse)
+            if (fpBody) { // mouse look
                 camYaw += fpTurnYaw * mo.dt;
                 camPitch = std::clamp(camPitch + fpTurnPitch * mo.dt, -89.f, 89.f);
             }
             if (fpBody && fpFollow && model) {
-                // (as the plugin's animateAvatar in first person: toward where it goes, but no further off the camera than
-                // 0.8 rad; standing, it catches up once the head would turn more than 0.9 rad)
+                // as animateAvatar in first person: toward travel, at most 0.8 rad off the camera; standing, it catches
+                // up once the head would turn over 0.9 rad
                 auto        wrap  = [](float a) { return std::remainder(a, 6.2831853f); };
                 const float cy    = rad(camYaw);
                 float       want  = bodyYaw;
@@ -439,7 +437,7 @@ int main(int argc, char** argv) {
             }
             mo.fp.on = fpBody && model;
             if (mo.fp.on) {
-                // (as the plugin's first person: the camera in the eyes as last drawn, the head looking where it looks)
+                // as the plugin's first person: camera in the eyes as last drawn, the head looking with it
                 const auto e = anim.eyes();
                 const M4   drawn = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1});
                 mo.fp.yaw        = rad(camYaw);
@@ -453,11 +451,10 @@ int main(int argc, char** argv) {
                 anim.update(mo);
                 still.update(mo);
             }
-            mo.fp.press = false, mo.fp.tap = -1; // (once)
+            mo.fp.press = false, mo.fp.tap = -1; // one frame only
             if (springTrace && model) {
-                // time, then each spring bone's tail (with the part in its name) in its parent's frame, as the springs
-                // turned it (model units): how it swings on what it hangs from. First a line of what kind of spring
-                // each is (its name up to its first '.', as --springclip has them)
+                // time, then each spring bone's tail (nodes named *springPart*) in its parent's frame, model units;
+                // first a header line with each one's kind
                 if (ftell(springTrace) == 0) {
                     std::string head = "# time";
                     for (const auto& J : model->springJoints)
@@ -477,9 +474,9 @@ int main(int argc, char** argv) {
                 fprintf(springTrace, "%s\n", line.c_str());
             }
             if (springDump && model) {
-                // time, then each spring bone's joint and tail, then each collider's two ends, in the world (m). First a
-                // line per bone (its name, spring, radius, length) and per collider (its node, kind, radius, the body's bit, a
-                // disc's radius), and which colliders each spring keeps out of
+                // time, each spring bone's joint and tail, each collider's ends (world m); first '#' lines: joint
+                // (name, spring, radius, length), collider (node, kind, radius, body, disc) and spring (collider
+                // indices)
                 const M4 toWorld = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1}) * model->fix;
                 if (ftell(springDump) == 0) {
                     for (const auto& J : model->springJoints)
@@ -507,10 +504,10 @@ int main(int argc, char** argv) {
                 fprintf(springDump, "%s\n", line.c_str());
             }
             if (bodyClips && model) {
-                // each bone's skin as it is at rest, round a line through the bone (toward the next bone of the humanoid,
-                // or its first child, else its own longest way), by 1 cm along it and 5° round it; a spring's vertex
-                // nearer that line than the skin goes out there, the bone as it is now, is inside the body. A bone's skin
-                // is what it moves most of; the head's and what hangs from it, the hair, count as neither
+                // each bone's rest skin as radii around a line through it (to the next humanoid bone, else its first
+                // child, else its principal axis), per 1 cm and 5°; a spring vertex nearer the line than that, with the
+                // bone as posed now, is inside. A bone's skin is the vertices it weighs most; head and hair count as
+                // neither
                 constexpr int   NB = 72;
                 constexpr float DA = 0.01f;
                 const auto&     J  = model->joints;
@@ -594,7 +591,7 @@ int main(int argc, char** argv) {
                             const M4 b2 = J[jointOf[to]].inverseBind.inverse();
                             sh.u        = normalize(V3{b2.m[12], b2.m[13], b2.m[14]} - sh.o);
                         }
-                        if (length(sh.u) < 0.5f) { // (its own longest way: the mic in a hand without fingers)
+                        if (length(sh.u) < 0.5f) { // principal axis, e.g. a mic in a fingerless hand
                             V3 mean{};
                             for (const V3& p : pts)
                                 mean += p * (1.f / pts.size());
@@ -640,8 +637,7 @@ int main(int argc, char** argv) {
                         names += std::format(" {} ({:.2f} m)", model->nodes[J[sh.joint].node].name, sh.rows * DA);
                     fprintf(stderr, "bodyclip: %zu bones' skin:%s\n", bodyShapes.size(), names.c_str());
                 }
-                // (the springs as the animation has them, physics off: what's inside by design counts only as far as
-                // physics takes it deeper)
+                // measured against the springs without physics: only depth beyond the animation's own counts
                 auto skinned = [&](const std::vector<float>& JM, size_t v) {
                     const auto& vx = model->vertices[v];
                     V3          p{};
@@ -678,7 +674,7 @@ int main(int argc, char** argv) {
                         const V3    q  = d - sh.u * a;
                         const float rq = length(q);
                         if (rq < 0.01f)
-                            continue; // (on the line itself which way it is from it says nothing)
+                            continue; // too near the line to know its bearing
                         const int b = ((int)std::floor((std::atan2(dot(q, sh.e2), dot(q, sh.e1)) + 3.14159265f) / 6.2831853f * NB) % NB + NB) % NB;
                         if (const float in = sh.out[(size_t)r * NB + b] - rq; in > most)
                             most = in, at = (int)s;
@@ -708,9 +704,9 @@ int main(int argc, char** argv) {
                 fprintf(bodyClips, "%s\n", line.c_str());
             }
             if (walkLog && model) {
-                // time, the body's feet (the box's height), its velocity up, on the ground, the ground under it, the
-                // avatar's lift, the height it's seen at; then per foot (left, right) its heel's and ball's height over
-                // what's under them (< 0: inside it; nan: nothing near); the animator's state; the gait's status
+                // time, box feet, vertical velocity, on ground, ground under it, avatar lift, seen height; per foot
+                // (left, right) heel and ball height over the surface below (< 0 inside, nan none near); animator
+                // state; gait status
                 const auto  under = groundUnder(world.collision, body.feet.x, body.feet.z, body.feet.y);
                 std::string clear;
                 const M4    toWorld = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1}) * model->fix;
@@ -725,7 +721,7 @@ int main(int argc, char** argv) {
                     const V3 ankle = model->fix.point({rest.m[12], rest.m[13], rest.m[14]});
                     for (const V3& off : {model->feet[sd].heel, model->feet[sd].ball}) {
                         const V3 w = carry.point(ankle + off);
-                        // (the first surface down from 0.25 m above it, that's under it: inside a step, that step's top)
+                        // first surface down from 0.25 m above it (inside a step: its top)
                         SRayHit h;
                         const bool hit = world.collision.raycast(w + V3{0, 0.25f, 0}, {0, -1, 0}, 1.f, h) && h.normal.y > 0.5f;
                         clear += std::format(" {:.4f}", hit ? h.t - 0.25f : NAN);
@@ -735,7 +731,7 @@ int main(int argc, char** argv) {
                         anim.lift(), feet.y, clear.c_str(), anim.playing().c_str(), anim.gaitStatus().c_str());
             }
             if (trace && model) {
-                // each foot's heel and ball in the world, carried by the foot as the skin is
+                // each foot's ankle, heel and ball in the world, carried by the foot as the skin is
                 const M4    toWorld = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1}) * model->fix;
                 std::string line    = std::format("{:.4f} {:.4f} {:.4f} {:.4f} {:.3f}", time, feet.x, feet.z, bodyYaw, mo.speed);
                 for (int sd = 0; sd < 2; ++sd) {
@@ -755,8 +751,8 @@ int main(int argc, char** argv) {
                 fprintf(trace, "%s %s\n", line.c_str(), anim.gaitStatus().c_str());
             }
             if (springClips && model) {
-                // the skin as drawn; round a vertical line through the hips, by height (1 cm) and bearing (5°), how far out
-                // the body goes (not its springs, arms or head); a spring's vertex nearer the line than that is inside
+                // body radius (not springs, arms or head) around a vertical line through the hips, per 1 cm of height
+                // and 5° of bearing; a spring vertex nearer the line is inside
                 if (vertexSpring.size() != model->vertices.size()) {
                     springKinds.clear();
                     std::vector<int> kindOf(model->springs.size());
@@ -794,8 +790,8 @@ int main(int argc, char** argv) {
                     if (b.part < 0 || b.part >= (int)anim.partsShown().size() || anim.partsShown()[b.part])
                         for (uint32_t i = b.first; i < b.first + b.count; ++i)
                             shown[model->indices[i]] = 1;
-                // (and the springs as the animation has them, physics off: what's inside by design, like a tie's band under
-                // the collar, counts only as far as physics takes it deeper)
+                // against the springs without physics too: what's inside by design (a tie's band under the collar)
+                // counts only as far as physics takes it deeper
                 const M4        toWorld = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1}) * model->fix;
                 std::vector<V3> at(model->vertices.size()), still0(model->vertices.size());
                 for (size_t v = 0; v < at.size(); ++v) {
@@ -834,7 +830,7 @@ int main(int argc, char** argv) {
                     int   h, a;
                     float r = 0;
                     if (!bin(p, h, a) || std::hypot(p.x - hips.x, p.z - hips.z) < 0.06f)
-                        return 0.f; // (on the line itself which way it is from it says nothing)
+                        return 0.f; // too near the line to know its bearing
                     for (int d = -1; d <= 1; ++d)
                         r = std::max(r, out[h * NA + (a + d + NA) % NA]);
                     return r - std::hypot(p.x - hips.x, p.z - hips.z);
@@ -865,12 +861,12 @@ int main(int argc, char** argv) {
                     fprintf(bones, "%s\n", line.c_str());
                 }
                 if (clips) {
-                    // the skin as drawn; round a vertical line through the hips, by height (1 cm) and bearing (5°), how
-                    // far out the body goes (the skirt with it); an arm's vertex nearer the line than that is inside
+                    // body radius (skirt included) around a vertical line through the hips, per 1 cm and 5°; an arm
+                    // vertex nearer the line is inside
                     if (vertexPart.size() != model->vertices.size()) {
                         std::vector<int8_t> nodePart(model->nodes.size(), 0);
-                        // (the forearms and hands; the upper arms, the head with its hair, and what constraints turn after
-                        // something else, count as neither)
+                        // 1/2: left/right forearm and hand; upper arms, head (with hair) and nodes driven by non-roll
+                        // constraints: -1; the rest body (0)
                         const int           lu = model->human[HB_L_UPPER_ARM], ru = model->human[HB_R_UPPER_ARM], nk = model->human[HB_NECK] >= 0 ? model->human[HB_NECK] : model->human[HB_HEAD];
                         const int           lf = model->human[HB_L_LOWER_ARM], rf = model->human[HB_R_LOWER_ARM];
                         for (const auto& nc : model->constraints)
@@ -939,7 +935,7 @@ int main(int argc, char** argv) {
                                     deep = depth, where = at[v] - hips;
                             }
                         }
-                        // (where the deepest is, from the hips: across the body's right, up, ahead)
+                        // deepest point from the hips: right, up, ahead
                         const V3 fw{std::sin(bodyYaw), 0, -std::cos(bodyYaw)}, rt{std::cos(bodyYaw), 0, std::sin(bodyYaw)};
                         line += std::format(" {} {:.4f} {:.3f} {:.3f} {:.3f}", inside, deep, dot(where, rt), where.y, dot(where, fw));
                     }
@@ -947,9 +943,9 @@ int main(int argc, char** argv) {
                 }
             }
             if (hairClips && model && model->clearance.measured) {
-                // the hair (what springs swing under the head), as drawn; each arm as the round shape its skin goes out to
-                // round its bones at rest (SBodyClearance: a sleeve's cuff with it), by quarter along the upper arm, the
-                // forearm and the hand (toward its middle finger); a hair vertex nearer an arm's bone than that is inside
+                // hair (spring bones under the head) against each arm's rest radius around its bones (SBodyClearance,
+                // sleeves included), per quarter of upper arm, forearm and hand; a hair vertex nearer a bone than that
+                // is inside
                 if (vertexHair.size() != model->vertices.size()) {
                     const size_t         n = model->nodes.size();
                     std::vector<uint8_t> spring(n, 0), head(n, 0);
@@ -1038,7 +1034,7 @@ int main(int argc, char** argv) {
             }
         }
     };
-    // how far each spring's bones are turned from where the animation has them, degrees
+    // each spring's bones' angle from the animation's pose, degrees
     auto swing = [&] {
         if (!model)
             return;
@@ -1095,12 +1091,12 @@ int main(int argc, char** argv) {
         fprintf(stderr, "swing (mean/max deg):%s\n", line.empty() ? " no springs" : line.c_str());
     };
 
-    std::string attackClip, attackClipFirst; // --attackclip
+    std::string attackClip, attackClipFirst;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
-        // laid out for the --size, as the plugin's every frame does it: the mouse moves its cursor by logical pixels
+        // lay out for --size each time, as the plugin does each frame: the menu cursor moves in logical pixels
         menu.layout(W, H, 1);
-        if (a == "--attackclip") { // file [first person's file]: VRM animations for the attacks of the avatars loaded after it
+        if (a == "--attackclip") { // file [fp file]: attack VRMAs for later --avatars
             need(i, 1);
             attackClip      = argv[++i];
             attackClipFirst = i + 1 < argc && argv[i + 1][0] != '-' ? argv[++i] : "";
@@ -1158,14 +1154,12 @@ int main(int argc, char** argv) {
         } else if (a == "--physics") {
             need(i, 1);
             anim.setPhysics(atoi(argv[++i]) != 0);
-        } else if (a == "--gaitstyle") { // 1|0: the walk's and run's body from the avatar's clips (made in Blender), or the walking's own
+        } else if (a == "--gaitstyle") { // 1|0: walk and run clips drive the body, else the gait
             need(i, 1);
             anim.setGaitStyle(atoi(argv[++i]) != 0);
         } else if (a == "--swing") {
             swing();
-        } else if (a == "--springs") { // each spring: its bones, colliders and limit; where its first bone's limit points (the
-                                       // avatar's frame: x right, y up, -z ahead) and its bones that leave out a collider
-                                       // of the body's they start inside of
+        } else if (a == "--springs") { // prints each spring's bones, colliders and limit
             if (!model)
                 continue;
             static constexpr const char* LIMIT[] = {"none", "cone", "hinge", "spherical"};
@@ -1189,9 +1183,7 @@ int main(int argc, char** argv) {
                         model->springs[s].name.c_str(), n, model->springs[s].colliders.size(), LIMIT[J.limit], J.limitA * 57.29578f, J.limitB * 57.29578f, at.x, at.y, at.z,
                         bone.x, bone.y, bone.z, axis.x, axis.y, axis.z, std::acos(std::clamp(dot(axis, bone), -1.f, 1.f)) * 57.29578f, in);
             }
-        } else if (a == "--limits") { // how far the bones with a limit are out of it now: the worst (degrees) and its spring;
-                                      // worked out here on its own, from the limit's frame (the parent as it swings, the bone
-                                      // as the animation turns it) and the cone's, hinge's or spherical limit's rules
+        } else if (a == "--limits") { // worst limit overshoot (deg), computed independently
             if (!model)
                 continue;
             auto rot = [](const M4& m) {
@@ -1212,7 +1204,7 @@ int main(int argc, char** argv) {
                 float       out = 0;
                 if (jt.limit == LIMIT_CONE)
                     out = std::acos(std::clamp(d.y, -1.f, 1.f)) * 57.29578f - A;
-                else if (jt.limit == LIMIT_HINGE) // (off the yz plane, or round in it too far)
+                else if (jt.limit == LIMIT_HINGE) // off the yz plane, or too far round in it
                     out = std::max(std::asin(std::min(std::abs(d.x), 1.f)) * 57.29578f, std::abs(std::atan2(d.z, d.y)) * 57.29578f - A);
                 else
                     out = std::max(std::abs(std::atan2(d.z, d.y)) * 57.29578f - A, std::asin(std::min(std::abs(d.x), 1.f)) * 57.29578f - B);
@@ -1238,12 +1230,12 @@ int main(int argc, char** argv) {
             need(i, 1);
             orbit    = rad(atof(argv[++i]));
             camChest = false;
-        } else if (a == "--view-world") { // camera around the avatar at a yaw in the world, not turning with the body (degrees)
+        } else if (a == "--view-world") { // camera orbit yaw in world space, degrees
             need(i, 1);
             orbit    = rad(atof(argv[++i]));
             camWorld = true;
             camChest = false;
-        } else if (a == "--view-chest") { // camera around the avatar at a yaw from where its chest faces (dances turn it), degrees
+        } else if (a == "--view-chest") { // camera orbit yaw from the chest's facing, degrees
             need(i, 1);
             orbit    = rad(atof(argv[++i]));
             camChest = true;
@@ -1254,7 +1246,7 @@ int main(int argc, char** argv) {
         } else if (a == "--dist") {
             need(i, 1);
             dist = atof(argv[++i]);
-        } else if (a == "--at") { // look at a bone (by node name, or a humanoid bone: lefthand, righthand, head...), then --shift
+        } else if (a == "--at") { // look at a node or humanoid bone (lefthand, head...)
             need(i, 1);
             aimName = argv[++i];
         } else if (a == "--shift") { // move the look-at point, world meters: x y z
@@ -1275,74 +1267,61 @@ int main(int argc, char** argv) {
         } else if (a == "--run") { // 1|0: the player runs (Shift), else walks
             need(i, 1);
             mo.run = atoi(argv[++i]) != 0;
-        } else if (a == "--face") { // 1|0: the body turns to where it goes, as in the plugin's third person
+        } else if (a == "--face") { // 1|0: body turns toward travel (third person)
             need(i, 1);
             face = atoi(argv[++i]) != 0;
-        } else if (a == "--look-cam") { // 1|0: the head looks as the plugin's third person has it (a camera behind, looking -z)
+        } else if (a == "--look-cam") { // 1|0: head look as in third person (camera behind)
             need(i, 1);
             lookCam = atoi(argv[++i]) != 0;
-        } else if (a == "--gait") { // the walking's state
+        } else if (a == "--gait") { // prints the gait status
             if (model)
                 fprintf(stderr, "gait %s\n", anim.gaitStatus().c_str());
-        } else if (a == "--trace") { // file: a line a frame: time, feet x z, yaw, speed, each foot's ankle, heel and ball in the
-                                     // world, the walking's state
+        } else if (a == "--trace") { // file: feet and gait per frame
             need(i, 1);
             if (trace)
                 fclose(trace);
             trace = fopen(argv[++i], "w");
-        } else if (a == "--bones") { // file: a line a frame: time, the body's yaw, each humanoid bone's joint in the world
+        } else if (a == "--bones") { // file: humanoid joints per frame
             need(i, 1);
             if (bones)
                 fclose(bones);
             bones = fopen(argv[++i], "w");
-        } else if (a == "--springclip") { // file: a line a frame: time, then per kind of spring (its name up to a '.', as the
-                                          // first line lists them) how many of its vertices physics puts inside the body
-                                          // (round a vertical line through the hips, not counting the arms and head), more
-                                          // than 5 mm deeper than the animation has them, and the most (m)
+        } else if (a == "--springclip") { // file: spring depth into the body per frame
             need(i, 1);
             if (springClips)
                 fclose(springClips);
             springClips = fopen(argv[++i], "w");
             vertexSpring.clear();
-        } else if (a == "--bodyclip") { // file: a line a frame: time, then per kind of spring (as --springclip has them) how many
-                                        // of its vertices physics puts inside the body more than 5 mm deeper than the
-                                        // animation has them, the most (m) and the bone whose skin that is in: each bone's
-                                        // skin as it is at rest round a line through it, carried as the bone is now (any
-                                        // pose: a dance's, a fall's), the head's and its hair's not counted
+        } else if (a == "--bodyclip") { // file: like --springclip, per bone's rest skin
             need(i, 1);
             if (bodyClips)
                 fclose(bodyClips);
             bodyClips = fopen(argv[++i], "w");
             vertexBodyKind.clear();
-        } else if (a == "--springdump") { // file: a line a frame: time, then each spring bone's joint and tail, then each
-                                          // collider's two ends, in the world (m); first what they are, a line each
+        } else if (a == "--springdump") { // file: spring joints and colliders per frame
             need(i, 1);
             if (springDump)
                 fclose(springDump);
             springDump = fopen(argv[++i], "w");
-        } else if (a == "--springtrace") { // file part: a line a frame: time, then each spring bone's tail with the part
-                                             // in its name ("": all) in its parent's frame, x y z (model units)
+        } else if (a == "--springtrace") { // file part: tails of spring bones named *part*
             need(i, 2);
             if (springTrace)
                 fclose(springTrace);
             springTrace = fopen(argv[i + 1], "w");
             springPart  = argv[i + 2];
             i += 2;
-        } else if (a == "--hairclip") { // file: a line a frame: time, then per arm (left, right) how many of the hair's vertices (what
-                                        // springs swing under the head) are inside it (as round as its skin goes out at rest,
-                                        // a sleeve's cuff with it), the deepest (m) and the node that one follows most ("-": none)
+        } else if (a == "--hairclip") { // file: hair inside each arm per frame
             need(i, 1);
             if (hairClips)
                 fclose(hairClips);
             hairClips = fopen(argv[++i], "w");
             vertexHair.clear();
-        } else if (a == "--clip") { // file: a line a frame: time, then per forearm (left, right) how many of its vertices are inside
-                                    // the body (a skirt with it), the deepest (m) and where that is from the hips (right, up, ahead)
+        } else if (a == "--clip") { // file: forearms inside the body per frame
             need(i, 1);
             if (clips)
                 fclose(clips);
             clips = fopen(argv[++i], "w");
-        } else if (a == "--walk") { // the plugin's body through the world from here on (walker.cpp): up its stairs, off ledges
+        } else if (a == "--walk") { // walker.cpp's body from here on: stairs, ledges
             walking         = true;
             body.feet       = feet;
             body.seenY      = NAN;
@@ -1352,7 +1331,7 @@ int main(int argc, char** argv) {
                 return world.collision.overlaps({{f.x - SWalker::RADIUS, f.y, f.z - SWalker::RADIUS}, {f.x + SWalker::RADIUS, f.y + h, f.z + SWalker::RADIUS}});
             };
             mo.ground = [&](float x, float z, float y) { return groundUnder(world.collision, x, z, y); };
-        } else if (a == "--floors") { // x0 z0 x1 z1 step file: every floor over that grid (a line a cell: x z, the heights up)
+        } else if (a == "--floors") { // x0 z0 x1 z1 step file: floor heights per cell
             need(i, 6);
             const float x0 = atof(argv[i + 1]), z0 = atof(argv[i + 2]), x1 = atof(argv[i + 3]), z1 = atof(argv[i + 4]), st = atof(argv[i + 5]);
             FILE*       f = fopen(argv[i + 6], "w");
@@ -1370,7 +1349,7 @@ int main(int argc, char** argv) {
                     fprintf(f, "%s\n", line.c_str());
                 }
             fclose(f);
-        } else if (a == "--walklog") { // file: a line a frame (with --walk): the body's height, on the ground, the gait
+        } else if (a == "--walklog") { // file: body and gait per frame (with --walk)
             need(i, 1);
             walkLog = fopen(argv[++i], "w");
         } else if (a == "--vy") {
@@ -1380,7 +1359,7 @@ int main(int argc, char** argv) {
             mo.onGround = false;
         } else if (a == "--ground") {
             mo.onGround = true;
-        } else if (a == "--fly") { // 1|0: flying (the plugin's F; going on as it was going); 0 above the ground: falls to it
+        } else if (a == "--fly") { // 1|0: flying (F), keeping momentum; 0 aloft falls
             need(i, 1);
             const bool was = mo.flying;
             mo.flying      = atoi(argv[++i]) != 0;
@@ -1394,7 +1373,7 @@ int main(int argc, char** argv) {
             }
             if (mo.flying)
                 jumping = false;
-        } else if (a == "--movey") { // flying: the velocity up the keys ask for, m/s (the plugin's Space 8, Ctrl -8)
+        } else if (a == "--movey") { // vertical flying velocity, m/s (Space 8, Ctrl -8)
             need(i, 1);
             moveY = atof(argv[++i]);
         } else if (a == "--crouch") {
@@ -1405,8 +1384,7 @@ int main(int argc, char** argv) {
             mo.lookYaw   = rad(atof(argv[i + 1]));
             mo.lookPitch = rad(atof(argv[i + 2]));
             i += 2;
-        } else if (a == "--viseme") { // name weight: lip sync's viseme (aa ih ou ee oh pp ff ss ch) at that weight, the rest 0, as the
-            // plugin hands them to the avatar ("none": all 0)
+        } else if (a == "--viseme") { // name weight: one viseme, the rest 0 ("none": all 0)
             need(i, 2);
             const std::string name = argv[++i];
             const float       w    = (float)atof(argv[++i]);
@@ -1476,7 +1454,7 @@ int main(int argc, char** argv) {
             for (int m : found)
                 anim.setShape(m, std::string(argv[i + 2]) == "reset" ? NAN : (float)atof(argv[i + 2]));
             i += 2;
-        } else if (a == "--parts") { // what's shown, the toggles
+        } else if (a == "--parts") { // prints parts, toggles, sliders, variants
             if (!model)
                 continue;
             std::string line;
@@ -1523,7 +1501,7 @@ int main(int argc, char** argv) {
         } else if (a == "--frames") {
             need(i, 1);
             step(atoi(argv[++i]));
-        } else if (a == "--eyes") { // each eye's turn relative to the head: angle, axis (in the model's bind space)
+        } else if (a == "--eyes") { // each eye's turn from the head: angle, axis (bind space)
             if (!model)
                 continue;
             auto rot = [&](int hb, float r[3][3]) {
@@ -1586,7 +1564,7 @@ int main(int argc, char** argv) {
                     }
                     fprintf(stderr, "%s %s:%s\n", hand ? "right" : "left", F[f], line.c_str());
                 }
-        } else if (a == "--thumb") { // each finger's bones, rest and posed, in the hand's frame: along, across, palm
+        } else if (a == "--thumb") { // finger bones in the hand's frame, rest and posed
             if (!model)
                 continue;
             const auto& J = anim.joints();
@@ -1689,8 +1667,8 @@ int main(int argc, char** argv) {
             if (e < 0)
                 fprintf(stderr, "no emote %s\n", what.c_str());
             anim.playEmote(e, loop);
-            still.playEmote(e, loop); // (the swing and --springclip are measured against it)
-        } else if (a == "--emotes") { // the avatar's
+            still.playEmote(e, loop); // the reference for the swing and --springclip
+        } else if (a == "--emotes") { // lists the avatar's emotes
             for (size_t k = 0; k < anim.emotes().size(); ++k) {
                 const auto& em = *anim.emotes()[k];
                 fprintf(stderr, "emote %zu: %s (%s) %.2f s%s%s%s%s, %zu channels, %zu faces%s, gestures %d %d\n", k + 1, em.name.c_str(), em.from.c_str(), em.anim.duration,
@@ -1718,14 +1696,14 @@ int main(int argc, char** argv) {
                 fprintf(stderr, "menu at %s\n", menu.open() ? menu.path().c_str() : "(closed)");
         } else if (a == "--menu-close") {
             menu.hide();
-        } else if (a == "--ctl") { // "avatar ..." or "menu ...": a hyprctl hypr3d request, as the plugin does it
+        } else if (a == "--ctl") { // a hyprctl hypr3d "avatar ..." or "menu ..." request
             need(i, 1);
             const std::string        req = argv[++i];
             std::istringstream       in(req);
             std::vector<std::string> words;
             for (std::string w; in >> w;)
                 words.push_back(w);
-            std::string rest = req; // after "avatar emote"
+            std::string rest = req; // the text after the first two words
             for (int w = 0; w < 2; ++w) {
                 const size_t b = rest.find_first_not_of(" \t"), e = b == std::string::npos ? b : rest.find_first_of(" \t", b);
                 rest           = e == std::string::npos ? "" : rest.substr(e);
@@ -1736,7 +1714,7 @@ int main(int argc, char** argv) {
             else if (!words.empty() && words[0] == "menu")
                 r = menuCommand(menu, {words.begin() + 1, words.end()}, menuDo);
             fprintf(stderr, "ctl %s -> %s\n", req.c_str(), r.empty() ? "(not a command here)" : r.c_str());
-        } else if (a == "--key") { // tab, esc, backspace, enter, 1-9 or an evdev code, as the plugin takes them
+        } else if (a == "--key") { // tab, esc, backspace, enter, 1-9 or an evdev code
             need(i, 1);
             const std::string k    = argv[++i];
             const uint32_t    code = k == "tab" ? 15 : k == "esc" ? 1 : k == "backspace" ? 14 : k == "enter" ? 28 : k.size() == 1 && k[0] >= '1' && k[0] <= '9' ? (uint32_t)(k[0] - '1' + 2) : (uint32_t)atoi(k.c_str());
@@ -1752,7 +1730,7 @@ int main(int argc, char** argv) {
         } else if (a == "--wheel") { // notches (down > 0), while the menu is open
             need(i, 1);
             menuWheel(menu, wheel, (float)atof(argv[++i]));
-        } else if (a == "--mouse") { // dx dy: the mouse moved (the menu's cursor, while it's open)
+        } else if (a == "--mouse") { // dx dy: moves the open menu's cursor
             need(i, 2);
             if (menu.open())
                 menu.move(atof(argv[i + 1]), atof(argv[i + 2]));
@@ -1769,7 +1747,7 @@ int main(int argc, char** argv) {
                         ws += std::format(" {}={:.2f}", model->morphs[k].name, anim.morphWeights()[k]);
                 fprintf(stderr, "morphs:%s\n", ws.c_str());
             }
-        } else if (a == "--where") { // node: where in the world it is (its joint's bind point, skinned)
+        } else if (a == "--where") { // node: world position of its skinned joint
             need(i, 1);
             const std::string nm = argv[++i];
             int               node = -1;
@@ -1792,7 +1770,7 @@ int main(int argc, char** argv) {
                 }
             if (!said)
                 fprintf(stderr, "where %s: no such node with a joint\n", nm.c_str());
-        } else if (a == "--map") { // path [scale]: a glTF map instead of the courtyard; the feet go to its start
+        } else if (a == "--map") { // path [scale]: a glTF map instead of the courtyard
             need(i, 1);
             SMapRequest req;
             req.path     = argv[++i];
@@ -1822,7 +1800,7 @@ int main(int argc, char** argv) {
                     (long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count(), res.req.scale, b.min.x, b.min.y, b.min.z,
                     b.max.x, b.max.y, b.max.z, feet.x, feet.y, feet.z, camYaw, d.center.x, d.center.y, d.center.z, d.normal.x, d.normal.y, d.normal.z, d.height,
                     world.sunDir.x, world.sunDir.y, world.sunDir.z);
-        } else if (a == "--fp") { // first person from the feet: yaw pitch (degrees); 1.65 m up, no body (but its shadow)
+        } else if (a == "--fp") { // yaw pitch: first person 1.65 m up, no body
             need(i, 2);
             firstPerson = true;
             fpBody      = false;
@@ -1830,45 +1808,44 @@ int main(int argc, char** argv) {
             camYaw      = atof(argv[i + 1]);
             camPitch    = atof(argv[i + 2]);
             i += 2;
-        } else if (a == "--fpbody") { // first person with the body: yaw pitch (degrees); the camera in the avatar's eyes, its hands in view
+        } else if (a == "--fpbody") { // yaw pitch: first person from the avatar's eyes
             need(i, 2);
             fpBody = firstPerson = true;
             eyeSet               = false;
             camYaw               = atof(argv[i + 1]);
             camPitch             = atof(argv[i + 2]);
             i += 2;
-        } else if (a == "--fpturn") { // yaw pitch, degrees a second: the first person camera turning (the mouse), each frame
+        } else if (a == "--fpturn") { // yaw pitch: camera turn, degrees a second
             need(i, 2);
             fpTurnYaw   = atof(argv[i + 1]);
             fpTurnPitch = atof(argv[i + 2]);
             i += 2;
-        } else if (a == "--fpfollow") { // 1|0: the body turns as in the plugin's first person (else as --turn has it)
+        } else if (a == "--fpfollow") { // 1|0: body turns as in first person, else --turn
             need(i, 1);
             fpFollow = atoi(argv[++i]) != 0;
-        } else if (a == "--fpoff") { // the body's first person off (the hands the animation's again), its camera gone too
+        } else if (a == "--fpoff") { // first person body and camera off
             fpBody = false;
             mo.fp  = {};
-        } else if (a == "--fphands") { // ready|touch|type|hold|down: what the hands do in first person
+        } else if (a == "--fphands") { // ready|touch|type|hold|down: first person hands
             need(i, 1);
             const std::string v = argv[++i];
             mo.fp.hands         = v == "touch" ? FPH_TOUCH : v == "type" ? FPH_TYPE : v == "hold" ? FPH_HOLD : v == "down" ? FPH_DOWN : FPH_READY;
-        } else if (a == "--fproom") { // meters: how far ahead of the eye there's room for the hands (a wall)
+        } else if (a == "--fproom") { // meters of room ahead of the eye (a wall)
             need(i, 1);
             mo.fp.room = atof(argv[++i]);
-        } else if (a == "--fppress") { // a button goes down (touching: the finger pokes), the next frame
+        } else if (a == "--fppress") { // a button press next frame (the finger pokes)
             mo.fp.press = true;
-        } else if (a == "--fptap") { // left|right: a key goes down for that hand (typing), the next frame
+        } else if (a == "--fptap") { // left|right: a key press next frame (typing)
             need(i, 1);
             mo.fp.tap = std::string(argv[++i]) == "left" ? 0 : 1;
-        } else if (a == "--attack") { // left|right|next: an attack (the plugin's left click on nothing): that arm swung, or whichever's next
+        } else if (a == "--attack") { // left|right|next: swing that arm, or the next one
             need(i, 1);
             const std::string v = argv[++i];
             fprintf(stderr, "attack %s: %s\n", v.c_str(), model && anim.attack(v == "left" ? 0 : v == "right" ? 1 : -1) ? "ok" : "none");
-        } else if (a == "--attackstatus") { // the attacks' swings, as the plugin's avatar status has them
+        } else if (a == "--attackstatus") { // prints the attack status
             if (model)
                 fprintf(stderr, "attack: %s\n", anim.attackStatus().c_str());
-        } else if (a == "--wrists") { // where each wrist is from the feet, in the avatar's own frame (x right, y up, -z ahead); first
-                                      // person's arms; then where the shoulders (the upper arms' joints) are, the same way
+        } else if (a == "--wrists") { // wrists and shoulders from the feet (x right, y up, -z ahead)
             if (!model)
                 continue;
             auto at = [&](std::initializer_list<int> bones) {
@@ -1881,7 +1858,7 @@ int main(int argc, char** argv) {
                 return line;
             };
             fprintf(stderr, "wrists:%s arms %.3f shoulders%s\n", at({HB_L_HAND, HB_R_HAND}).c_str(), anim.firstPersonArms(), at({HB_L_UPPER_ARM, HB_R_UPPER_ARM}).c_str());
-        } else if (a == "--fpstatus") { // first person: the camera, how much is in, and where each hand is on the screen
+        } else if (a == "--fpstatus") { // first person camera, weights, hands on screen
             if (!model)
                 continue;
             const auto  e     = anim.eyes();
@@ -1897,7 +1874,7 @@ int main(int argc, char** argv) {
                     const V3    p = drawn.point(model->fix.point(V3{anim.globals()[n].m[12], anim.globals()[n].m[13], anim.globals()[n].m[14]}));
                     const float c[4] = {vp.m[0] * p.x + vp.m[4] * p.y + vp.m[8] * p.z + vp.m[12], vp.m[1] * p.x + vp.m[5] * p.y + vp.m[9] * p.z + vp.m[13], 0,
                                         vp.m[3] * p.x + vp.m[7] * p.y + vp.m[11] * p.z + vp.m[15]};
-                    // (the screen from its top left, 0..1 across and down; behind the eye: nan)
+                    // screen position from the top left, 0..1 across and down; nan behind the eye
                     const float sx = c[3] > 0 ? 0.5f + 0.5f * c[0] / c[3] : NAN, sy = c[3] > 0 ? 0.5f - 0.5f * c[1] / c[3] : NAN;
                     hands += std::format(" {}{} {:.3f} {:.3f} ({:.2f} m)", s ? "right" : "left", b == HB_L_HAND ? "wrist" : "elbow", sx, sy, length(p - eye));
                 }
@@ -1906,7 +1883,7 @@ int main(int argc, char** argv) {
                     anim.firstPersonArms(), eye.x, eye.y, eye.z,
                     eye.y - feet.y, e ? std::format("{:.3f} {:.3f} {:.3f}", drawn.point(*e).x, drawn.point(*e).y, drawn.point(*e).z).c_str() : "none", camYaw, camPitch,
                     bodyYaw * DEG, hands.c_str());
-        } else if (a == "--eye") { // first person from a point: x y z yaw pitch
+        } else if (a == "--eye") { // x y z yaw pitch: first person from a point
             need(i, 5);
             firstPerson = true;
             eyeSet      = true;
@@ -1914,20 +1891,20 @@ int main(int argc, char** argv) {
             camYaw      = atof(argv[i + 4]);
             camPitch    = atof(argv[i + 5]);
             i += 5;
-        } else if (a == "--spawn") { // first person at the map's start, looking where it looks
+        } else if (a == "--spawn") { // first person at the map's spawn and its yaw
             firstPerson = true;
             eyeSet      = false;
             feet        = world.spawn;
             camYaw      = world.spawnYaw * DEG;
             camPitch    = 0;
-        } else if (a == "--desk") { // first person from the start, looking at the middle of the desktop
+        } else if (a == "--desk") { // first person at the spawn, facing the desktop
             firstPerson = true;
             eyeSet      = false;
             feet        = world.spawn;
             const V3 to = world.desktop.center - (feet + V3{0, 1.65f, 0});
             camYaw      = std::atan2(to.x, -to.z) * DEG;
             camPitch    = std::atan2(to.y, std::sqrt(to.x * to.x + to.z * to.z)) * DEG;
-        } else if (a == "--stand") { // first person on the floor under x y z: yaw pitch
+        } else if (a == "--stand") { // x y z yaw pitch: first person on the floor below
             need(i, 5);
             const V3 at{(float)atof(argv[i + 1]), (float)atof(argv[i + 2]), (float)atof(argv[i + 3])};
             std::vector<SRayHit> hits;
@@ -1944,7 +1921,7 @@ int main(int argc, char** argv) {
             camPitch    = atof(argv[i + 5]);
             i += 5;
             fprintf(stderr, "standing at %.2f %.2f %.2f\n", feet.x, feet.y, feet.z);
-        } else if (a == "--probe") { // a ray from the first person eye: yaw pitch; prints where it hits
+        } else if (a == "--probe") { // yaw pitch: prints where a ray from the eye hits
             need(i, 2);
             const V3 eye = eyeSet ? eyeAt : feet + V3{0, 1.65f, 0};
             const V3 d   = forwardFrom(rad(atof(argv[i + 1])), rad(atof(argv[i + 2])));
@@ -1955,7 +1932,7 @@ int main(int argc, char** argv) {
             } else
                 fprintf(stderr, "probe %s %s: nothing\n", argv[i + 1], argv[i + 2]);
             i += 2;
-        } else if (a == "--scanwalls") { // step ymin ymax: every flat wall a 2.4 m desktop fits on, seen from 3-8 m
+        } else if (a == "--scanwalls") { // step ymin ymax: flat walls a 2.4 m desktop fits on
             need(i, 3);
             const float step = atof(argv[i + 1]), ymin = atof(argv[i + 2]), ymax = atof(argv[i + 3]);
             i += 3;
@@ -2035,7 +2012,7 @@ int main(int argc, char** argv) {
             fprintf(stderr, "%zu candidate walls\n", cands.size());
         } else if (a == "--third") {
             firstPerson = false;
-        } else if (a == "--hide") { // name: stop drawing the map's materials whose name has it (debugging)
+        } else if (a == "--hide") { // name: hide map materials whose name contains it
             need(i, 1);
             const std::string what = argv[++i];
             int               n    = 0;
@@ -2046,7 +2023,7 @@ int main(int argc, char** argv) {
                         ++n;
                     }
             fprintf(stderr, "hid %d batches of %s\n", n, what.c_str());
-        } else if (a == "--hide-avatar") { // name: stop drawing the avatar's materials whose name has it (to see what's behind)
+        } else if (a == "--hide-avatar") { // name: hide avatar materials whose name contains it
             need(i, 1);
             const std::string what = argv[++i];
             int               n    = 0;
@@ -2057,7 +2034,7 @@ int main(int argc, char** argv) {
                         ++n;
                     }
             fprintf(stderr, "hid %d of the avatar's batches of %s\n", n, what.c_str());
-        } else if (a == "--show") { // name: draw them again
+        } else if (a == "--show") { // name: show the map's materials again
             need(i, 1);
             const std::string what = argv[++i];
             if (world.model)
@@ -2066,7 +2043,7 @@ int main(int argc, char** argv) {
                         b.render = true;
         } else if (a == "--plain") {
             plainTextures = true;
-        } else if (a == "--no-dual") { // glass without blending's second source, as where there's none (before --map)
+        } else if (a == "--no-dual") { // glass without dual-source blending (before --map)
             renderer.dualSource = false;
         } else if (a == "--glinfo") {
             const char* ext = (const char*)glGetString(GL_EXTENSIONS);
@@ -2079,7 +2056,7 @@ int main(int argc, char** argv) {
         } else if (a == "--bench") {
             need(i, 1);
             bench = atoi(argv[++i]);
-        } else if (a == "--audio") { // file.wav [start seconds]: lip sync from it, mono or its channels mixed
+        } else if (a == "--audio") { // file.wav [start s]: lip sync input, channels mixed
             need(i, 1);
             const std::string file  = argv[++i];
             const float       start = i + 1 < argc && argv[i + 1][0] != '-' ? (float)atof(argv[++i]) : 0.f;
@@ -2125,12 +2102,12 @@ int main(int argc, char** argv) {
             lip.reset();
             fprintf(stderr, "audio %s: %.2f s at %d Hz%s\n", file.c_str(), audioRate ? (double)audio.size() / audioRate : 0.0, audioRate,
                     audio.empty() ? " (no samples: PCM 16/24/32-bit or 32-bit float WAV)" : "");
-        } else if (a == "--lipsync-gain") { // dB|auto: lip sync's gain, for what follows (the plugin's lipsync_gain)
+        } else if (a == "--lipsync-gain") { // dB|auto: lip sync gain, as lipsync_gain
             need(i, 1);
             const std::string v = argv[++i];
             lipGain             = v == "auto" ? std::nullopt : std::optional<float>((float)atof(v.c_str()));
             lip.setGain(lipGain);
-        } else if (a == "--lipsync-trace") { // the rest of --audio's file through lip sync, a line a window
+        } else if (a == "--lipsync-trace") { // rest of --audio through lip sync, a line per window
             CLipSync     tr;
             tr.setGain(lipGain);
             const size_t from = audioAt;
@@ -2146,24 +2123,25 @@ int main(int argc, char** argv) {
                     shape += std::format(" {:.2f}", w.shape[s]);
                     out += std::format(" {:.2f}", v[s]);
                 }
-                // (the marks after the consonant: the fields before it keep their places, the mouth's nine stay last)
+                // new fields go after the consonant so earlier fields keep their positions and the nine visemes stay
+                // last (scripts index them)
                 fprintf(stderr, "window %.3f s: level %.1f gain %.1f crossings %.3f periodic %.3f %s F1 %.0f F2 %.0f bands %.3f %.3f %.3f under %.1f consonant %s marks %.1f %.1f amp %.1f shape%s out%s\n",
                         (double)(k - from) / audioRate, w.level, w.gain, w.crossings, w.periodic, w.voiced ? "voiced" : "unvoiced", w.f1, w.f2, w.mid, w.high, w.low,
                         w.under, w.consonant >= 0 ? VISEME_NAMES[w.consonant] : "-", w.lo, w.hi, tr.gain(), shape.c_str(), out.c_str());
             }
-        } else if (a == "--badge") { // text [scale]: the plugin's corner badge (lip sync's "lip sync: listening"), at a monitor's scale
+        } else if (a == "--badge") { // text [scale]: the plugin's corner badge
             need(i, 1);
             badgeText = argv[++i];
             if (i + 1 < argc && argv[i + 1][0] != '-')
                 badgeScale = (float)atof(argv[++i]);
-        } else if (a == "--visemes") { // what lip sync heard last: aa ih ou ee oh, the level, the formants
+        } else if (a == "--visemes") { // prints lip sync's last visemes, level, formants
             const auto& v = lip.visemes();
             fprintf(stderr, "visemes aa %.2f ih %.2f ou %.2f ee %.2f oh %.2f pp %.2f ff %.2f ss %.2f ch %.2f, level %.1f dBFS, F1 %.0f F2 %.0f Hz, gain %.1f dB\n", v[0], v[1],
                     v[2], v[3], v[4], v[5], v[6], v[7], v[8], lip.level(), lip.f1(), lip.f2(), lip.gain());
         } else if (a == "--outlines") { // 1|0: the avatar's toon outlines
             need(i, 1);
             outlines = atoi(argv[++i]) != 0;
-        } else if (a == "--autoexp") { // 1|0: set the exposure like the plugin does, at each --out
+        } else if (a == "--autoexp") { // 1|0: plugin-style auto exposure at each --out
             need(i, 1);
             autoExp = atoi(argv[++i]) != 0;
         } else if (a == "--out") {

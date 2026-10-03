@@ -1,9 +1,7 @@
-# gamepad.py [--hold S] STEP...: a game controller made through uinput (as root, in tools/test/vm's VM), laid out as
-# the kernel's xpad driver has an Xbox 360 pad (USB 045e:028e: SDL knows its mapping), that does each step in turn,
-# 0.4 s apart: a button's name (a b x y lb rb back start guide ls rs) presses and releases it; "lx=V", "ly=V", "rx=V",
-# "ry=V" (-32768..32767), "lt=V", "rt=V" (0..255) and "dx=V", "dy=V" (the d-pad, -1..1) move an axis there and back.
-# Games read controllers themselves, from /dev/input (SDL through udev), not through the compositor. The pad stays
-# for --hold seconds more (default 1), then goes.
+# gamepad.py [--hold S] STEP...: a uinput Xbox 360 pad in xpad's layout (045e:028e, known to SDL), as root in the VM.
+# Steps, 0.4 s apart: a button (a b x y lb rb back start guide ls rs) is pressed and released; lx= ly= rx= ry=
+# (-32768..32767), lt= rt= (0..255), dx= dy= (d-pad, -1..1) move an axis there and back. The pad stays --hold s (default
+# 1)
 import fcntl
 import os
 import struct
@@ -19,7 +17,7 @@ AXES = {'lx': (0x00, -32768, 32767, 16, 128), 'ly': (0x01, -32768, 32767, 16, 12
         'rx': (0x03, -32768, 32767, 16, 128), 'ry': (0x04, -32768, 32767, 16, 128), 'rt': (0x05, 0, 255, 0, 0),
         'dx': (0x10, -1, 1, 0, 0), 'dy': (0x11, -1, 1, 0, 0)}
 UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_ABSBIT = 0x40045564, 0x40045565, 0x40045567
-UI_DEV_SETUP, UI_ABS_SETUP, UI_DEV_CREATE, UI_DEV_DESTROY = 0x405C5503, 0x401C5504, 0x5501, 0x5502  # (92 and 28 bytes)
+UI_DEV_SETUP, UI_ABS_SETUP, UI_DEV_CREATE, UI_DEV_DESTROY = 0x405C5503, 0x401C5504, 0x5501, 0x5502
 BUS_USB = 0x03
 
 
@@ -42,7 +40,7 @@ def main(args):
         os.write(fd, struct.pack('llHHi', 0, 0, kind, code, value))
         os.write(fd, struct.pack('llHHi', 0, 0, EV_SYN, SYN_REPORT, 0))
 
-    time.sleep(2.0)  # for udev, and the game, to find it
+    time.sleep(2.0)  # let udev and the game find it
     for step in args:
         name, _, value = step.partition('=')
         if name in BUTTONS:

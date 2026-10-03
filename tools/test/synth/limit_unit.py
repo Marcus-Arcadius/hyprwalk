@@ -1,11 +1,8 @@
-# limit_unit.py: tools/unity2hypr3d.py's PhysBone limits and Immobile, on booth.py's SynthChan: Angle, Hinge and Polar
-# limits come out as VRMC_springBone_limit's cone, hinge and spherical ones (radians), a limit's Rotation (Unity's Euler
-# angles) as the GLB's turn (Unity's mirrored: x the same, y and z the other way), and with it the hemisphere the back
-# hair may swing in lies behind it, off her back, tilted the 15° of its yaw; an All Motion Immobile is the spring's
-# "parentImmobile", a World one isn't.
+# limit_unit.py: tools/unity2hypr3d.py's PhysBone limits (as VRMC_springBone_limit, rotations mirrored for the GLB) and
+# Immobile (All Motion -> "parentImmobile") on booth.py's SynthChan.
 #   python3 tools/test/synth/limit_unit.py [BOOTHDIR]   (booth.py's packages; made in a temporary directory if not given)
 import sys, os, json, math, struct, shutil, subprocess, tempfile
-sys.dont_write_bytecode = True  # (no __pycache__ left in tools/)
+sys.dont_write_bytecode = True  # no __pycache__ in tools/
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.join(HERE, '..', '..')
 
@@ -19,7 +16,7 @@ def check(what, got, want, tol=None):
         FAILS.append(what)
 
 
-def qmul(a, b):  # (w, x, y, z)
+def qmul(a, b):  # w, x, y, z
     w1, x1, y1, z1 = a
     w2, x2, y2, z2 = b
     return (w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2, w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
@@ -63,8 +60,8 @@ got = hb.get('rotation', [0, 0, 0, 1])
 for k, c in enumerate('xyzw'):
     check('the back hair limit\'s rotation, %s (Unity\'s Euler 90, 15, 0 mirrored)' % c, got[k], want[k], 1e-4)
 
-# where its hemisphere is, in the GLB's world (VRMC_springBone_limit: the node's frame, turned the shortest way from y
-# to its child, then by the rotation): behind it, off her back, and out to a side by sin 15°
+# the hemisphere's axis in GLB world space: VRMC_springBone_limit's frame is the node's, turned the shortest way from y
+# to its child, then by the rotation
 nodes = js['nodes']
 parent = {c: i for i, n in enumerate(nodes) for c in n.get('children', [])}
 index = {n.get('name'): i for i, n in enumerate(nodes)}

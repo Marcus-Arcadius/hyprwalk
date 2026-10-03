@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
-# lipsync_check.sh: lip sync (src/lipsync.cpp) on sung vowels that tools/test/synth/vowels.py makes: a man's and a
-# woman's a, i, u, e, o must each open the mouth with their own viseme the most (aa, ih, ou, ee, oh), and silence,
-# hiss and hiss that follows a vowel must leave it shut; the consonants between two a's (s, sh, f, m) must each show
-# their own (ss, ch, ff, pp) and no other. Through the harness, as the plugin feeds it the microphone.
-# Then all of it as quieter microphones give it (tools/test/synth/attenuate.py: --levels dB down, after a second of
-# silence, as lip sync hears the room before you speak): the automatic gain must open each vowel as wide as it opens
-# at its own level (0.05 less at most), and silence, hiss and the hiss after a vowel stay shut. And a whisper, 40 dB
-# down: right after a normal voice it stays shut (the gain goes by the voice of the last 15 s); on its own, or 16 s
-# after the normal voice, it opens once the gain has heard it (a syllable's worth).
+# lipsync_check.sh: lip sync (src/lipsync.cpp) through the harness on tools/test/synth/vowels.py's sung vowels and
+# consonants, also --levels dB quieter (the automatic gain must open each vowel within 0.05 of its own level) and
+# whispered (shut right after a normal voice, since the gain follows the last 15 s).
+#
 #   tools/test/harness/lipsync_check.sh AVATAR.glb [WORKDIR] [--real DIR [PERCENT]] [--levels "0 20 30 40"]
-# Any avatar will do (it needs no mouth for the numbers). Needs build/test/shot (tools/test/harness/build.sh).
-# --real DIR: recordings of real voices too, WAVs named for their vowel (a_*.wav ... o_*.wav; kept out of the repo:
-# see the README). For each, how often its viseme is the mouth's biggest (after the first 0.3 s), how open it is on
-# average, and how much of it lip sync heard as voiced; at least PERCENT (85) of the files must lead with their own,
-# at their own level and at each of --levels, where each must open as wide as at its own level (0.05 less at most).
+#
+#   AVATAR.glb      any avatar (the numbers need no mouth)
+#   --real DIR      also real voices, WAVs named a_*.wav ... o_*.wav (extras/speech/in has some): at least
+#                   PERCENT (85) must lead with their own viseme, at their own level and each of --levels
+#   --levels "..."  the dB levels for the quieter microphones (tools/test/synth/attenuate.py)
+#
+# Needs build/test/shot (tools/test/harness/build.sh).
 set -uo pipefail
 REAL="" REAL_MIN=85 LEVELS="0 20 30 40" ARGS=()
 while (($#)); do
@@ -34,14 +31,13 @@ mkdir -p "$W/lvl"
 FAILS=0
 ok() { echo "ok   $*"; }
 fail() { echo "FAIL $*"; FAILS=$((FAILS + 1)); }
-# the visemes after that many frames (60 a second) of a file
+# FILE [FRAMES]: the visemes after that many frames (60 a second)
 run() { "$SHOT" --size 64x64 --avatar "$AV" --audio "$1" --frames "${2:-30}" --visemes 2>&1 | grep '^visemes'; }
 # the viseme with the most: visemes aa X ih X ou X ee X oh X, ...
 best() { awk '{m = -1; for (i = 2; i <= 10; i += 2) { x = $(i + 1) + 0; if (x > m) { m = x; n = $i } } print n, m}' <<< "$1"; }
 # the most of any of the nine
 most() { awk '{m = 0; for (i = 3; i <= 19; i += 2) if ($i + 0 > m) m = $i + 0; print m}' <<< "$1"; }
-# the most each consonant viseme shows along a file (the trace's last nine numbers are the mouth's visemes: aa ih ou
-# ee oh pp ff ss ch)
+# each consonant viseme's peak over a file (a trace line ends with the nine visemes aa ih ou ee oh pp ff ss ch)
 consonants() {
     "$SHOT" --size 64x64 --avatar "$AV" --audio "$1" --lipsync-trace 2>&1 | awk '
         /^window/ { for (i = 6; i <= 9; i++) { x = $(NF - 9 + i) + 0; if (x > m[i]) m[i] = x } }
@@ -63,16 +59,16 @@ for who in man woman; do
         k=$((k + 1))
     done
 done
-# and hiss after a vowel (as a microphone hears it, one after the other): the vowel's shape mustn't stay
+# hiss right after a vowel: the vowel's shape mustn't linger
 "${ATT[@]}" "$W/o_then_hiss.wav" 0 "$W/man_o.wav" "$W/hiss.wav"
-# (quiet_a with nothing before it: no pause heard, so nothing to set the gain by)
+# quiet_a has no silence before it, so the gain has nothing to set itself by
 for f in silence hiss quiet_a o_then_hiss; do
-    line="$(run "$W/$f.wav" $([[ $f == o_then_hiss ]] && echo 90))" # (0.8 s of the o, then 0.7 of hiss)
+    line="$(run "$W/$f.wav" $([[ $f == o_then_hiss ]] && echo 90))" # 0.8 s of the o, then 0.7 s of hiss
     m="$(most "$line")"
     if awk -v m="$m" 'BEGIN {exit !(m < 0.05)}'; then ok "$f: shut ($m)"; else fail "$f: open ($line)"; fi
 done
 # the consonants, a man's and a woman's
-check_consonant() { # file, what it is, the viseme it must show
+check_consonant() { # FILE LABEL VISEME: VISEME and no other
     local line got other
     line="$(consonants "$1")"
     got="$(awk -v w="$3" '{for (i = 1; i <= 8; i += 2) if ($i == w) print $(i + 1)}' <<< "$line")"
@@ -85,10 +81,10 @@ for who in man woman; do
         check_consonant "$W/${who}_$f.wav" "${who}'s a-${f:1:${#f}-2}-a" "${pair##*:}"
     done
 done
-# and on the avatar: its own s viseme (VRChat's vrc.v_ss) in place of the vowel's shape, halfway through the s
+# on the avatar: its s shape (VRChat's vrc.v_ss) over the vowel's, halfway through the s
 out="$("$SHOT" --size 64x64 --avatar "$AV" --audio "$W/man_asa.wav" --frames 38 --morphs 2>&1)"
 if grep -q "lip sync's consonants:.* ss" <<< "$out"; then
-    # (VRChat's own names are vrc.v_SS, vrc.v_aa; some avatars have them in lower case)
+    # VRChat names them vrc.v_SS and vrc.v_aa; some avatars use lower case
     ss="$(grep -io 'vrc.v_ss=[0-9.]*' <<< "$out" | cut -d= -f2)" aa="$(grep -io 'vrc.v_aa=[0-9.]*' <<< "$out" | cut -d= -f2)"
     if awk -v s="${ss:-0}" -v a="${aa:-0}" 'BEGIN {exit !(s > 0.3 && s > a)}'; then
         ok "the avatar's s shape through the s: vrc.v_ss $ss over vrc.v_aa ${aa:-0}"
@@ -110,7 +106,7 @@ for L in $LEVELS; do
     for who in man woman; do
         k=0
         for v in a i u e o; do
-            line="$(run "$W/lvl/${who}_$v@$L.wav" 90)" # (the second of silence, then 0.5 s of the vowel)
+            line="$(run "$W/lvl/${who}_$v@$L.wav" 90)" # 1 s of silence, then 0.5 s of the vowel
             b="$(best "$line")"
             if [[ "${b%% *}" == "${names[$k]}" ]] && awk -v x="${b#* }" -v o="${OPEN0[${who}_$v]}" 'BEGIN {exit !(x > 0.5 && x >= o - 0.05)}'; then
                 worst="$(awk -v x="${b#* }" -v o="${OPEN0[${who}_$v]}" -v w="$worst" 'BEGIN {print (x - o < w ? x - o : w)}')"
@@ -139,10 +135,10 @@ done
 "${ATT[@]}" "$W/lvl/whisper-alone.wav" 0 silence:1 "$W/quiet_a.wav" "$W/quiet_a.wav" &
 "${ATT[@]}" "$W/lvl/whisper-16s-later.wav" 0 silence:1 "$W/man_a.wav" silence:16 "$W/quiet_a.wav" "$W/quiet_a.wav" &
 wait
-line="$(run "$W/lvl/whisper-after-voice.wav" 168)" # (1 s, 0.8 of the a, 1 s into the whisper)
+line="$(run "$W/lvl/whisper-after-voice.wav" 168)" # 1 s of silence, 0.8 s of a, 1 s of whisper
 m="$(most "$line")"
 if awk -v m="$m" 'BEGIN {exit !(m < 0.05)}'; then ok "a whisper right after a normal voice: shut ($m)"; else fail "a whisper right after a normal voice: open ($line)"; fi
-for f in alone:120 16s-later:1128; do # (1 s into the whisper)
+for f in alone:120 16s-later:1128; do # 1 s into the whisper
     line="$(run "$W/lvl/whisper-${f%%:*}.wav" "${f##*:}")"
     b="$(best "$line")"
     if [[ "${b%% *}" == aa ]] && awk -v x="${b#* }" 'BEGIN {exit !(x > 0.5)}'; then
@@ -154,8 +150,7 @@ done
 
 # --- real voices
 if [[ -n "$REAL" ]]; then
-    measure() { # a file, the second of silence before it (0 or 1), its vowel: how often its own viseme leads after 0.3 s
-        # of it, how open it is then on average, how much of it was voiced
+    measure() { # FILE SILENCE(0|1) VOWEL: % led, mean open, % voiced
         local want
         want="$(echo aiueo | awk -v v="$3" '{print index($0, v)}')"
         # the trace's last nine numbers are the mouth's visemes (aa ih ou ee oh ...), $2 the window's time, $12 voicing

@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# cs2mat_check.sh: CS2's material details as tools/cs2map.py writes them (HYPR3D_materials_source2's tintMask, decal,
-# texture2, blendMode "add" and fog false) on cs2mats.py's panels, drawn by the harness from 4.4 m, each split down the
-# middle by its 2x1 textures (see cs2mats.py): the tint only where the tint mask is, a decal multiplied on the second uv
-# set (which runs the other way) and one mixed in by its alpha, an unlit color times its second texture, an unlit one
-# added to the wall, and out past the fog's end a red quad with its fog off that stays red beside one that doesn't; above
-# them vertex paint in the tint (only where the tint mask is; all 0 is none), unlit mod2x in linear light, and past the
-# fog unlitgeneric's added light fading out.
+# cs2mat_check.sh: CS2 material details as tools/cs2map.py writes them (HYPR3D_materials_source2's tintMask, decal,
+# texture2, blendMode "add" and fog false), drawn by the harness on cs2mats.py's panels: tint masks, decals on the
+# second uv set, unlit and additive blends, vertex paint, mod2x and fog (cs2mats.py has the layout).
+#
 #   tools/test/harness/cs2mat_check.sh [DIR]   (DIR: where the map and the frame go; a temporary one by default)
+#
 # Needs build/test/shot (tools/test/harness/build.sh).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# sound_check.sh: emotes' sounds on their own (src/sound.cpp's decoding, src/speaker.cpp's playing through PipeWire),
-# against a PipeWire of its own: no devices and no session manager (a timer drives its graph, and the links are made
-# here), so nothing is heard and the desktop's PipeWire isn't touched. It decodes test sounds (ffmpeg makes them) and
-# compares them with ffmpeg's decoding; it plays them into pw-record and compares what came, sample by sample, with
-# what should have: from where the dance would be by the time it's heard, at the volume asked, going round, fading out
-# when stopped or ending; it checks the clock the dance keeps time by, and that one that's never linked has none.
+# sound_check.sh: emote sounds (src/sound.cpp's decoding, src/speaker.cpp's PipeWire playback) against a private
+# PipeWire with no devices or session manager, so nothing is heard and the desktop's PipeWire isn't touched. Decoding
+# is compared with ffmpeg's, playback recorded by pw-record sample by sample.
+#
 #   tools/test/sound/sound_check.sh [--song FILE.ogg]... [WORKDIR]
-# A --song (a real one: the Freddy dance's) is decoded and compared with ffmpeg's and libvorbis's decodings, and played
-# looping across its end. WORKDIR (default build/test/sound_check) gets the sounds, the recordings and the logs. Needs
-# ffmpeg and ffprobe, pipewire, pw-record and pw-link, and Blender (numpy) for the comparisons. Builds
-# build/test/sound_test through the repo's build.sh. Prints a line a check; exits 1 when one fails.
+#
+#   --song FILE.ogg  a real song: compared with ffmpeg's and libvorbis's decodings, and played looping across its end
+#   WORKDIR          the sounds, recordings and logs (default build/test/sound_check)
+#
+# Needs ffmpeg, ffprobe, pipewire, pw-record, pw-link and Blender (numpy); builds build/test/sound_test with build.sh.
+# Prints a line per check; exits 1 when one fails.
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 HERE="$REPO/tools/test/sound"
@@ -31,8 +31,7 @@ done
 "$REPO/build.sh" -f tools/test/sound/sound.mk > "$WORK/build.log" 2>&1 || { tail -n 30 "$WORK/build.log"; exit 1; }
 T="$REPO/build/test/sound_test"
 
-# the test sounds: two chirps (stereo, a channel each: they can't be mistaken for each other or for themselves further
-# on), a mono one, one at 44.1 kHz (PipeWire resamples it), and ones that can't be played
+# test sounds: a chirp per stereo channel (no stretch matches another), mono, 44.1 kHz (resampled), unplayable ones
 S="$WORK/sounds"
 mkdir -p "$S"
 chirps='0.5*sin(2*PI*(200*t+450*t*t))|0.4*sin(2*PI*(300*t+200*t*t))'
@@ -49,17 +48,16 @@ FAILS=0
 ok() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; FAILS=$((FAILS + 1)); }
 
-# decoding: what it says of each, and the samples for the comparisons: as long as the file says (its last granule
-# position, as ffprobe gives it; ffmpeg's own decoding can leave a block off the end), the same samples as ffmpeg's
+# decoding: must match ffmpeg's samples for the declared length (last granule position; ffmpeg may drop the last block)
 CASES="$WORK/cases.jsonl"
 : > "$CASES"
-decode() { # name, file: its decoding in $WORK/NAME.s16, "rate R channels C frames N" or "error: ..." printed
+decode() { # NAME FILE: decode to $WORK/NAME.s16, print the result
     "$T" decode "$2" "$WORK/$1.s16" 2>&1
 }
 declared() { # the frames a file says it has
     ffprobe -v error -select_streams a:0 -show_entries stream=duration_ts -of csv=p=0 "$1"
 }
-compare() { # name, decoded name, file, what it said, the references (decoders: ffmpeg, libvorbis)
+compare() { # NAME DECODED FILE SAID REF... (ffmpeg, libvorbis)
     local name="$1" d="$2" file="$3" said="$4" frames ref
     frames="$(declared "$file")"
     shift 4
@@ -91,7 +89,7 @@ for song in "${SONGS[@]}"; do
     compare "$(basename "$song")" "song$k" "$song" "$r" ffmpeg libvorbis
 done
 
-# a PipeWire of its own, its socket in a short folder (a socket's path can't be long)
+# a private PipeWire; its socket in a short dir (socket paths are limited)
 RUN="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/h3d-sound.XXXXXX")"
 DAEMON=""
 cleanup() {
@@ -104,7 +102,7 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM
-# (its clients too: PIPEWIRE_CONFIG_DIR has their client.conf, by which their streams set up their own ports)
+# clients read PIPEWIRE_CONFIG_DIR's client.conf, so their streams set up their own ports
 export PIPEWIRE_RUNTIME_DIR="$RUN" PIPEWIRE_REMOTE=h3d-sound-test PIPEWIRE_CONFIG_DIR="$HERE/pipewire"
 pipewire -c pipewire.conf > "$WORK/pipewire.log" 2>&1 &
 DAEMON=$!
@@ -114,7 +112,7 @@ for _ in $(seq 50); do
 done
 [[ -S "$RUN/h3d-sound-test" ]] || { cat "$WORK/pipewire.log"; echo "sound_check.sh: its PipeWire didn't start" >&2; exit 1; }
 
-port() { # direction (-o/-i), name: there within 5 s
+port() { # -o|-i NAME: wait up to 5 s for the port
     for _ in $(seq 100); do
         timeout 2 pw-link "$1" 2> /dev/null | grep -qx "$2" && return 0
         sleep 0.05
@@ -122,8 +120,8 @@ port() { # direction (-o/-i), name: there within 5 s
     return 1
 }
 
-# play NAME SOUND DECODED CHANNELS KIND [sound_test's options]: into pw-record (unless KIND is "unlinked"), linked by
-# hand once both are there; KIND says what the comparison checks
+# play NAME SOUND DECODED CHANNELS KIND [sound_test options]: into pw-record (unless KIND is "unlinked"), linked by hand
+# once both are there; KIND picks the comparison
 play() {
     local name="$1" file="$2" decoded="$3" ch="$4" kind="$5"
     shift 5
@@ -136,7 +134,7 @@ play() {
     "$T" play "$file" --log "$log" "$@" > "$out" 2>&1 &
     local st=$!
     if [[ -n "$pr" ]]; then
-        # (all at once, by the nodes' names: one channel linked before the other would start alone)
+        # link all ports at once by node name: a channel linked first would start alone
         local there=1
         for p in "${ports[@]}"; do
             port -o "hypr3d-emote-sound:output_$p" && port -i "h3d-rec:input_$p" || { there=0; fail "$name: no ports to link ($p)"; }
@@ -174,7 +172,7 @@ play unlinked "$S/chirp.ogg" "$WORK/chirp.s16" 2 unlinked --for 1 --wait 1.5
 k=0
 for song in "${SONGS[@]}"; do
     k=$((k + 1))
-    # (across its end, round to its start)
+    # loop across its end
     len="$(python3 -c 'import os, sys; print(os.path.getsize(sys.argv[1]) / 4 / 48000)' "$WORK/song$k.s16")"
     play "song$k" "$song" "$WORK/song$k.s16" 2 exact --loop --from "$(python3 -c "print(max(0, $len - 1.5))")" --for 3
 done

@@ -1,50 +1,33 @@
 #!/usr/bin/env bash
-# check.sh OUTDIR [--mic] [--avatar FILE] [--map FILE|--no-map] [--app CMD]... [--so FILE]: hypr3d.so in the Hyprland
-# you're running now, on your own GPU and monitor: what tools/test/vm can't reach. You run it; it goes through what
-# hyprctl can do, and asks you to do what only you can. Each run goes into a folder of its own, OUTDIR/run-1,
-# OUTDIR/run-2 ... (OUTDIR/latest is the last one).
+# check.sh: hypr3d.so in the Hyprland you're running, on your own GPU and monitor (what tools/test/vm can't reach).
+# It does what hyprctl can and asks you to do the rest. Each run gets its own OUTDIR/run-N (OUTDIR/latest).
+#
+#   tools/test/live/check.sh OUTDIR [--mic] [--avatar FILE] [--map FILE|--no-map] [--app CMD]... [--so FILE]
+#                            [--monitor NAME]
 #
 #   tools/test/live/check.sh ~/hypr3d-live                  # 3D, an avatar, the menu, a notification, a map
 #   tools/test/live/check.sh ~/hypr3d-live --mic            # and lip sync on your voice
-#   tools/test/live/check.sh ~/hypr3d-live --avatar ~/avatars/me.glb
 #   tools/test/live/check.sh ~/hypr3d-live --no-map --app discord --app "steam steam://rungameid/APPID"
 #
-#   --mic          lip sync on your microphone: hold each sound the notifications ask for (ah, ee, oo, eh, oh: the
-#                  Japanese vowels a, i, u, e, o lip sync knows; then "sss", then nothing) until the notification
-#                  goes; the run's lipsync.jsonl gets what it heard, frames/ the avatar's mouth at the loudest of
-#                  each, and audio/ what PipeWire says about your microphone (wpctl status and inspect, pw-dump: no
-#                  sound).
-#                  (CHECK_SAY=CMD runs CMD a, CMD i ... CMD s, CMD quiet as each prompt shows: tools/test/vm sings
-#                  them into its test microphone)
-#   --avatar FILE  the avatar to load (default: assets.py's ToonTest.glb, made in OUTDIR; your own tells more)
-#   --map FILE     a map to walk into (default: ~/.local/share/hypr3d/maps/de_mirage.glb, if it's there)
+#   --mic          lip sync on your microphone: hold each sound a notification asks for (ah, ee, oo, eh, oh, sss,
+#                  silence) until it goes; results in lipsync.jsonl, PipeWire's view of the microphone in audio/
+#   --avatar FILE  the avatar to load (default: assets.py's ToonTest.glb, made in OUTDIR)
+#   --map FILE     a map to walk into (default: ~/.local/share/hypr3d/maps/de_mirage.glb, if there)
 #   --no-map       no map
-#   --so FILE      the plugin to load (default: the repo's hypr3d.so, as ./build.sh left it)
-#   --monitor NAME 3D on that monitor (focused first) instead of the focused one: run it from a terminal on another,
-#                  and the terminal isn't in the way of the desktop comparisons
-#   --app CMD      an app of yours (repeatable): a desktop id, an app's name or a command, launched from 3D
-#                  (hyprctl hypr3d launch). Notifications then ask you to play it (P) and stop (Super+Esc), type into
-#                  it (E), point at it (its own cursor), carry it somewhere (H, then H again where it should go), pin it
-#                  to your view (Shift+H) and take it back into your hands (Shift+H again, then H), then try what you
-#                  want in it (P, then Super+Esc when done: a call, a screen share, OBS capturing the 3D view); then
-#                  its window is closed, as its close button does (a chat app goes to its tray, a game quits). Frames of each step
-#                  go to OUTDIR/frames. A Steam game (steam steam://rungameid/ID) is the window Steam starts for it,
-#                  not Steam's own. (CHECK_DO=CMD runs CMD STEP WINDOW as each prompt shows: tools/test/vm does the
-#                  steps with hyprctl)
+#   --so FILE      the plugin to load (default: the repo's hypr3d.so from ./build.sh)
+#   --monitor NAME 3D on that monitor, not the focused one: run it from a terminal on another monitor to keep the
+#                  terminal out of the desktop comparisons
+#   --app CMD      an app to launch from 3D (repeatable): a desktop id, name or command. Notifications take you
+#                  through playing, typing, pointing, carrying, pinning and a free try; then its window is closed.
+#                  A Steam game (steam steam://rungameid/ID) is the game's window, not Steam's
+#   CHECK_SAY=CMD  runs CMD a|i|u|e|o|s|quiet at each lip sync prompt (tools/test/vm sings into its test microphone)
+#   CHECK_DO=CMD   runs CMD STEP WINDOW at each --app prompt (tools/test/vm does the steps with hyprctl)
 #
-# On the focused monitor it loads the plugin and compares the desktop before and after, enters 3D, loads the avatar
-# and looks at it, opens the Action Menu and plays an emote, shows a notification over the 3D view, looks out of the
-# avatar's eyes (first person: its hands up in the view), picks up the
-# window the crosshair starts on (or the nearest to it: hyprctl hypr3d aim) and puts it back, walks into the map,
-# leaves 3D and unloads the plugin. The desktop's frames are compared leaving out what changes on its own (what
-# differs between two frames a second apart: a clock, an animated wallpaper) and the terminal this runs in.
-# Frames go to the run's frames/ (grim; diff-A-B.png shows in red what changed between two, in blue what was left
-# out), hyprctl's answers to status/, the plugin's own log (hyprctl hypr3d log) to hypr3d.log, and a line per check
-# to results.txt.
+# The desktop must look the same after 3D and after unloading, leaving out the terminal and what changes within a
+# second. Output: frames/ (diff-A-B.png: red changed, blue left out), status/, hypr3d.log, results.txt.
 #
-# Don't touch the mouse or keyboard while it runs: in 3D they're the plugin's. Esc leaves 3D at any time, and then
-# Ctrl+C here stops it. Whatever happens, it leaves 3D, turns lip sync off and unloads the plugin. It won't start
-# while hypr3d is loaded already.
+# Don't touch the mouse or keyboard while it runs; Esc leaves 3D, then Ctrl+C stops it. It always cleans up (3D and
+# lip sync off, plugin unloaded).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 UTIL=(python3 "$REPO/tools/test/live/util.py")
@@ -73,7 +56,7 @@ hyprctl version > /dev/null 2>&1 || die "hyprctl doesn't answer"
 hyprctl plugin list 2>/dev/null | grep -q hypr3d && die "hypr3d is loaded already: unload it first (hyprctl plugin unload PATH)"
 [[ -z "$MAP" && $NOMAP -eq 0 && -f "$HOME/.local/share/hypr3d/maps/de_mirage.glb" ]] && MAP="$HOME/.local/share/hypr3d/maps/de_mirage.glb"
 ((NOMAP)) && MAP=""
-# a folder of this run's own: run-1, run-2 ... (a run never writes over another's)
+# each run gets a new run-N folder
 mkdir -p "$BASE" || die "can't make $BASE"
 BASE="$(realpath "$BASE")"
 RUN=1
@@ -91,14 +74,14 @@ HYPRLOG="${XDG_RUNTIME_DIR:-/run/user/$UID}/hypr/$HYPRLAND_INSTANCE_SIGNATURE/hy
 
 PASS=0 FAIL=0 N=0 LOADED=0 START=$(date +%s)
 log() { echo "$*" | tee -a "$OUT/results.txt"; }
-check() { # what, an exit status (0 = it passed), what was seen
+check() { # WHAT STATUS [SEEN]; status 0 = passed
     if (($2 == 0)); then PASS=$((PASS + 1)); log "ok    $1${3:+  [$3]}"; else FAIL=$((FAIL + 1)); log "FAIL  $1${3:+  [$3]}"; fi
 }
 note() { log "      $1${2:+  [$2]}"; }
 ctl() { hyprctl hypr3d "$@" 2>&1; }
-js() { "${UTIL[@]}" json "$1"; }                               # a value out of the JSON on stdin
-is() { python3 -c "import sys; sys.exit(0 if ($1) else 1)"; } # a comparison of numbers
-wait_for() { # seconds, a command: till it succeeds
+js() { "${UTIL[@]}" json "$1"; }                               # value at a dotted path in the JSON on stdin
+is() { python3 -c "import sys; sys.exit(0 if ($1) else 1)"; } # numeric test, as a Python expression
+wait_for() { # SECONDS CMD...: retry CMD until it succeeds
     local end=$((SECONDS + $1))
     shift
     while ((SECONDS < end)); do "$@" && return 0; sleep 0.25; done
@@ -109,12 +92,12 @@ avatar_loaded() { [[ "$(ctl avatar | js loading)" == false && "$(ctl avatar | js
 map_is() { [[ "$(ctl map | js loading)" == false && "$(ctl map | js map)" == "$1" ]]; }
 placed_is() { [[ "$(ctl status | js placed)" == "$1" ]]; }
 listening() { [[ "$(ctl avatar lipsync | js listening)" == true ]]; }
-face_avatar() { # distance, pitch: third person, looking at its face
+face_avatar() { # DISTANCE PITCH: third person, facing the avatar
     ctl view third "$1" > /dev/null
     ctl turn "$(python3 -c "print($(ctl avatar | js bodyYaw) + 180)")" "$2" > /dev/null
 }
 
-# the focused monitor, where 3D goes, and the frames come from (--monitor: that one, focused first)
+# 3D and the frames use the focused monitor (--monitor focuses that one first)
 if [[ -n "$MONITOR" ]]; then
     hyprctl -j monitors | python3 -c 'import json, sys; sys.exit(0 if any(m["name"] == sys.argv[1] for m in json.load(sys.stdin)) else 1)' "$MONITOR" ||
         die "no monitor $MONITOR (hyprctl monitors lists them)"
@@ -124,12 +107,11 @@ fi
 read -r MON MON_W MON_H MON_HZ MON_SCALE MON_X MON_Y MON_ID <<< "$(hyprctl -j monitors | python3 -c 'import json, sys
 m = next(m for m in json.load(sys.stdin) if m["focused"])
 print(m["name"], m["width"], m["height"], m["refreshRate"], m["scale"], m["x"], m["y"], m["id"])')"
-shot() { # name: a frame, as frames/NN-name.png (and raw/name.ppm to compare)
+shot() { # NAME: frames/NN-NAME.png, raw/NAME.ppm to compare
     N=$((N + 1))
     grim -o "$MON" -t ppm "$OUT/raw/$1.ppm" && "${UTIL[@]}" png "$OUT/raw/$1.ppm" "$OUT/frames/$(printf %02d $N)-$1.png"
 }
-# the desktop as it is, twice a second apart: what differs between the two changes on its own (a clock, an animated
-# wallpaper), and comparisons leave it out
+# two shots a second apart: what differs between them changes on its own (a clock) and comparisons skip it
 desktop_shot() {
     shot "$1"
     sleep 1
@@ -137,7 +119,7 @@ desktop_shot() {
     SAME+=(--same "$OUT/raw/$1.ppm" "$OUT/raw/$1-2.ppm")
 }
 SAME=()
-# the terminal this runs in (its output scrolls): the window of a process this one comes from, in the frame's pixels
+# box of the terminal this runs in (an ancestor process's window), in frame pixels: its scrolling output is left out
 TERM_BOX="$(hyprctl -j clients | python3 -c 'import json, sys
 pid, mon, mx, my, scale = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5])
 up = set()
@@ -167,7 +149,7 @@ cleanup() {
         ctl avatar lipsync off > /dev/null
         ctl off now > /dev/null
         sleep 0.5
-        ctl log > "$OUT/hypr3d.log" # (the plugin's own lines: Hyprland writes its log only with its debug logs on)
+        ctl log > "$OUT/hypr3d.log" # the plugin's own log; Hyprland's needs debug logs
         local r
         r="$(hyprctl plugin unload "$SO" 2>&1)"
         if [[ "$r" == ok ]]; then note "unloaded the plugin"; else FAIL=$((FAIL + 1)); log "FAIL  unloading the plugin  [$r]"; fi
@@ -259,7 +241,7 @@ o="$("${UTIL[@]}" count "$OUT/raw/notification.ppm" orange 0.5 0 1 0.25)"
 check "Hyprland draws its notification over the 3D view" $? "$o orange pixels in the top right"
 hyprctl dismissnotify > /dev/null 2>&1
 
-# --- first person from the avatar's eyes (first_person_body): its hands up low in the view, as a first person game's
+# --- first person (first_person_body): the hands up low in the view
 ctl view first > /dev/null
 ctl spawn > /dev/null
 sleep 1.5
@@ -273,12 +255,12 @@ else
     note "first person from the avatar's eyes: not with this avatar (it isn't a humanoid with a head and arms), or first_person_body is off" "$(js view <<< "$a")"
 fi
 
-# --- carrying the window the crosshair starts on, if there's one
+# --- carrying the window under the crosshair, if any
 ctl view first > /dev/null
 ctl spawn > /dev/null
 sleep 1
 kind="$(ctl status | js aimed.kind)"
-if [[ "$kind" != window ]]; then # (on the wallpaper between windows, say): the nearest window, then
+if [[ "$kind" != window ]]; then # else aim at the nearest window
     r="$(ctl aim)"
     sleep 0.8
     note "the crosshair started on ${kind/null/nothing}: turned to the window nearest to it" "$r; now on $(ctl status | js aimed.kind)"
@@ -304,32 +286,33 @@ else
     note "no window to aim at: carrying one skipped" "$kind"
 fi
 
-# --- your apps: launched from 3D, played, typed into, pointed at, pinned to the view
+# --- your apps (--app)
 playing() { [[ "$(ctl status | js playing)" != null ]]; }
 walking() { [[ "$(ctl status | js playing)" == null && "$(ctl status | js typing)" == false ]]; }
 typing() { [[ "$(ctl status | js typing)" == true && "$(ctl status | js playing)" == null ]]; }
 cursor_on() { [[ "$(ctl status | js cursor)" != null ]]; }
 pinned() { ctl windows | python3 -c 'import json, sys; sys.exit(0 if any(p["address"] == sys.argv[1] and p["pinned"] for p in json.load(sys.stdin)["placed"]) else 1)' "$1"; }
 held() { ctl windows | python3 -c 'import json, sys; sys.exit(0 if any(p["address"] == sys.argv[1] and p["held"] for p in json.load(sys.stdin)["placed"]) else 1)' "$1"; }
-put_down() { # out in the world, not carried, not pinned, and no other window pinned either
+put_down() { # placed, not held, and nothing pinned
     ctl windows | python3 -c 'import json, sys
 placed = json.load(sys.stdin)["placed"]
 sys.exit(0 if any(p["address"] == sys.argv[1] and not p["held"] for p in placed) and not any(p["pinned"] for p in placed) else 1)' "$1"
 }
-where() { # a placed window: how far off, how big it looks (1 = as on the 2D desktop), carried or pinned
+where() { # distance, apparent size (1 = as in 2D), held, pinned
     ctl windows | python3 -c 'import json, sys
 print("; ".join("{class}: {distance:.2f} m, looks {apparent:.2f}, held {held}, pinned {pinned}".format(**p) for p in json.load(sys.stdin)["placed"] if p["address"] == sys.argv[1]))' "$1"
 }
-ask() { # what to do, the step, seconds for it: shown over the 3D view as long as it's waited for
+ask() { # MSG STEP SECONDS: notify that long, run CHECK_DO
     say "$1" "$(($3 * 1000))"
-    [[ -n "${CHECK_DO:-}" ]] && $CHECK_DO "$2" "$ADDR" > /dev/null 2>&1 & # (tools/test/vm does it with hyprctl)
+    [[ -n "${CHECK_DO:-}" ]] && $CHECK_DO "$2" "$ADDR" > /dev/null 2>&1 & # tools/test/vm does the step with hyprctl
 }
 for app in "${APPS[@]}"; do
     ctl view first > /dev/null
     before="$(hyprctl -j clients | python3 -c 'import json, sys; print(" ".join(c["address"] for c in json.load(sys.stdin)))')"
     r="$(ctl launch "$app")"
-    newwin() { # the window that opened for it: its address and class. One hypr3d placed as launched from 3D, else
-        # the first new one (a Steam game's: not Steam's own windows, which open first when Steam wasn't running)
+    newwin() {
+        # address and class of the app's new window: the one hypr3d placed as launched from 3D, else the first new one;
+        # not Steam's own windows, which open first when Steam wasn't running
         hyprctl -j clients | python3 -c 'import json, subprocess, sys
 old, steam = set(sys.argv[1].split()), "steam://rungameid/" in sys.argv[2]
 placed = {p["address"] for p in json.loads(subprocess.run(["hyprctl", "hypr3d", "windows"], capture_output=True, text=True).stdout or "{}").get("placed", [])}
@@ -344,7 +327,7 @@ print(*(new[0]["address"], new[0]["class"]) if new else "")' "$before" "$app"
     read -r ADDR CLS <<< "$(newwin)"
     [[ -z "$ADDR" ]] && continue
     sleep 3
-    # (one it doesn't know was launched from 3D, a game Steam starts, opens on the wall: it's brought here)
+    # a window not known as launched from 3D (a game Steam starts) opens on the wall: bring it here
     if ! ctl windows | grep -q "\"address\": \"$ADDR\""; then
         note "$CLS opened on the wall (not known as launched from 3D): brought in front of you"
         ctl window "$ADDR" bring > /dev/null
@@ -391,7 +374,6 @@ print(*(new[0]["address"], new[0]["class"]) if new else "")' "$before" "$app"
     shot "app-$CLS-put-down-again"
     pinned "$ADDR" && ctl window "$ADDR" unpin > /dev/null
     [[ "$(ctl status | js holding)" == true ]] && ctl place > /dev/null
-    # what only you can judge: a call, a screen share, OBS capturing the 3D view, a controller
     ask "now try what matters to you in $CLS (a call, a screen share, OBS capturing this view, a controller): P to play it, Super+Esc when you're done (5 minutes at most)" free 30
     if wait_for 60 playing; then
         sleep 5
@@ -439,10 +421,10 @@ if ((MIC)); then
     r="$(ctl avatar lipsync on)"
     wait_for 5 listening
     check "lip sync on: listening" $? "$(ctl avatar lipsync | js text)"
-    face_avatar 1.0 -3 # (close: the mouth, in frames of each sound below)
-    sleep 2.5 # (what's wrong with the microphone, if anything, shows after 2 s)
+    face_avatar 1.0 -3 # close up on the mouth for the frames below
+    sleep 2.5 # microphone problems show after 2 s
     ctl avatar lipsync > "$OUT/status/lipsync.json"
-    # what PipeWire says about the microphone: which it is, what lip sync's stream is linked to, muted or not (no sound)
+    # PipeWire's view of the microphone: which one, what lip sync's stream is linked to, muted (records no sound)
     mkdir -p "$OUT/audio"
     wpctl status > "$OUT/audio/wpctl-status.txt" 2>&1
     wpctl inspect @DEFAULT_AUDIO_SOURCE@ > "$OUT/audio/wpctl-inspect-default-source.txt" 2>&1
@@ -469,9 +451,9 @@ print(f"what came|{ls.get('samples')} samples in {ls.get('buffers')} buffers ({l
 print(f"the sources there are|{'; '.join(s['description'] + ' (' + s['name'] + ')' for s in ls.get('sources', []))}")
 EOF
 )
-    calm # (no notifications: the badge doesn't move between the frame and asking where it is)
+    calm # no notifications, so the badge stays put
     shot lipsync-badge
-    # (where it's drawn: under Hyprland's notifications, however many there are)
+    # the badge sits below Hyprland's notifications, however many there are
     box="$(ctl avatar lipsync | python3 -c 'import json, subprocess, sys
 b = json.load(sys.stdin)["badge"] or [0, 0, 0, 0]
 m = next(m for m in json.loads(subprocess.run(["hyprctl", "-j", "monitors"], capture_output=True, text=True).stdout) if m["focused"])
@@ -480,16 +462,16 @@ print((b[0] - 4) / m["width"], (b[1] - 4) / m["height"], (b[0] + b[2] + 4) / m["
     ((red > 20))
     check "its badge in the top right corner" $? "$red red pixels; at $(ctl avatar lipsync | js badge)"
     : > "$OUT/lipsync.jsonl"
-    listen() { # what to say, a name: what lip sync hears for 4 s, and a frame of the mouth at its loudest
+    listen() { # MSG NAME: 4 s of lip sync, frame at the loudest
         say "$1" 4800
-        [[ -n "${CHECK_SAY:-}" ]] && $CHECK_SAY "$2" & # (tools/test/vm's VM sings it into its test microphone)
+        [[ -n "${CHECK_SAY:-}" ]] && $CHECK_SAY "$2" & # tools/test/vm sings into its test microphone
         sleep 0.8
         local end=$((SECONDS + 4)) loudest=-60 heard level grabbed=""
         while ((SECONDS < end)); do
             heard="$(ctl avatar lipsync)"
             printf '{"say": "%s", "at": %s, "heard": %s}\n' "$2" "$(date +%s.%N)" "$heard" >> "$OUT/lipsync.jsonl"
             [[ "$heard" =~ \"level\":\ (-?[0-9.]+) ]] && level="${BASH_REMATCH[1]}" || level=-120
-            if awk -v a="$level" -v b="$loudest" 'BEGIN {exit !(a > b + 1)}'; then # (louder than any before: this moment's frame)
+            if awk -v a="$level" -v b="$loudest" 'BEGIN {exit !(a > b + 1)}'; then # loudest yet: grab this frame
                 loudest="$level"
                 [[ -n "$grabbed" ]] && wait "$grabbed"
                 grim -o "$MON" -t ppm "$OUT/raw/lipsync-$2.ppm" &
@@ -498,7 +480,7 @@ print((b[0] - 4) / m["width"], (b[1] - 4) / m["height"], (b[0] + b[2] + 4) / m["
             sleep 0.12
         done
     }
-    # (the Japanese vowels lip sync knows, as English spells them: the letters' names would be other sounds)
+    # lip sync's Japanese vowels, spelled as English sounds (the letters' names would be other sounds)
     listen 'hold "ahhh", as in "father", from now until this goes away' a
     listen 'hold "eeee", as in "see", from now until this goes away' i
     listen 'hold "oooo", as in "food", from now until this goes away' u
@@ -507,12 +489,11 @@ print((b[0] - 4) / m["width"], (b[1] - 4) / m["height"], (b[0] + b[2] + 4) / m["
     listen 'hold "sssss" from now until this goes away' s
     listen "stay quiet until this goes away" quiet
     wait
-    for v in a i u e o s quiet; do # (as PNGs now: that takes a while)
+    for v in a i u e o s quiet; do # PNG conversion is slow: done after listening
         N=$((N + 1))
         [[ -f "$OUT/raw/lipsync-$v.ppm" ]] && "${UTIL[@]}" png "$OUT/raw/lipsync-$v.ppm" "$OUT/frames/$(printf %02d $N)-lipsync-$v.png"
     done
-    # judged by the loud part of each (the upper quartile of its readings: a sound held for most of the prompt, not
-    # all of it, still counts)
+    # judge each by its upper quartile, so a sound held for most of the prompt still counts
     heard="$(python3 - "$OUT/lipsync.jsonl" << 'EOF'
 import json, sys
 rows = [json.loads(l) for l in open(sys.argv[1])]
@@ -568,7 +549,7 @@ desktop_shot desktop-after-3d
 read -r d left <<< "$(differs desktop-loaded desktop-after-3d)"
 is "$d < 0.005"
 check "the desktop looks as it did before 3D" $? "$d of the pixels differ, $left left out: see frames/diff-*"
-ctl log > "$OUT/hypr3d.log" # (the plugin's own lines: Hyprland writes its log only with its debug logs on)
+ctl log > "$OUT/hypr3d.log"
 r="$(hyprctl plugin unload "$SO" 2>&1)"
 [[ "$r" == ok ]] && LOADED=0
 [[ "$r" == ok ]] && ! hyprctl plugin list | grep -q hypr3d

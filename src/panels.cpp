@@ -17,8 +17,7 @@
 namespace h3d {
 
     namespace {
-        // stacking level of each kind of surface, times the layer spacing gives
-        // how far in front of the wall it sits
+        // stacking level per surface kind; times the layer spacing, its distance in front of the wall
         constexpr float DEPTH_BACKGROUND = 0.f;
         constexpr float DEPTH_BOTTOM     = 1.f;
         constexpr float DEPTH_TILED      = 2.f;
@@ -49,8 +48,7 @@ namespace h3d {
             return s && s->m_current.texture && s->m_current.texture->ok() && s->m_current.size.x >= 1 && s->m_current.size.y >= 1;
         }
 
-        // a whole surface tree (root + subsurfaces), root placed at `rootBox`
-        // (which may stretch it), subsurfaces scaled along with it
+        // a surface tree with the root at `rootBox` (possibly stretched) and subsurfaces scaled along
         void addTree(SPanel& panel, const SP<CWLSurfaceResource>& root, const CBox& rootBox, bool cropRoot) {
             if (!root)
                 return;
@@ -70,8 +68,7 @@ namespace h3d {
                     if (s == root) {
                         ps.box = rootBox;
                         if (cropRoot) {
-                            // like Hyprland: show the buffer 1:1, cutting off (or
-                            // extending the edge of) whatever doesn't fit the window box
+                            // like Hyprland: the buffer 1:1, cropped (or edge-extended) to the window box
                             const Vector2D ratio = rootBox.size() / rootSize;
                             ps.uvBR              = ps.uvTL + (ps.uvBR - ps.uvTL) * ratio;
                         }
@@ -111,8 +108,7 @@ namespace h3d {
                 nullptr);
         }
 
-        // `lift`: how much of a fullscreen window's hiding (Hyprland fades the top layer's surfaces that were there before
-        // it to 0) is undone, 0..1
+        // `lift` (0..1) undoes Hyprland's fade-out of top-layer surfaces under a fullscreen window
         void addLayers(std::vector<SPanel>& out, PHLMONITOR mon, int layer, float depth, int& order, float lift = 0.f) {
             for (const auto& ref : mon->m_layerSurfaceLayers[layer]) {
                 const auto ls = ref.lock();
@@ -152,7 +148,7 @@ namespace h3d {
 
     }
 
-    // up its WM_TRANSIENT_FOR past other menus, else the app's own window that has the keyboard, else the one it's over
+    // an X11 menu's owner: WM_TRANSIENT_FOR past other menus, else the app's focused window, else the one under it
     PHLWINDOW x11Owner(const PHLWINDOW& w) {
         const auto xs = w->m_xwaylandSurface.lock();
         if (!xs)
@@ -182,9 +178,8 @@ namespace h3d {
 
     namespace {
 
-        // windows in `placed` were put somewhere in the world: their workspace
-        // fading in and out doesn't apply to them. `lift`: how much of a fullscreen window's hiding (Hyprland fades the
-        // rest of its workspace to 0) is undone for this one, 0..1
+        // windows in `placed` are out in the world, so workspace fades don't apply; `lift` (0..1) undoes the fade a
+        // fullscreen window gives the rest of its workspace
         void addWindow(std::vector<SPanel>& out, PHLMONITOR mon, PHLWINDOW w, float depth, int& order, const std::unordered_set<uintptr_t>& placed,
                        float lift = 0.f) {
             const auto ws = w->m_workspace;
@@ -244,14 +239,13 @@ namespace h3d {
         int        order = 0;
         const auto ws    = mon->m_activeWorkspace;
         const bool fullscreen = ws && hypr::hasFullscreen(ws);
-        // in 3D a fullscreen (or maximized) window hides the rest of its workspace only on the desktop wall, while it's
-        // there itself: one out in the world (placed, in tiling mode's row) covers nothing on the wall, and nothing out
-        // in the world is under it
+        // in 3D a fullscreen or maximized window hides the rest of its workspace only while it is on the desktop wall;
+        // out in the world (placed, tiling row) it hides nothing
         const auto  fsWindow = ws ? hypr::fullscreenWindow(ws) : nullptr;
         const bool  fsOut    = fsWindow && always.contains(reinterpret_cast<uintptr_t>(fsWindow.get()));
         const float in3D     = std::clamp(inWorld, 0.f, 1.f);
         const auto  lift     = [&](const PHLWINDOW& w) { return fsOut || (w && always.contains(reinterpret_cast<uintptr_t>(w.get()))) ? in3D : 0.f; };
-        // (Hyprland doesn't render one hidden under a fullscreen window at all)
+        // Hyprland doesn't render windows hidden under a fullscreen one at all
         const auto  underFs = [&](const PHLWINDOW& w) {
             return fsWindow && w->m_workspace == ws && !w->isAllowedOverFullscreen() && !hypr::fadingOut(w) && w->visibleOnMonitor(mon);
         };
@@ -260,12 +254,12 @@ namespace h3d {
         addLayers(out, mon, 1, DEPTH_BOTTOM, order);
 
         std::vector<PHLWINDOW> tiled, floating, full, special, specialFloating, pinned, elsewhere;
-        std::vector<std::pair<PHLWINDOW, PHLWINDOW>> x11Popups; // (an X11 menu or tooltip, the window it belongs to)
+        std::vector<std::pair<PHLWINDOW, PHLWINDOW>> x11Popups; // (X11 menu or tooltip, its owner)
         PHLWINDOW              focusedTiled;
         for (const auto& w : hypr::windows()) {
             if (!w || w->isHidden() || (!w->m_isMapped && !hypr::fadingOut(w)))
                 continue;
-            // (an X11 menu or tooltip is under a fullscreen window or not as the window it belongs to is)
+            // an X11 menu or tooltip is under a fullscreen window when its owner is
             const auto owner = w->m_isX11 && w->isX11OverrideRedirect() ? x11Owner(w) : nullptr;
             if (!g_pHyprRenderer->shouldRenderWindow(w, mon) && !(underFs(w) && lift(owner ? owner : w) > 0.f)) {
                 if (w->m_isMapped && always.contains(reinterpret_cast<uintptr_t>(w.get())))
@@ -296,7 +290,7 @@ namespace h3d {
 
         for (auto& w : tiled)
             addWindow(out, mon, w, DEPTH_TILED, order, always, lift(w));
-        for (auto& w : floating) // (with a fullscreen one, those under it that it doesn't hide; the ones over it after it)
+        for (auto& w : floating) // with a fullscreen one: only those it doesn't hide
             if (!fullscreen || (lift(w) > 0.f && !w->shouldRenderOverFullscreen()))
                 addWindow(out, mon, w, DEPTH_FLOATING, order, always, lift(w));
         for (auto& w : full)
@@ -315,8 +309,7 @@ namespace h3d {
             addWindow(out, mon, w, DEPTH_SPECIAL + 1.f, order, always);
         for (auto& w : elsewhere)
             addWindow(out, mon, w, DEPTH_FLOATING, order, always, lift(w));
-        // X11 menus and tooltips over the window they belong to, as its popups: carried along when it's placed in the
-        // world (their positions are the X server's, relative to where it is on the desktop)
+        // X11 menus and tooltips as popups of their owner, following it into the world (X positions are desktop ones)
         for (const auto& [w, owner] : x11Popups) {
             const auto   it    = std::ranges::find_if(out, [&](const SPanel& p) { return p.kind == PANEL_WINDOW && p.window.lock() == owner; });
             const bool   owned = it != out.end();
@@ -330,7 +323,7 @@ namespace h3d {
             }
         }
 
-        // an input method's popup (its candidates), over the window typed into, which has the keyboard
+        // input method popup (candidates) over the focused window
         if (const auto focus = Desktop::focusState()->window()) {
             const auto   it    = std::ranges::find_if(out, [&](const SPanel& p) { return p.kind == PANEL_WINDOW && p.window.lock() == focus; });
             const float  depth = it != out.end() ? it->depth + DEPTH_POPUP : DEPTH_OVERLAY;
@@ -354,8 +347,7 @@ namespace h3d {
             });
         }
 
-        // (with a fullscreen window, as Hyprland draws them: the ones mapped over it (a notification) at their own alpha,
-        // the ones faded out under it not; a bar on the wall, the fullscreen window out in the world, lifted)
+        // with a fullscreen window, as Hyprland draws them (only notifications over it), unless it's out in the world
         if (!fullscreen)
             addLayers(out, mon, 2, DEPTH_TOP, order);
         else
@@ -369,8 +361,7 @@ namespace h3d {
             return a.order < b.order;
         });
 
-        // levels -> meters; panels sharing a level get pulled apart a little
-        // so the ones on top never z-fight with the ones below
+        // levels -> meters; panels sharing a level are pulled apart a little so they don't z-fight
         float level = -1.f;
         int   rank  = 0;
         for (auto& p : out) {

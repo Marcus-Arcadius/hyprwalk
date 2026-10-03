@@ -1,11 +1,8 @@
-# tkfs.py: an X11 app for tools/test/vm (Tk, through XWayland) that goes fullscreen the way a game does through
-# Wine/Proton: its main window maps at a normal size, then a second window of its own maps and takes the keyboard (a
-# new window gets it), then the main window asks for fullscreen with a _NET_WM_STATE client message (it's mapped by
-# then, so Hyprland honours it). With HELPER "fullscreen" the second window, a dialog of the main one's (class
-# CLASSdlg, title "DIALOG CLASS"), asks for fullscreen itself. With TRIGGER, once that file is there, a dialog of the
-# main window's with a text field opens and takes the keyboard (a message box, a name to type). It prints "helper
-# mapped", "asked for fullscreen", "dialog mapped" and "key KEYSYM" ("key KEYSYM dialog" for the text field's), flushed.
-#   python3 tkfs.py CLASS HELPER(transient|normal|none|fullscreen) HELPER_MS FULLSCREEN_AFTER_HELPER_MS [TRIGGER]
+# tkfs.py CLASS HELPER(transient|normal|none|fullscreen) HELPER_MS FULLSCREEN_AFTER_HELPER_MS [TRIGGER]
+# An X11 (Tk) app going fullscreen like a Wine/Proton game: the main window maps, a helper window takes the keyboard,
+# then the main window sends a _NET_WM_STATE fullscreen request (mapped by then, so Hyprland honours it).
+# HELPER fullscreen: a dialog (class CLASSdlg) asks instead. Once the TRIGGER file exists, a dialog with a text field
+# takes the keyboard. Prints each step and "key KEYSYM [dialog]"
 import os
 import sys
 import tkinter as tk

@@ -1,7 +1,6 @@
-# Emotes' sounds on their own: build/test/sound_test, from sound_test.cpp and the plugin's own build/sound.o (decoding),
-# build/speaker.o (playing through PipeWire) and build/third_party.o (stb_vorbis). Don't run make on this directly;
-# sound_check.sh next to it builds it through the repo's build.sh (in the build shell of the Hyprland you are running)
-# and runs it against a PipeWire of its own.
+# build/test/sound_test: emote sounds on their own, with the plugin's sound.o (decoding), speaker.o (PipeWire playback)
+# and third_party.o (stb_vorbis). sound_check.sh next to it builds it through the repo's build.sh and runs it against
+# its own PipeWire; don't run make on this directly.
 include Makefile
 
 TESTDIR := build/test
