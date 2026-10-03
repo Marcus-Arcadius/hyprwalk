@@ -149,6 +149,9 @@ namespace h3d {
         m_nodes.reserve(m_tris.size() / 2 + 1);
         m_nodes.emplace_back();
         buildNode(0, 0, (uint32_t)m_tris.size(), centroids, 0);
+        // up to half of both is growth slack (de_dust2: ~190 MB)
+        m_tris.shrink_to_fit();
+        m_nodes.shrink_to_fit();
     }
 
     void CCollision::buildNode(uint32_t node, uint32_t first, uint32_t count, std::vector<V3>& centroids, int depth) {

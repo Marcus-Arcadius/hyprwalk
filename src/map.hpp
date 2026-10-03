@@ -284,17 +284,18 @@ namespace h3d {
         SMapLighting            lighting; // the game's own, when the file has it
         M4                      backdropTransform = M4::identity(); // hypr3d_backdrop space -> world
 
-        // call after the renderer's GPU upload; the lighting numbers stay
+        // call after the renderer's GPU upload; the lighting numbers stay. Swapped with empties: v = {} keeps the
+        // capacity (initializer_list assignment)
         void releaseCpuData() {
-            vertices      = {};
-            indices       = {};
+            std::vector<SMapVertex>().swap(vertices);
+            std::vector<uint32_t>().swap(indices);
             for (auto& i : images)
-                i.rgba = {};
+                std::vector<uint8_t>().swap(i.rgba);
             for (auto& s : lighting.sets) {
-                s.irradiance.texels = {};
-                s.directional.rgba  = {};
-                s.shadows.rgba      = {};
-                s.probes            = {};
+                std::vector<uint32_t>().swap(s.irradiance.texels);
+                std::vector<uint8_t>().swap(s.directional.rgba);
+                std::vector<uint8_t>().swap(s.shadows.rgba);
+                std::vector<uint16_t>().swap(s.probes);
             }
         }
     };

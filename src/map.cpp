@@ -952,8 +952,8 @@ namespace h3d {
         for (size_t i = 0; i + 2 < b.occTris.size(); i += 3)
             occ.addTriangle(b.occTris[i], b.occTris[i + 1], b.occTris[i + 2]);
         occ.build();
-        b.colTris = {};
-        b.occTris = {};
+        std::vector<V3>().swap(b.colTris); // (= {} keeps the capacity)
+        std::vector<V3>().swap(b.occTris);
         check(cancel);
 
         // one index range per material: opaque, alpha tested, sky, blended, shadow only

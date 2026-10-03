@@ -500,10 +500,10 @@ namespace h3d {
 
         // call after the renderer's GPU upload; morph data stays
         void releaseCpuData() {
-            vertices = {};
-            indices  = {};
+            std::vector<SAvatarVertex>().swap(vertices); // (= {} keeps the capacity)
+            std::vector<uint32_t>().swap(indices);
             for (auto& i : images)
-                i.rgba = {};
+                std::vector<uint8_t>().swap(i.rgba);
         }
     };
 

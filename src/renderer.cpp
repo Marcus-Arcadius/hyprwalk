@@ -9,6 +9,11 @@
 #include <numeric>
 #include <ranges>
 
+#include <EGL/egl.h>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
+
 #ifndef GL_TEXTURE_EXTERNAL_OES
 #define GL_TEXTURE_EXTERNAL_OES 0x8D65
 #endif
@@ -38,16 +43,40 @@ namespace h3d {
         // backdrop fog density relative to the map's: it's kilometres away and would be all fog otherwise
         constexpr float BACKDROP_FOG = 0.125f;
 
-        // tiny per-program uniform location cache
-        std::unordered_map<GLuint, std::unordered_map<std::string, GLint>> g_uniforms;
+        // per-program uniform locations, keyed by the name's address, not its text (hashing names costs a third of a
+        // frame's CPU time): names must be string literals
+        std::unordered_map<GLuint, std::unordered_map<const char*, GLint>> g_uniforms;
+        GLuint                                                              g_lastProg = 0;
+        std::unordered_map<const char*, GLint>*                             g_last     = nullptr; // g_uniforms[g_lastProg]
 
         GLint U(GLuint prog, const char* name) {
-            auto& m = g_uniforms[prog];
-            if (auto it = m.find(name); it != m.end())
+            if (!g_last || prog != g_lastProg) {
+                g_last     = &g_uniforms[prog];
+                g_lastProg = prog;
+            }
+            if (auto it = g_last->find(name); it != g_last->end())
                 return it->second;
             const GLint loc = glGetUniformLocation(prog, name);
-            m.emplace(name, loc);
+            g_last->emplace(name, loc);
             return loc;
+        }
+
+        // geometry that never changes: immutable storage where there's EXT_buffer_storage, of which the NVIDIA driver
+        // keeps no copy in system memory (glBufferData's: 140 MB for de_mirage)
+        void staticBuffer(GLenum target, size_t size, const void* data) {
+            static const auto storage =
+                gl::hasExtension("GL_EXT_buffer_storage") ? (PFNGLBUFFERSTORAGEEXTPROC)eglGetProcAddress("glBufferStorageEXT") : nullptr;
+            if (storage)
+                storage(target, (GLsizeiptr)size, data, 0);
+            else
+                glBufferData(target, (GLsizeiptr)size, data, GL_STATIC_DRAW);
+        }
+
+        // gives freed CPU copies back to the system: glibc keeps freed heap memory (~550 MB after de_dust2)
+        void trimHeap() {
+#ifdef __GLIBC__
+            malloc_trim(0);
+#endif
         }
 
         std::string withCommon(const char* body, bool sky, bool lit = false, bool dual = false) {
@@ -580,9 +609,9 @@ namespace h3d {
         glGenBuffers(1, &m_map.ibo);
         glBindVertexArray(m_map.vao);
         glBindBuffer(GL_ARRAY_BUFFER, m_map.vbo);
-        glBufferData(GL_ARRAY_BUFFER, model->vertices.size() * sizeof(SMapVertex), model->vertices.data(), GL_STATIC_DRAW);
+        staticBuffer(GL_ARRAY_BUFFER, model->vertices.size() * sizeof(SMapVertex), model->vertices.data());
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_map.ibo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, model->indices.size() * sizeof(uint32_t), model->indices.data(), GL_STATIC_DRAW);
+        staticBuffer(GL_ELEMENT_ARRAY_BUFFER, model->indices.size() * sizeof(uint32_t), model->indices.data());
         const GLsizei stride = sizeof(SMapVertex);
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SMapVertex, pos));
@@ -621,6 +650,7 @@ namespace h3d {
         if (err == GL_OUT_OF_MEMORY)
             return false;
         model->releaseCpuData();
+        trimHeap();
         return true;
     }
 
@@ -659,9 +689,9 @@ namespace h3d {
         glGenBuffers(1, &m_avatar.ibo);
         glBindVertexArray(m_avatar.vao);
         glBindBuffer(GL_ARRAY_BUFFER, m_avatar.vbo);
-        glBufferData(GL_ARRAY_BUFFER, model->vertices.size() * sizeof(SAvatarVertex), model->vertices.data(), GL_STATIC_DRAW);
+        staticBuffer(GL_ARRAY_BUFFER, model->vertices.size() * sizeof(SAvatarVertex), model->vertices.data());
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_avatar.ibo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, model->indices.size() * sizeof(uint32_t), model->indices.data(), GL_STATIC_DRAW);
+        staticBuffer(GL_ELEMENT_ARRAY_BUFFER, model->indices.size() * sizeof(uint32_t), model->indices.data());
         const GLsizei stride = sizeof(SAvatarVertex);
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SAvatarVertex, pos));
@@ -730,6 +760,7 @@ namespace h3d {
         if (err == GL_OUT_OF_MEMORY)
             return false;
         model->releaseCpuData();
+        trimHeap();
         return true;
     }
 
@@ -991,6 +1022,7 @@ namespace h3d {
             }
             *p = 0;
         }
+        g_last = nullptr;
         for (GLuint* b : {&m_quadVBO, &m_worldVBO}) {
             if (*b)
                 glDeleteBuffers(1, b);
