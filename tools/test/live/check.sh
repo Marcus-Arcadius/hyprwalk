@@ -24,7 +24,8 @@
 #                  and the terminal isn't in the way of the desktop comparisons
 #   --app CMD      an app of yours (repeatable): a desktop id, an app's name or a command, launched from 3D
 #                  (hyprctl hypr3d launch). Notifications then ask you to play it (P) and stop (Super+Esc), type into
-#                  it (E), point at it (its own cursor), pin it to your view (H) and put it down elsewhere (H again), then try what you
+#                  it (E), point at it (its own cursor), carry it somewhere (H, then H again where it should go), pin it
+#                  to your view (Shift+H) and take it back into your hands (Shift+H again, then H), then try what you
 #                  want in it (P, then Super+Esc when done: a call, a screen share, OBS capturing the 3D view); then
 #                  its window is closed, as its close button does (a chat app goes to its tray, a game quits). Frames of each step
 #                  go to OUTDIR/frames. A Steam game (steam steam://rungameid/ID) is the window Steam starts for it,
@@ -32,7 +33,8 @@
 #                  steps with hyprctl)
 #
 # On the focused monitor it loads the plugin and compares the desktop before and after, enters 3D, loads the avatar
-# and looks at it, opens the Action Menu and plays an emote, shows a notification over the 3D view, picks up the
+# and looks at it, opens the Action Menu and plays an emote, shows a notification over the 3D view, looks out of the
+# avatar's eyes (first person: its hands up in the view), picks up the
 # window the crosshair starts on (or the nearest to it: hyprctl hypr3d aim) and puts it back, walks into the map,
 # leaves 3D and unloads the plugin. The desktop's frames are compared leaving out what changes on its own (what
 # differs between two frames a second apart: a clock, an animated wallpaper) and the terminal this runs in.
@@ -257,6 +259,20 @@ o="$("${UTIL[@]}" count "$OUT/raw/notification.ppm" orange 0.5 0 1 0.25)"
 check "Hyprland draws its notification over the 3D view" $? "$o orange pixels in the top right"
 hyprctl dismissnotify > /dev/null 2>&1
 
+# --- first person from the avatar's eyes (first_person_body): its hands up low in the view, as a first person game's
+ctl view first > /dev/null
+ctl spawn > /dev/null
+sleep 1.5
+a="$(ctl avatar | tee "$OUT/status/first-person.json")"
+if [[ "$(js body <<< "$a")" == true ]]; then
+    ly="$(js hands.at.0.1 <<< "$a")" ry="$(js hands.at.1.1 <<< "$a")"
+    [[ "$(js hands.mode <<< "$a")" == ready && "$ly" != null && "$ry" != null ]] && is "0.5 < $ly <= 1 and 0.5 < $ry <= 1"
+    check "first person from the avatar's eyes ($(js eyeHeight <<< "$a") m up): its hands up low in the view" $? "$(js hands <<< "$a")"
+    shot first-person
+else
+    note "first person from the avatar's eyes: not with this avatar (it isn't a humanoid with a head and arms), or first_person_body is off" "$(js view <<< "$a")"
+fi
+
 # --- carrying the window the crosshair starts on, if there's one
 ctl view first > /dev/null
 ctl spawn > /dev/null
@@ -294,10 +310,15 @@ walking() { [[ "$(ctl status | js playing)" == null && "$(ctl status | js typing
 typing() { [[ "$(ctl status | js typing)" == true && "$(ctl status | js playing)" == null ]]; }
 cursor_on() { [[ "$(ctl status | js cursor)" != null ]]; }
 pinned() { ctl windows | python3 -c 'import json, sys; sys.exit(0 if any(p["address"] == sys.argv[1] and p["pinned"] for p in json.load(sys.stdin)["placed"]) else 1)' "$1"; }
-put_down() { # out in the world, not pinned, and no other window pinned either
+held() { ctl windows | python3 -c 'import json, sys; sys.exit(0 if any(p["address"] == sys.argv[1] and p["held"] for p in json.load(sys.stdin)["placed"]) else 1)' "$1"; }
+put_down() { # out in the world, not carried, not pinned, and no other window pinned either
     ctl windows | python3 -c 'import json, sys
 placed = json.load(sys.stdin)["placed"]
-sys.exit(0 if any(p["address"] == sys.argv[1] for p in placed) and not any(p["pinned"] for p in placed) else 1)' "$1"
+sys.exit(0 if any(p["address"] == sys.argv[1] and not p["held"] for p in placed) and not any(p["pinned"] for p in placed) else 1)' "$1"
+}
+where() { # a placed window: how far off, how big it looks (1 = as on the 2D desktop), carried or pinned
+    ctl windows | python3 -c 'import json, sys
+print("; ".join("{class}: {distance:.2f} m, looks {apparent:.2f}, held {held}, pinned {pinned}".format(**p) for p in json.load(sys.stdin)["placed"] if p["address"] == sys.argv[1]))' "$1"
 }
 ask() { # what to do, the step, seconds for it: shown over the 3D view as long as it's waited for
     say "$1" "$(($3 * 1000))"
@@ -350,17 +371,26 @@ print(*(new[0]["address"], new[0]["class"]) if new else "")' "$before" "$app"
     wait_for 20 cursor_on
     check "its own cursor, drawn on it" $? "$(ctl status | js cursor)"
     shot "app-$CLS-cursor"
-    ask "press H pointing at $CLS: it pins to your view; look around a bit" pin 45
+    ask "press H pointing at $CLS: you pick it up; walk a few steps and look where it should go" carry 45
+    wait_for 45 held "$ADDR"
+    check "H: $CLS picked up, carried where you look" $? "$(where "$ADDR")"
+    sleep 5
+    shot "app-$CLS-carried"
+    ask "press H again: $CLS goes where you look (a wall, or the air in front of you)" place 45
+    wait_for 45 put_down "$ADDR"
+    check "H again: $CLS put down where you look, carried no more" $? "$(where "$ADDR")"
+    shot "app-$CLS-put-down"
+    ask "press Shift+H pointing at $CLS: it pins to your view; look around a bit" pin 45
     wait_for 45 pinned "$ADDR"
-    check "H: pinned to the view" $?
+    check "Shift+H: pinned to the view" $?
     sleep 5
     shot "app-$CLS-pinned"
-    ask "walk a few steps, look anywhere (at another window too) and press H again: $CLS stays there, where it was" put 45
-    wait_for 45 put_down "$ADDR"
-    check "H again, wherever you look: $CLS put down where it was, pinned no more, and nothing else pinned" $? \
-        "$(ctl windows | python3 -c 'import json, sys; print([(p["class"], p["pinned"]) for p in json.load(sys.stdin)["placed"]])')"
-    shot "app-$CLS-put-down"
+    ask "walk a few steps, press Shift+H again (it's back in your hands, as big as it was), look where it should go and press H" unpin 60
+    wait_for 60 put_down "$ADDR"
+    check "Shift+H again, then H: $CLS out of the view's corner, put down where you look, and nothing else pinned" $? "$(where "$ADDR")"
+    shot "app-$CLS-put-down-again"
     pinned "$ADDR" && ctl window "$ADDR" unpin > /dev/null
+    [[ "$(ctl status | js holding)" == true ]] && ctl place > /dev/null
     # what only you can judge: a call, a screen share, OBS capturing the 3D view, a controller
     ask "now try what matters to you in $CLS (a call, a screen share, OBS capturing this view, a controller): P to play it, Super+Esc when you're done (5 minutes at most)" free 30
     if wait_for 60 playing; then

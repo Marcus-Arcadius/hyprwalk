@@ -243,6 +243,8 @@ pkgs.testers.runNixOSTest {
   testScript = "raise Exception('run tools/test/vm/run.sh: it gives the driver the test script')";
   skipLint = true;
   skipTypeCheck = true;
+  # (a full run on llvmpipe takes about an hour now: the driver's own 3600 s would end it in its last sections)
+  globalTimeout = 7200;
   # (the tests' own QEMU has no OpenGL)
   qemu.package = if gpu == "virgl" then pkgs.qemu else pkgs.qemu_test;
 

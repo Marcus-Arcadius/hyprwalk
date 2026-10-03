@@ -330,7 +330,7 @@ namespace h3d {
         }
         SLevel&   top = m_stack.back();
         const int n   = (int)page.items.size();
-        if (n <= SLOTS) {
+        if (n <= (top.id == ROOT ? ROOT_SLOTS : SLOTS)) {
             top.chunk = 0;
             m_page    = std::move(page);
             return;
@@ -569,20 +569,22 @@ namespace h3d {
                 cairo_stroke(cr);
             }
 
-            // the items: an icon, the label and what it's set to, in the middle of the wedge
-            const double rm = Rin + (Ro - Rin) * 0.52;
+            // the items: an icon, the label and what it's set to, in the middle of the wedge. The root's nine (narrower
+            // wedges) have a little more of their width and a little smaller text: what fits in one of eight fits
+            const double rm      = Rin + (Ro - Rin) * 0.52;
+            const bool   crowded = n > SLOTS;
             for (int i = 0; i < n; ++i) {
                 const SMenuItem& it    = m_page.items[i];
                 const double     t     = i * TAU / n; // clockwise from the top
                 const double     x     = C + rm * std::sin(t), y = C - rm * std::cos(t);
-                const double     maxW  = n <= 2 ? 0.62 * R : std::min(2 * rm * std::sin(HALF_TURN / n) * 0.86, 0.62 * R);
+                const double     maxW  = n <= 2 ? 0.62 * R : std::min(2 * rm * std::sin(HALF_TURN / n) * (crowded ? 0.92 : 0.86), 0.62 * R);
                 const double     a     = it.disabled ? 0.3 : 1;
                 const double     iconPx = (n > 6 ? 0.13 : 0.145) * R;
                 const SPicture*  pic    = it.picture && it.picture->w > 0 && it.picture->h > 0 ? it.picture.get() : nullptr;
                 const SBlock     rows[] = {
                     block(ctx.get(), pic ? "" : it.icon, "emoji", iconPx, false, maxW, 1, true),
-                    block(ctx.get(), it.label, "Sans", 0.066 * R, true, maxW, 2),
-                    block(ctx.get(), it.hint, "Sans", 0.052 * R, false, maxW, 1),
+                    block(ctx.get(), it.label, "Sans", (crowded ? 0.062 : 0.066) * R, true, maxW, 2),
+                    block(ctx.get(), it.hint, "Sans", (crowded ? 0.049 : 0.052) * R, false, maxW, 1),
                 };
                 const SColor colors[] = {WHITE, WHITE, HINT};
                 const double alphas[] = {a, 0.96 * a, 0.7 * a};
@@ -791,9 +793,10 @@ namespace h3d {
                     outfit.disabled = true;
                 }
             }
-            // (Apps and Windows: main.cpp's pages)
+            // (Apps, Windows, Maps and Avatars: main.cpp's pages. Avatars last, ninth, so the others keep their numbers)
             p.items = {emotes, faces, hands, outfit, {.label = "Apps", .icon = "🚀", .page = "apps"}, {.label = "Windows", .icon = "🪟", .page = "windows"},
-                       {.label = "Options", .icon = "⚙️", .page = "options"}};
+                       {.label = "Options", .icon = "⚙️", .page = "options"}, {.label = "Maps", .hint = s.map, .icon = "🗺️", .page = "maps"},
+                       {.label = "Avatars", .hint = !s.loading && m ? m->name : none, .icon = "🧍", .page = "avatars"}};
         } else if (id == "emotes") {
             p.title = "Emotes";
             for (size_t i = 0; a && i < a->emotes().size(); ++i) {

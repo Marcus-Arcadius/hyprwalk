@@ -53,11 +53,16 @@ namespace h3d {
         const std::vector<int>*       batchMaterials = nullptr; // CAvatarAnimator::batchMaterials(), null = the batches' own
         M4                            transform = M4::identity(); // avatar space -> world
         bool                          visible = false;  // drawn (third person); it casts its shadow either way
+        bool                          firstPerson = false; // seen from inside, the camera in its eyes: its head isn't drawn
         bool                          outlines = true;  // its materials' toon outlines (an inverted hull each)
         float                         sky = 1, bounce = 0; // light around it, like the map's baked values
 
         bool                          drawn(const SAvatarBatch& b) const {
             return !shown || (size_t)b.part >= shown->size() || (*shown)[b.part];
+        }
+        // the indices of it that are seen, first and count (in first person without the head's; its shadow: all of them)
+        std::pair<uint32_t, uint32_t> range(const SAvatarBatch& b) const {
+            return !firstPerson || b.fpCount == UINT32_MAX || !b.count ? std::pair{b.first, b.count} : std::pair{b.fpFirst, b.fpCount};
         }
         int                           material(const SAvatarBatch& b, size_t i) const { // what batch i is drawn with
             return batchMaterials && i < batchMaterials->size() ? (*batchMaterials)[i] : b.material;

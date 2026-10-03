@@ -5,7 +5,8 @@
 # bone with a limit (a PhysBone's, VRMC_springBone_limit's) ever gets out of it, as the harness works out on its own
 # where each one is (--limits, every 5 frames), and that the kinds of spring named (a spring's name up to its first
 # '.', as Necktie for Necktie.A.001) are never put more than 2 cm deeper inside the body than the animation has them
-# (--springclip, every frame). Prints how deep every kind went, in each move.
+# (--springclip, every frame), and that every kind swings as smoothly at 143.9 frames a second (a 144 Hz monitor's) as
+# at 60 (--springtrace), in first person turning too. Prints how deep every kind went, in each move.
 #   tools/test/harness/spring_check.sh AVATAR [DIR] [KIND...]   (DIR: where the logs go, a temporary one by default; "" too)
 # Hatsune Miku NT's necktie (a Booth avatar, local only): spring_check.sh ~/.local/share/hypr3d/avatars/Miku/Miku.glb ""
 # Necktie. Needs build/test/shot (tools/test/harness/build.sh).
@@ -21,7 +22,7 @@ KINDS=("${@:3}")
 mkdir -p "$DIR"
 FAILS=0
 check() { # what, ok (1/0), the value
-    if [[ "$2" == 1 ]]; then echo "ok   $1: $3"; else echo "FAIL $1: $3"; FAILS=$((FAILS + 1)); fi
+    if [[ "$2" == 1 ]]; then echo "ok   $1${3:+: $3}"; else echo "FAIL $1${3:+: $3}"; FAILS=$((FAILS + 1)); fi
 }
 
 # (as the plugin moves: 10 m/s² to a walk or a run, 14 to a stop, 7 turning right back, the body turned toward where it
@@ -56,6 +57,73 @@ for m in "${moves[@]}"; do
     "$SHOT" --size 64x64 --avatar "$AVATAR" --springclip "$DIR/$name.clip" "${opts[@]}" "${lim[@]}" > "$DIR/$name.log" 2>&1 ||
         { echo "FAIL the harness ($name): $(tail -3 "$DIR/$name.log")"; exit 1; }
 done
+
+# smooth at any frame rate: the springs step 60 times a second, and a monitor's frames (143.9 a second) fall between
+# the steps. How each kind of spring swings on what it hangs from (each bone's tail in its parent's frame), its wobble
+# about its own smooth path (the angle from a moving 1/20 s average, rms over the frames, its bones' mean), at 143.9
+# frames a second no more than half as much again as at 60, and 0.05 deg: in first person turning (the sleeves on the
+# arms in view), walking round a corner, running, dancing, turning on the spot
+if has --springtrace; then
+    secs() { awk -v s="$1" -v dt="$2" 'BEGIN { printf "%d", s / dt + 0.5 }'; }
+    smooth=(fpturn walkturn run dance spot)
+    has --fpturn || { smooth=("${smooth[@]:1}"); echo "(the harness can't turn its camera: no first person turning)"; }
+    for hz in 60 143.9; do
+        dt="$(awk -v hz="$hz" 'BEGIN { printf "%.7f", 1 / hz }')"
+        for name in "${smooth[@]}"; do
+            case "$name" in
+                fpturn) opts=(--fpbody 0 0 --fpfollow 1 --frames "$(secs 1 "$dt")" --fpturn 90 0) ;;
+                walkturn) opts=("${go[@]}" --frames "$(secs 0.5 "$dt")" --move 0 -1.6 --frames "$(secs 1 "$dt")" --move 1.6 0) ;;
+                run) opts=("${go[@]}" "${run[@]}" --frames "$(secs 0.5 "$dt")" --move 0 -4.5 --frames "$(secs 1 "$dt")" --move 0 0) ;;
+                dance) opts=(--frames "$(secs 0.5 "$dt")" --emote Dance loop) ;;
+                spot) opts=(--frames "$(secs 0.5 "$dt")" --turn 360) ;;
+            esac
+            "$SHOT" --size 64x64 --avatar "$AVATAR" --dt "$dt" "${opts[@]}" --springtrace "$DIR/$name@$hz.trace" "" --frames "$(secs 2 "$dt")" > "$DIR/$name@$hz.log" 2>&1 ||
+                { echo "FAIL the harness ($name at $hz frames a second): $(tail -3 "$DIR/$name@$hz.log")"; exit 1; }
+        done
+    done
+    while read -r ok what; do
+        check "$what" "$ok" ""
+    done < <(python3 - "$DIR" "${smooth[@]}" << 'EOF'
+import bisect, math, sys
+
+D, moves = sys.argv[1], sys.argv[2:]
+
+
+def wobble(path):
+    """per kind of spring, its bones' wobble about their own smooth paths (degrees rms), their mean"""
+    lines = open(path, encoding='utf-8', errors='replace').read().split('\n')
+    kinds = [k.strip('[] ') for k in lines[0].split(' [')[1:]]
+    rows = [list(map(float, l.split())) for l in lines[1:] if l.strip()]
+    ts, H, per = [r[0] for r in rows], 1 / 40, {}
+    for j, kind in enumerate(kinds):
+        dirs = []
+        for r in rows:
+            v = r[1 + 3 * j:4 + 3 * j]
+            n = math.sqrt(sum(x * x for x in v)) or 1
+            dirs.append([x / n for x in v])
+        dev = []
+        for i, t in enumerate(ts):
+            if t - ts[0] < H or ts[-1] - t < H:
+                continue
+            lo, hi = bisect.bisect_left(ts, t - H - 1e-9), bisect.bisect_right(ts, t + H + 1e-9)
+            m = [sum(dirs[k][q] for k in range(lo, hi)) for q in range(3)]
+            n = math.sqrt(sum(x * x for x in m)) or 1
+            dev.append(math.degrees(math.acos(max(-1, min(1, sum(m[q] / n * dirs[i][q] for q in range(3)))))))
+        if dev:
+            per.setdefault(kind, []).append(math.sqrt(sum(x * x for x in dev) / len(dev)))
+    return {k: sum(v) / len(v) for k, v in per.items()}
+
+
+for move in moves:
+    slow, fast = wobble(f'{D}/{move}@60.trace'), wobble(f'{D}/{move}@143.9.trace')
+    for kind in sorted(slow):
+        a, b = slow[kind], fast.get(kind, 0.)
+        print(1 if b <= 1.5 * a + 0.05 else 0, f'{kind} as smooth at 143.9 frames a second as at 60 ({move}): {b:.3f} deg, at 60 {a:.3f}')
+EOF
+)
+else
+    echo "(the harness has no --springtrace: not checked at 143.9 frames a second)"
+fi
 
 # the limits: the worst any bone was out of its own, over every move
 worst="$(cat "$DIR"/*.log | awk '/^limits:/ { if ($6 + 0 > w) { w = $6 + 0; at = $0 } n = $2 } END { printf "%.2f deg (%d bones with limits)%s", w, n, (w > 0 ? ", " at : "") }')"

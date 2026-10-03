@@ -11,6 +11,7 @@
 #include "world.hpp"
 #include "map.hpp"
 #include "collision.hpp"
+#include "walker.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -184,13 +185,47 @@ int main(int argc, char** argv) {
     CAvatarAnimator               anim;
     CAvatarAnimator               still; // the same without physics, to measure the swing against
     V3                            move{}, vel{};
+    float                         moveY = 0; // --movey: flying, the velocity up the keys ask for (the plugin's Space and Ctrl, or W looking up or down)
     float                         turn = 0;  // degrees a second
-    float                         accel = 0; // m/s² toward the --move velocity, 0 = at once (the plugin's is 40 on the ground)
-    float                         ground  = 0;
-    bool                          jumping = false; // --jump: falls back down to ground
+    float                         accel = 0; // m/s² toward the --move velocity, 0 = at once (the plugin's is 10 on the ground)
+    float                         decel = 0; // m/s² when the --move velocity is slower than now (the plugin's is 14), 0 = accel
+    float                         turnBack = 7; // m/s² when the --move velocity goes back the other way (the plugin's), 0 = accel
+    bool                          face  = false; // --face 1: the body turns to where it goes, as the plugin's third person does
+    bool                          lookCam = false; // --look-cam 1: the head looks as the plugin's third person has it, the camera behind looking -z
+    float                         camLookYaw = 0, camLookPitch = 0; // (that, eased)
+    float                         fpTurnYaw = 0, fpTurnPitch = 0; // --fpturn: the first person camera turning, degrees a second
+    bool                          fpFollow = false, fpBodyTurning = false; // --fpfollow 1: the body turns as in the plugin's first person
+    bool                          camWorld = false; // --view-world: the camera's yaw is the world's
+    bool                          camChest = false; // --view-chest: ... the chest's (where it faces as the animation turns it)
+    bool                          speedSet = false; // --speed: that speed along the body, whatever the velocity
+    FILE*                         trace = nullptr;  // --trace: a line a frame, where the feet are
+    FILE*                         bones = nullptr;  // --bones: a line a frame, where the humanoid's joints are
+    FILE*                         clips = nullptr;  // --clip: a line a frame, how far the arms are inside the body and skirt
+    std::vector<int8_t>           vertexPart;       // (--clip's: per vertex 0 the body, 1 the left forearm and hand, 2 the right's, -1 neither)
+    FILE*                         hairClips = nullptr; // --hairclip: a line a frame, how far the hair is inside the arms
+    std::vector<uint8_t>          vertexHair;          // (--hairclip's: per vertex, it hangs off the head on springs)
     FILE*                         springClips = nullptr; // --springclip: a line a frame, how far each kind of spring is inside the body
+    FILE*                         springTrace = nullptr; // --springtrace: a line a frame, where the springs' tails are
+    FILE*                         springDump  = nullptr; // --springdump: a line a frame, the springs' bones and colliders in the world
+    FILE*                         bodyClips   = nullptr; // --bodyclip: a line a frame, how far each kind of spring is inside the body, bone by bone
+    struct SBodyShape {                                  // (--bodyclip's: a bone's skin at rest round a line through it)
+        int                joint = -1;
+        V3                 o, u, e1, e2; // the line (bind space) and two ways across it
+        float              a0   = 0;     // where its rows start along the line
+        int                rows = 0;
+        std::vector<float> out;          // rows * 72: how far out its skin goes, by 1 cm along the line and 5° round it
+    };
+    std::vector<SBodyShape>       bodyShapes;
+    std::vector<int>              vertexBodyKind; // (per vertex: its kind of spring (bodyKinds), -1 the body, -2 neither)
+    std::vector<std::string>      bodyKinds;
+    std::string                   springPart;            // (... of the bones with that in their names)
     std::vector<int>              vertexSpring;          // (--springclip's: per vertex its kind of spring, -1 the body, -2 neither)
     std::vector<std::string>      springKinds;           // (... the kinds: a spring's name up to its first '.')
+    float                         ground  = 0;
+    bool                          jumping = false; // --jump: falls back down to ground
+    bool                          walking = false; // --walk: the plugin's body through the world (walker.cpp): its stairs, ledges
+    SWalker                       body;
+    FILE*                         walkLog = nullptr; // --walklog: a line a frame, the body and the gait over the ground
     SAvatarMotion                 mo;
     std::vector<SPanel>           panels;
     int                           W = 800, H = 800;
@@ -199,11 +234,14 @@ int main(int argc, char** argv) {
     std::string aimName;
     float bodyYaw = 0, orbit = 0, pitch = 8, dist = 2.6f, targetY = -1, sky = 1, bounce = 0.15f, time = 0, fov = 70, exposure = 1;
     float height = 0;
-    bool  camChest = false; // --view-chest: the camera's yaw is the chest's (where it faces as the animation turns it)
     // first person (maps): from the feet at eye height, or from --eye
     bool  firstPerson = false, eyeSet = false;
     V3    eyeAt{};
     float camYaw = 0, camPitch = 0; // degrees, the plugin's: yaw 0 = -z, 90 = +x
+    // first person with the body (--fpbody): the camera in the avatar's eyes, its head not drawn, its hands in view, as
+    // the plugin has them; drawn from outside too (--third after it: the pose as it is)
+    bool            fpBody = false;
+    SFirstPersonEye fpEye;
     const float DEG = 180.f / 3.14159265f;
     // the plugin's adaptExposure(), snapped: how bright it is around the eye (the same functions)
     auto autoExposure = [&](const V3& eye, const V3& view) {
@@ -285,19 +323,50 @@ int main(int argc, char** argv) {
                 audio.clear();
                 anim.setVisemes({});
             }
-            if (accel > 0) {
+            if (mo.flying) {
+                // (as the plugin's simulate() flying: toward what the keys ask for, up and down too, at 12 a second)
+                vel = vel + (V3{move.x, moveY, move.z} - vel) * std::min(1.f, mo.dt * 12.f);
+                mo.vy = vel.y;
+            } else if (accel > 0) {
                 V3          d  = V3{move.x, 0, move.z} - V3{vel.x, 0, vel.z};
-                const float dl = length(d), maxD = accel * mo.dt;
+                const bool  slower = decel > 0 && length(move) < length(V3{vel.x, 0, vel.z});
+                const bool  back   = turnBack > 0 && dot(V3{move.x, 0, move.z}, V3{vel.x, 0, vel.z}) < 0;
+                const float dl = length(d), maxD = (back ? turnBack : slower ? decel : accel) * mo.dt;
                 if (dl > maxD)
                     d = d * (maxD / dl);
                 vel.x += d.x;
                 vel.z += d.z;
-                mo.speed = length(V3{vel.x, 0, vel.z});
             } else {
                 vel.x = move.x;
                 vel.z = move.z;
             }
-            if (jumping) {
+            if (!speedSet) {
+                mo.speed = length(V3{vel.x, 0, vel.z});
+                mo.vel   = {vel.x, 0, vel.z};
+                mo.wish  = mo.flying ? V3{} : V3{move.x, 0, move.z}; // (flying, the plugin has no walk to ask for)
+                if (accel > 0)
+                    mo.accel = accel, mo.decel = decel > 0 ? decel : accel, mo.turnBack = turnBack > 0 ? turnBack : accel;
+            }
+            if (walking) {
+                // (as the plugin's simulate(): its gravity, the air's 10 m/s² for the speed is left out)
+                if (length(feet - body.seen()) > 1e-5f) // (put somewhere else: --pos)
+                    body.feet = feet, body.seenY = NAN;
+                body.vel.x = vel.x, body.vel.z = vel.z;
+                if (mo.flying)
+                    body.vel.y = vel.y;
+                else
+                    body.vel.y = std::max(body.vel.y - 20.f * mo.dt, -40.f);
+                if (jumping && body.onGround && !mo.flying)
+                    body.vel.y = 6.3f, body.onGround = false;
+                jumping = false;
+                body.move(mo.dt, 1.8f, mo.flying);
+                vel         = body.vel;
+                mo.onGround = body.onGround;
+                mo.vy       = body.vel.y;
+                mo.speed    = speedSet ? mo.speed : length(V3{vel.x, 0, vel.z});
+                mo.vel      = {vel.x, 0, vel.z};
+                feet        = body.seen(); // (the avatar, the camera: as the plugin draws them)
+            } else if (jumping && !mo.flying) {
                 vel.y -= 20.f * mo.dt;
                 if (feet.y + vel.y * mo.dt <= ground) {
                     feet.y      = ground;
@@ -307,12 +376,383 @@ int main(int argc, char** argv) {
                 }
                 mo.vy = vel.y;
             }
-            feet += vel * mo.dt;
-            bodyYaw += rad(turn) * mo.dt;
+            if (!walking) {
+                // (flying: no lower than the ground it took off from; walking on it, nothing up or down)
+                if (mo.flying && feet.y + vel.y * mo.dt < ground)
+                    vel.y = std::max(vel.y, (ground - feet.y) / mo.dt);
+                else if (!mo.flying && !jumping)
+                    vel.y = 0;
+                feet += vel * mo.dt;
+            }
+            if (face) // (as the plugin's third person: toward where it goes, else it stays; turning on from how fast it turns)
+                if (const auto way = anim.wayToFace(mo, true, bodyYaw, 0.f)) // (W walks toward -z)
+                    bodyYaw = anim.turnBody(bodyYaw, *way, mo.dt, mo.speed);
+                else
+                    bodyYaw = anim.turnBody(bodyYaw, mo.speed > 0.3f ? std::atan2(vel.x, -vel.z) : bodyYaw, mo.dt, mo.speed);
+            else
+                bodyYaw += rad(turn) * mo.dt;
+            if (lookCam && model) {
+                // (as the plugin's animateAvatar: where the camera looks, or back at it looking at its face; turning far,
+                // where the body turns to; eased)
+                auto      wrap = [](float a) { return std::remainder(a, 6.2831853f); };
+                float     ly = wrap(0.f - bodyYaw), lp = 0.f;
+                if (std::abs(ly) > 1.75f) {
+                    const V3 d = feet + V3{0, 1.7f, 2.8f} - (feet + V3{0, model->height * 0.92f, 0});
+                    ly         = wrap(std::atan2(d.x, -d.z) - bodyYaw);
+                    lp         = std::atan2(d.y, std::hypot(d.x, d.z));
+                }
+                const float turning = smoothstep01((std::abs(anim.turnLeft()) - 0.3f) / 0.6f);
+                ly *= 1.f - turning, lp *= 1.f - turning;
+                const float k = 1.f - std::exp(-mo.dt * 6.f);
+                camLookYaw += (std::clamp(ly, -1.4f, 1.4f) - camLookYaw) * k;
+                camLookPitch += (std::clamp(lp, -1.1f, 1.1f) - camLookPitch) * k;
+                mo.lookYaw = camLookYaw, mo.lookPitch = camLookPitch;
+            }
+            if (fpBody) { // (the mouse)
+                camYaw += fpTurnYaw * mo.dt;
+                camPitch = std::clamp(camPitch + fpTurnPitch * mo.dt, -89.f, 89.f);
+            }
+            if (fpBody && fpFollow && model) {
+                // (as the plugin's animateAvatar in first person: toward where it goes, but no further off the camera than
+                // 0.8 rad; standing, it catches up once the head would turn more than 0.9 rad)
+                auto        wrap  = [](float a) { return std::remainder(a, 6.2831853f); };
+                const float cy    = rad(camYaw);
+                float       want  = bodyYaw;
+                if (const auto way = anim.wayToFace(mo, false, bodyYaw, cy)) {
+                    want          = *way;
+                    fpBodyTurning = false;
+                } else if (mo.speed > 0.3f) {
+                    const float side = wrap(std::atan2(vel.x, -vel.z) - cy);
+                    want             = std::abs(side) > 2.2f ? cy : cy + std::clamp(side, -0.8f, 0.8f);
+                    fpBodyTurning    = false;
+                } else {
+                    const float off = wrap(cy - bodyYaw);
+                    if (std::abs(off) > 0.9f)
+                        fpBodyTurning = true;
+                    if (fpBodyTurning) {
+                        want = cy;
+                        if (std::abs(off) < 0.05f)
+                            fpBodyTurning = false;
+                    }
+                }
+                bodyYaw = anim.turnBody(bodyYaw, want, mo.dt, mo.speed);
+            }
+            mo.fp.on = fpBody && model;
+            if (mo.fp.on) {
+                // (as the plugin's first person: the camera in the eyes as last drawn, the head looking where it looks)
+                const auto e = anim.eyes();
+                const M4   drawn = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1});
+                mo.fp.yaw        = rad(camYaw);
+                mo.fp.pitch      = rad(camPitch);
+                mo.fp.eye        = fpEye.update(feet, e ? drawn.point(*e) : feet + V3{0, 1.65f, 0}, mo.fp.yaw, mo.dt);
+                mo.lookYaw       = std::remainder(mo.fp.yaw - bodyYaw, 6.2831853f);
+                mo.lookPitch     = mo.fp.pitch;
+            }
             mo.world = M4::trs(feet, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1});
             if (model) {
                 anim.update(mo);
                 still.update(mo);
+            }
+            mo.fp.press = false, mo.fp.tap = -1; // (once)
+            if (springTrace && model) {
+                // time, then each spring bone's tail (with the part in its name) in its parent's frame, as the springs
+                // turned it (model units): how it swings on what it hangs from. First a line of what kind of spring
+                // each is (its name up to its first '.', as --springclip has them)
+                if (ftell(springTrace) == 0) {
+                    std::string head = "# time";
+                    for (const auto& J : model->springJoints)
+                        if (model->nodes[J.node].name.find(springPart) != std::string::npos) {
+                            const auto& n = model->springs[J.spring].name;
+                            head += std::format(" [{}]", n.substr(0, n.find('.')));
+                        }
+                    fprintf(springTrace, "%s\n", head.c_str());
+                }
+                std::string line = std::format("{:.5f}", time);
+                for (const auto& J : model->springJoints)
+                    if (model->nodes[J.node].name.find(springPart) != std::string::npos) {
+                        const int p = model->nodes[J.node].parent;
+                        const V3  t = anim.globals()[J.node].point(J.tail), l = p >= 0 ? anim.globals()[p].inverse().point(t) : t;
+                        line += std::format(" {:.6f} {:.6f} {:.6f}", l.x, l.y, l.z);
+                    }
+                fprintf(springTrace, "%s\n", line.c_str());
+            }
+            if (springDump && model) {
+                // time, then each spring bone's joint and tail, then each collider's two ends, in the world (m). First a
+                // line per bone (its name, spring, radius, length) and per collider (its node, kind, radius, the body's bit, a
+                // disc's radius), and which colliders each spring keeps out of
+                const M4 toWorld = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1}) * model->fix;
+                if (ftell(springDump) == 0) {
+                    for (const auto& J : model->springJoints)
+                        fprintf(springDump, "# joint %s %s %.4f %.4f\n", model->nodes[J.node].name.c_str(), model->springs[J.spring].name.c_str(), J.radius, J.length);
+                    for (const auto& c : model->springColliders)
+                        fprintf(springDump, "# collider %s %d %.4f %d %.4f\n", model->nodes[c.node].name.c_str(), (int)c.kind, c.radius, (int)c.body, c.disc);
+                    for (const auto& s : model->springs) {
+                        std::string ks;
+                        for (int k : s.colliders)
+                            ks += std::format(" {}", k);
+                        fprintf(springDump, "# spring %s%s\n", s.name.c_str(), ks.c_str());
+                    }
+                }
+                std::string line = std::format("{:.5f}", time);
+                for (const auto& J : model->springJoints) {
+                    const M4& g = anim.globals()[J.node];
+                    for (const V3& p : {toWorld.point(g.point({})), toWorld.point(g.point(J.tail))})
+                        line += std::format(" {:.5f} {:.5f} {:.5f}", p.x, p.y, p.z);
+                }
+                for (const auto& c : model->springColliders) {
+                    const M4& g = anim.globals()[c.node];
+                    for (const V3& p : {toWorld.point(g.point(c.offset)), toWorld.point(g.point(c.tail))})
+                        line += std::format(" {:.5f} {:.5f} {:.5f}", p.x, p.y, p.z);
+                }
+                fprintf(springDump, "%s\n", line.c_str());
+            }
+            if (bodyClips && model) {
+                // each bone's skin as it is at rest, round a line through the bone (toward the next bone of the humanoid,
+                // or its first child, else its own longest way), by 1 cm along it and 5° round it; a spring's vertex
+                // nearer that line than the skin goes out there, the bone as it is now, is inside the body. A bone's skin
+                // is what it moves most of; the head's and what hangs from it, the hair, count as neither
+                constexpr int   NB = 72;
+                constexpr float DA = 0.01f;
+                const auto&     J  = model->joints;
+                if (vertexBodyKind.size() != model->vertices.size()) {
+                    bodyKinds.clear();
+                    bodyShapes.clear();
+                    std::vector<int> kindOf(model->springs.size());
+                    for (size_t s = 0; s < model->springs.size(); ++s) {
+                        const std::string k  = model->springs[s].name.substr(0, model->springs[s].name.find('.'));
+                        const auto        it = std::ranges::find(bodyKinds, k);
+                        kindOf[s]            = (int)(it - bodyKinds.begin());
+                        if (it == bodyKinds.end())
+                            bodyKinds.push_back(k);
+                    }
+                    const size_t     nn = model->nodes.size();
+                    std::vector<int> nodeKind(nn, -1), joint(nn, -1), jointOf(nn, -1);
+                    for (const auto& jt : model->springJoints)
+                        joint[jt.node] = kindOf[jt.spring];
+                    for (size_t j = 0; j < J.size(); ++j)
+                        jointOf[J[j].node] = (int)j;
+                    const int nk = model->human[HB_NECK] >= 0 ? model->human[HB_NECK] : model->human[HB_HEAD];
+                    for (size_t k = 0; k < nn; ++k) {
+                        const int p = model->nodes[k].parent;
+                        nodeKind[k] = joint[k] >= 0 ? joint[k] : (int)k == nk ? -2 : p >= 0 ? nodeKind[p] : -1;
+                    }
+                    std::vector<uint8_t> shown(model->vertices.size(), 0);
+                    for (const auto& b : model->batches)
+                        if (b.part < 0 || b.part >= (int)anim.partsShown().size() || anim.partsShown()[b.part])
+                            for (uint32_t i = b.first; i < b.first + b.count; ++i)
+                                shown[model->indices[i]] = 1;
+                    vertexBodyKind.assign(model->vertices.size(), -2);
+                    std::vector<std::vector<V3>> skin(J.size());
+                    for (size_t v = 0; v < model->vertices.size(); ++v) {
+                        const auto& vx   = model->vertices[v];
+                        int         most = 0;
+                        for (int k = 1; k < 4; ++k)
+                            if (vx.weights[k] > vx.weights[most])
+                                most = k;
+                        if (!shown[v])
+                            continue;
+                        vertexBodyKind[v] = nodeKind[J[vx.joints[most]].node];
+                        if (vertexBodyKind[v] == -1)
+                            skin[vx.joints[most]].push_back({vx.pos[0], vx.pos[1], vx.pos[2]});
+                    }
+                    // the humanoid's next bones
+                    std::vector<int> next(nn, -1);
+                    auto             link = [&](int a, int b) {
+                        if (model->human[a] >= 0 && model->human[b] >= 0)
+                            next[model->human[a]] = model->human[b];
+                    };
+                    link(HB_HIPS, HB_SPINE);
+                    link(HB_SPINE, HB_CHEST);
+                    link(HB_CHEST, model->human[HB_UPPER_CHEST] >= 0 ? HB_UPPER_CHEST : HB_NECK);
+                    link(HB_UPPER_CHEST, HB_NECK);
+                    for (int s = 0; s < 2; ++s) {
+                        link(s ? HB_R_SHOULDER : HB_L_SHOULDER, s ? HB_R_UPPER_ARM : HB_L_UPPER_ARM);
+                        link(s ? HB_R_UPPER_ARM : HB_L_UPPER_ARM, s ? HB_R_LOWER_ARM : HB_L_LOWER_ARM);
+                        link(s ? HB_R_LOWER_ARM : HB_L_LOWER_ARM, s ? HB_R_HAND : HB_L_HAND);
+                        link(s ? HB_R_HAND : HB_L_HAND, fingerBone(s, FINGER_MIDDLE, 0));
+                        link(s ? HB_R_UPPER_LEG : HB_L_UPPER_LEG, s ? HB_R_LOWER_LEG : HB_L_LOWER_LEG);
+                        link(s ? HB_R_LOWER_LEG : HB_L_LOWER_LEG, s ? HB_R_FOOT : HB_L_FOOT);
+                        link(s ? HB_R_FOOT : HB_L_FOOT, s ? HB_R_TOES : HB_L_TOES);
+                        for (int f = 0; f < FINGER_COUNT; ++f)
+                            for (int g = 0; g < 2; ++g)
+                                link(fingerBone(s, f, g), fingerBone(s, f, g + 1));
+                    }
+                    for (size_t j = 0; j < J.size(); ++j) {
+                        const auto& pts = skin[j];
+                        if (pts.size() < 20)
+                            continue;
+                        SBodyShape sh;
+                        sh.joint      = (int)j;
+                        const M4 bind = J[j].inverseBind.inverse();
+                        sh.o          = {bind.m[12], bind.m[13], bind.m[14]};
+                        int to        = next[J[j].node];
+                        if (to < 0)
+                            for (size_t k = 0; k < nn && to < 0; ++k)
+                                if (model->nodes[k].parent == J[j].node && jointOf[k] >= 0 && nodeKind[k] == -1)
+                                    to = (int)k;
+                        if (to >= 0 && jointOf[to] >= 0) {
+                            const M4 b2 = J[jointOf[to]].inverseBind.inverse();
+                            sh.u        = normalize(V3{b2.m[12], b2.m[13], b2.m[14]} - sh.o);
+                        }
+                        if (length(sh.u) < 0.5f) { // (its own longest way: the mic in a hand without fingers)
+                            V3 mean{};
+                            for (const V3& p : pts)
+                                mean += p * (1.f / pts.size());
+                            V3 d{1, 0.3f, 0.2f};
+                            for (int it = 0; it < 30; ++it) {
+                                V3 nd{};
+                                for (const V3& p : pts)
+                                    nd += (p - mean) * dot(p - mean, d);
+                                d = normalize(nd);
+                            }
+                            sh.u = dot(mean - sh.o, d) < 0 ? d * -1.f : d;
+                        }
+                        sh.e1 = normalize(cross(sh.u, std::abs(sh.u.y) < 0.9f ? V3{0, 1, 0} : V3{1, 0, 0}));
+                        sh.e2 = cross(sh.u, sh.e1);
+                        float lo = 1e9f, hi = -1e9f;
+                        for (const V3& p : pts) {
+                            const float a = dot(p - sh.o, sh.u);
+                            lo = std::min(lo, a), hi = std::max(hi, a);
+                        }
+                        sh.a0   = std::floor(lo / DA) * DA;
+                        sh.rows = (int)std::floor((hi - sh.a0) / DA) + 1;
+                        std::vector<float> raw((size_t)sh.rows * NB, 0.f);
+                        for (const V3& p : pts) {
+                            const V3    d = p - sh.o;
+                            const float a = dot(d, sh.u);
+                            const V3    q = d - sh.u * a;
+                            const int   r = std::clamp((int)std::floor((a - sh.a0) / DA), 0, sh.rows - 1);
+                            const int   b = ((int)std::floor((std::atan2(dot(q, sh.e2), dot(q, sh.e1)) + 3.14159265f) / 6.2831853f * NB) % NB + NB) % NB;
+                            raw[(size_t)r * NB + b] = std::max(raw[(size_t)r * NB + b], length(q));
+                        }
+                        sh.out.assign(raw.size(), 0.f);
+                        for (int r = 0; r < sh.rows; ++r)
+                            for (int b = 0; b < NB; ++b)
+                                for (int d = -1; d <= 1; ++d)
+                                    sh.out[(size_t)r * NB + b] = std::max(sh.out[(size_t)r * NB + b], raw[(size_t)r * NB + (b + d + NB) % NB]);
+                        bodyShapes.push_back(std::move(sh));
+                    }
+                    std::string head = "# time", names;
+                    for (const auto& k : bodyKinds)
+                        head += std::format(" [{}: inside, deepest, bone]", k);
+                    fprintf(bodyClips, "%s\n", head.c_str());
+                    for (const auto& sh : bodyShapes)
+                        names += std::format(" {} ({:.2f} m)", model->nodes[J[sh.joint].node].name, sh.rows * DA);
+                    fprintf(stderr, "bodyclip: %zu bones' skin:%s\n", bodyShapes.size(), names.c_str());
+                }
+                // (the springs as the animation has them, physics off: what's inside by design counts only as far as
+                // physics takes it deeper)
+                auto skinned = [&](const std::vector<float>& JM, size_t v) {
+                    const auto& vx = model->vertices[v];
+                    V3          p{};
+                    for (int k = 0; k < 4; ++k)
+                        if (vx.weights[k]) {
+                            const float* m = &JM[vx.joints[k] * 12];
+                            p += V3{m[0] * vx.pos[0] + m[1] * vx.pos[1] + m[2] * vx.pos[2] + m[3], m[4] * vx.pos[0] + m[5] * vx.pos[1] + m[6] * vx.pos[2] + m[7],
+                                    m[8] * vx.pos[0] + m[9] * vx.pos[1] + m[10] * vx.pos[2] + m[11]} *
+                                (vx.weights[k] / 255.f);
+                        }
+                    return p;
+                };
+                auto inverses = [&](const std::vector<float>& JM) {
+                    std::vector<M4> inv(bodyShapes.size());
+                    for (size_t s = 0; s < bodyShapes.size(); ++s) {
+                        M4 m = M4::identity();
+                        for (int r = 0; r < 3; ++r)
+                            for (int c = 0; c < 4; ++c)
+                                m.m[c * 4 + r] = JM[bodyShapes[s].joint * 12 + r * 4 + c];
+                        inv[s] = m.inverse();
+                    }
+                    return inv;
+                };
+                const std::vector<M4> inA = inverses(anim.joints()), inS = inverses(still.joints());
+                auto                  depth = [&](const std::vector<M4>& inv, const V3& p, int& at) {
+                    float most = -1.f;
+                    for (size_t s = 0; s < bodyShapes.size(); ++s) {
+                        const auto& sh = bodyShapes[s];
+                        const V3    d  = inv[s].point(p) - sh.o;
+                        const float a  = dot(d, sh.u);
+                        const int   r  = (int)std::floor((a - sh.a0) / DA);
+                        if (r < 0 || r >= sh.rows)
+                            continue;
+                        const V3    q  = d - sh.u * a;
+                        const float rq = length(q);
+                        if (rq < 0.01f)
+                            continue; // (on the line itself which way it is from it says nothing)
+                        const int b = ((int)std::floor((std::atan2(dot(q, sh.e2), dot(q, sh.e1)) + 3.14159265f) / 6.2831853f * NB) % NB + NB) % NB;
+                        if (const float in = sh.out[(size_t)r * NB + b] - rq; in > most)
+                            most = in, at = (int)s;
+                    }
+                    return most;
+                };
+                std::vector<int>   inside(bodyKinds.size(), 0), bone(bodyKinds.size(), -1);
+                std::vector<float> deep(bodyKinds.size(), 0.f);
+                for (size_t v = 0; v < model->vertices.size(); ++v) {
+                    const int k = vertexBodyKind[v];
+                    if (k < 0)
+                        continue;
+                    int         at = -1, was = -1;
+                    const float d  = depth(inA, skinned(anim.joints(), v), at);
+                    if (d <= 0.005f)
+                        continue;
+                    const float more = d - std::max(depth(inS, skinned(still.joints(), v), was), 0.f);
+                    if (more > 0.005f) {
+                        ++inside[k];
+                        if (more > deep[k])
+                            deep[k] = more, bone[k] = at;
+                    }
+                }
+                std::string line = std::format("{:.4f}", time);
+                for (size_t k = 0; k < bodyKinds.size(); ++k)
+                    line += std::format(" {} {:.4f} {}", inside[k], deep[k], bone[k] >= 0 ? model->nodes[J[bodyShapes[bone[k]].joint].node].name : "-");
+                fprintf(bodyClips, "%s\n", line.c_str());
+            }
+            if (walkLog && model) {
+                // time, the body's feet (the box's height), its velocity up, on the ground, the ground under it, the
+                // avatar's lift, the height it's seen at; then per foot (left, right) its heel's and ball's height over
+                // what's under them (< 0: inside it; nan: nothing near); the animator's state; the gait's status
+                const auto  under = groundUnder(world.collision, body.feet.x, body.feet.z, body.feet.y);
+                std::string clear;
+                const M4    toWorld = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1}) * model->fix;
+                for (int sd = 0; sd < 2; ++sd) {
+                    const int n = model->human[sd ? HB_R_FOOT : HB_L_FOOT];
+                    if (n < 0)
+                        continue;
+                    M4 rest = M4::identity();
+                    for (int k = n; k >= 0; k = model->nodes[k].parent)
+                        rest = model->nodes[k].rest.matrix() * rest;
+                    const M4 carry = toWorld * anim.globals()[n] * rest.inverse() * model->fix.inverse();
+                    const V3 ankle = model->fix.point({rest.m[12], rest.m[13], rest.m[14]});
+                    for (const V3& off : {model->feet[sd].heel, model->feet[sd].ball}) {
+                        const V3 w = carry.point(ankle + off);
+                        // (the first surface down from 0.25 m above it, that's under it: inside a step, that step's top)
+                        SRayHit h;
+                        const bool hit = world.collision.raycast(w + V3{0, 0.25f, 0}, {0, -1, 0}, 1.f, h) && h.normal.y > 0.5f;
+                        clear += std::format(" {:.4f}", hit ? h.t - 0.25f : NAN);
+                    }
+                }
+                fprintf(walkLog, "%.4f %.4f %.4f %.4f %.3f %d %.4f %.3f %.4f%s|%s|%s\n", time, body.feet.x, body.feet.y, body.feet.z, mo.vy, mo.onGround ? 1 : 0, under.value_or(NAN),
+                        anim.lift(), feet.y, clear.c_str(), anim.playing().c_str(), anim.gaitStatus().c_str());
+            }
+            if (trace && model) {
+                // each foot's heel and ball in the world, carried by the foot as the skin is
+                const M4    toWorld = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1}) * model->fix;
+                std::string line    = std::format("{:.4f} {:.4f} {:.4f} {:.4f} {:.3f}", time, feet.x, feet.z, bodyYaw, mo.speed);
+                for (int sd = 0; sd < 2; ++sd) {
+                    const int n = model->human[sd ? HB_R_FOOT : HB_L_FOOT];
+                    if (n < 0)
+                        continue;
+                    M4 rest = M4::identity();
+                    for (int k = n; k >= 0; k = model->nodes[k].parent)
+                        rest = model->nodes[k].rest.matrix() * rest;
+                    const M4 carry = toWorld * anim.globals()[n] * rest.inverse() * model->fix.inverse();
+                    const V3 ankle = model->fix.point({rest.m[12], rest.m[13], rest.m[14]});
+                    for (const V3& off : {V3{}, model->feet[sd].heel, model->feet[sd].ball}) {
+                        const V3 w = carry.point(ankle + off);
+                        line += std::format(" {:.4f} {:.4f} {:.4f}", w.x, w.y, w.z);
+                    }
+                }
+                fprintf(trace, "%s %s\n", line.c_str(), anim.gaitStatus().c_str());
             }
             if (springClips && model) {
                 // the skin as drawn; round a vertical line through the hips, by height (1 cm) and bearing (5°), how far out
@@ -412,6 +852,190 @@ int main(int argc, char** argv) {
                     line += std::format(" {} {:.4f}", inside[k], deep[k]);
                 fprintf(springClips, "%s\n", line.c_str());
             }
+            if ((bones || clips) && model) {
+                const M4 toWorld = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1}) * model->fix;
+                if (bones) {
+                    // time, the body's yaw, then each humanoid bone's joint in the world (nan: the avatar has none)
+                    std::string line = std::format("{:.4f} {:.4f}", time, bodyYaw);
+                    for (int b = 0; b < HB_COUNT; ++b) {
+                        const int n = model->human[b];
+                        const V3  p = n >= 0 ? toWorld.point({anim.globals()[n].m[12], anim.globals()[n].m[13], anim.globals()[n].m[14]}) : V3{NAN, NAN, NAN};
+                        line += std::format(" {:.4f} {:.4f} {:.4f}", p.x, p.y, p.z);
+                    }
+                    fprintf(bones, "%s\n", line.c_str());
+                }
+                if (clips) {
+                    // the skin as drawn; round a vertical line through the hips, by height (1 cm) and bearing (5°), how
+                    // far out the body goes (the skirt with it); an arm's vertex nearer the line than that is inside
+                    if (vertexPart.size() != model->vertices.size()) {
+                        std::vector<int8_t> nodePart(model->nodes.size(), 0);
+                        // (the forearms and hands; the upper arms, the head with its hair, and what constraints turn after
+                        // something else, count as neither)
+                        const int           lu = model->human[HB_L_UPPER_ARM], ru = model->human[HB_R_UPPER_ARM], nk = model->human[HB_NECK] >= 0 ? model->human[HB_NECK] : model->human[HB_HEAD];
+                        const int           lf = model->human[HB_L_LOWER_ARM], rf = model->human[HB_R_LOWER_ARM];
+                        for (const auto& nc : model->constraints)
+                            if (nc.type != SNodeConstraint::ROLL && nc.node >= 0)
+                                nodePart[nc.node] = -1;
+                        for (size_t k = 0; k < model->nodes.size(); ++k) {
+                            const int p = model->nodes[k].parent;
+                            nodePart[k] = (int)k == lf ? 1 : (int)k == rf ? 2 : (int)k == lu || (int)k == ru || (int)k == nk || nodePart[k] < 0 ? -1 : p >= 0 ? nodePart[p] : 0;
+                        }
+                        vertexPart.resize(model->vertices.size());
+                        for (size_t v = 0; v < model->vertices.size(); ++v) {
+                            const auto& vx   = model->vertices[v];
+                            int         most = 0;
+                            for (int k = 1; k < 4; ++k)
+                                if (vx.weights[k] > vx.weights[most])
+                                    most = k;
+                            vertexPart[v] = nodePart[model->joints[vx.joints[most]].node];
+                        }
+                    }
+                    const auto& J = anim.joints();
+                    std::vector<V3> at(model->vertices.size());
+                    for (size_t v = 0; v < at.size(); ++v) {
+                        const auto& vx = model->vertices[v];
+                        if (vertexPart[v] < 0)
+                            continue;
+                        V3 p{};
+                        for (int k = 0; k < 4; ++k)
+                            if (vx.weights[k]) {
+                                const float* m = &J[vx.joints[k] * 12];
+                                const float  w = vx.weights[k] / 255.f;
+                                p += V3{m[0] * vx.pos[0] + m[1] * vx.pos[1] + m[2] * vx.pos[2] + m[3], m[4] * vx.pos[0] + m[5] * vx.pos[1] + m[6] * vx.pos[2] + m[7],
+                                        m[8] * vx.pos[0] + m[9] * vx.pos[1] + m[10] * vx.pos[2] + m[11]} *
+                                    w;
+                            }
+                        at[v] = toWorld.point(p);
+                    }
+                    const M4&       hg   = anim.globals()[model->human[HB_HIPS]];
+                    const V3        hips = toWorld.point({hg.m[12], hg.m[13], hg.m[14]});
+                    constexpr int   NH = 120, NA = 72;
+                    constexpr float H0 = -0.8f, DH = 0.01f;
+                    std::vector<float> out(NH * NA, 0.f);
+                    auto               bin = [&](const V3& p, int& h, int& a) {
+                        h = (int)std::floor((p.y - hips.y - H0) / DH);
+                        a = ((int)std::floor((std::atan2(p.z - hips.z, p.x - hips.x) + 3.14159265f) / 6.2831853f * NA) % NA + NA) % NA;
+                        return h >= 0 && h < NH;
+                    };
+                    for (size_t v = 0; v < at.size(); ++v)
+                        if (int h, a; vertexPart[v] == 0 && bin(at[v], h, a))
+                            out[h * NA + a] = std::max(out[h * NA + a], std::hypot(at[v].x - hips.x, at[v].z - hips.z));
+                    std::string line = std::format("{:.4f}", time);
+                    for (int s = 1; s <= 2; ++s) {
+                        int   inside = 0;
+                        float deep   = 0;
+                        V3    where{};
+                        for (size_t v = 0; v < at.size(); ++v) {
+                            int h, a;
+                            if (vertexPart[v] != s || !bin(at[v], h, a))
+                                continue;
+                            float r = 0;
+                            for (int d = -1; d <= 1; ++d)
+                                r = std::max(r, out[h * NA + (a + d + NA) % NA]);
+                            const float depth = r - std::hypot(at[v].x - hips.x, at[v].z - hips.z);
+                            if (depth > 0.005f) {
+                                ++inside;
+                                if (depth > deep)
+                                    deep = depth, where = at[v] - hips;
+                            }
+                        }
+                        // (where the deepest is, from the hips: across the body's right, up, ahead)
+                        const V3 fw{std::sin(bodyYaw), 0, -std::cos(bodyYaw)}, rt{std::cos(bodyYaw), 0, std::sin(bodyYaw)};
+                        line += std::format(" {} {:.4f} {:.3f} {:.3f} {:.3f}", inside, deep, dot(where, rt), where.y, dot(where, fw));
+                    }
+                    fprintf(clips, "%s\n", line.c_str());
+                }
+            }
+            if (hairClips && model && model->clearance.measured) {
+                // the hair (what springs swing under the head), as drawn; each arm as the round shape its skin goes out to
+                // round its bones at rest (SBodyClearance: a sleeve's cuff with it), by quarter along the upper arm, the
+                // forearm and the hand (toward its middle finger); a hair vertex nearer an arm's bone than that is inside
+                if (vertexHair.size() != model->vertices.size()) {
+                    const size_t         n = model->nodes.size();
+                    std::vector<uint8_t> spring(n, 0), head(n, 0);
+                    for (const auto& jt : model->springJoints)
+                        spring[jt.node] = 1;
+                    for (size_t k = 0; k < n; ++k)
+                        if (const int p = model->nodes[k].parent; p >= 0) {
+                            spring[k] |= spring[p];
+                            head[k] = p == model->human[HB_HEAD] || head[p];
+                        }
+                    vertexHair.assign(model->vertices.size(), 0);
+                    for (size_t v = 0; v < model->vertices.size(); ++v) {
+                        const auto& vx   = model->vertices[v];
+                        int         most = 0;
+                        for (int k = 1; k < 4; ++k)
+                            if (vx.weights[k] > vx.weights[most])
+                                most = k;
+                        const int nd  = model->joints[vx.joints[most]].node;
+                        vertexHair[v] = spring[nd] && head[nd];
+                    }
+                    fprintf(hairClips, "# time, then per arm (left, right): hair vertices inside it, the deepest (m), the node that one hangs from\n");
+                }
+                std::vector<uint8_t> shown(model->vertices.size(), 0);
+                for (const auto& b : model->batches)
+                    if (b.part < 0 || b.part >= (int)anim.partsShown().size() || anim.partsShown()[b.part])
+                        for (uint32_t k = b.first; k < b.first + b.count; ++k)
+                            shown[model->indices[k]] = 1;
+                const M4    toWorld = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1}) * model->fix;
+                const auto& J       = anim.joints();
+                const auto& G       = anim.globals();
+                auto        jointAt = [&](int nd) { return toWorld.point({G[nd].m[12], G[nd].m[13], G[nd].m[14]}); };
+                std::string line    = std::format("{:.4f}", time);
+                for (int sd = 0; sd < 2; ++sd) {
+                    const int ua = model->human[sd ? HB_R_UPPER_ARM : HB_L_UPPER_ARM];
+                    if (ua < 0 || model->human[sd ? HB_R_LOWER_ARM : HB_L_LOWER_ARM] < 0 || model->human[sd ? HB_R_HAND : HB_L_HAND] < 0) {
+                        line += " 0 0.0000 -";
+                        continue;
+                    }
+                    const V3 sh = jointAt(ua), el = jointAt(model->human[sd ? HB_R_LOWER_ARM : HB_L_LOWER_ARM]), wr = jointAt(model->human[sd ? HB_R_HAND : HB_L_HAND]);
+                    V3       tip = wr + normalize(wr - el) * model->clearance.hand[sd];
+                    for (int f : {FINGER_MIDDLE, FINGER_INDEX, FINGER_RING, FINGER_LITTLE})
+                        if (const int nd = model->human[fingerBone(sd, f, 0)]; nd >= 0) {
+                            tip = wr + normalize(jointAt(nd) - wr) * model->clearance.hand[sd];
+                            break;
+                        }
+                    const V3 seg[3][2] = {{sh, el}, {el, wr}, {wr, tip}};
+                    int      inside    = 0, deepNode = -1;
+                    float    deep      = 0;
+                    for (size_t v = 0; v < model->vertices.size(); ++v) {
+                        if (!vertexHair[v] || !shown[v])
+                            continue;
+                        const auto& vx = model->vertices[v];
+                        V3          p{};
+                        for (int k = 0; k < 4; ++k)
+                            if (vx.weights[k]) {
+                                const float* m = &J[vx.joints[k] * 12];
+                                p += V3{m[0] * vx.pos[0] + m[1] * vx.pos[1] + m[2] * vx.pos[2] + m[3], m[4] * vx.pos[0] + m[5] * vx.pos[1] + m[6] * vx.pos[2] + m[7],
+                                        m[8] * vx.pos[0] + m[9] * vx.pos[1] + m[10] * vx.pos[2] + m[11]} *
+                                    (vx.weights[k] / 255.f);
+                            }
+                        p           = toWorld.point(p);
+                        float depth = 0;
+                        for (int k = 0; k < 3; ++k) {
+                            const V3    a = seg[k][0], d = seg[k][1] - seg[k][0];
+                            const float l2 = dot(d, d);
+                            if (l2 < 1e-8f)
+                                continue;
+                            const float t = dot(p - a, d) / l2;
+                            if (t < 0.f || t > 1.f)
+                                continue;
+                            depth = std::max(depth, model->clearance.arm[sd][k][std::clamp((int)(t * 4.f), 0, 3)] - length(p - a - d * t));
+                        }
+                        if (depth > 0.005f && ++inside && depth > deep) {
+                            int most = 0;
+                            for (int k = 1; k < 4; ++k)
+                                if (vx.weights[k] > vx.weights[most])
+                                    most = k;
+                            deep = depth, deepNode = model->joints[vx.joints[most]].node;
+                        }
+                    }
+                    std::string node = deepNode >= 0 ? model->nodes[deepNode].name : "-";
+                    std::ranges::replace(node, ' ', '_');
+                    line += std::format(" {} {:.4f} {}", inside, deep, node);
+                }
+                fprintf(hairClips, "%s\n", line.c_str());
+            }
         }
     };
     // how far each spring's bones are turned from where the animation has them, degrees
@@ -471,13 +1095,21 @@ int main(int argc, char** argv) {
         fprintf(stderr, "swing (mean/max deg):%s\n", line.empty() ? " no springs" : line.c_str());
     };
 
+    std::string attackClip, attackClipFirst; // --attackclip
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         // laid out for the --size, as the plugin's every frame does it: the mouse moves its cursor by logical pixels
         menu.layout(W, H, 1);
-        if (a == "--avatar") {
+        if (a == "--attackclip") { // file [first person's file]: VRM animations for the attacks of the avatars loaded after it
             need(i, 1);
-            SAvatarResult res = guardedLoad(loadAvatar, SAvatarRequest{argv[++i], height});
+            attackClip      = argv[++i];
+            attackClipFirst = i + 1 < argc && argv[i + 1][0] != '-' ? argv[++i] : "";
+        } else if (a == "--avatar") {
+            need(i, 1);
+            SAvatarRequest req{argv[++i], height};
+            req.attack        = attackClip;
+            req.attackFirst   = attackClipFirst;
+            SAvatarResult res = guardedLoad(loadAvatar, req);
             for (auto& l : res.log)
                 fprintf(stderr, "[load] %s\n", l.c_str());
             if (!res.model) {
@@ -506,6 +1138,12 @@ int main(int argc, char** argv) {
         } else if (a == "--accel") {
             need(i, 1);
             accel = atof(argv[++i]);
+        } else if (a == "--decel") {
+            need(i, 1);
+            decel = atof(argv[++i]);
+        } else if (a == "--turnback") {
+            need(i, 1);
+            turnBack = atof(argv[++i]);
         } else if (a == "--jump") { // like the plugin's: 6.3 m/s up, 20 m/s² down
             ground      = jumping ? ground : feet.y;
             vel.y       = 6.3f;
@@ -520,6 +1158,9 @@ int main(int argc, char** argv) {
         } else if (a == "--physics") {
             need(i, 1);
             anim.setPhysics(atoi(argv[++i]) != 0);
+        } else if (a == "--gaitstyle") { // 1|0: the walk's and run's body from the avatar's clips (made in Blender), or the walking's own
+            need(i, 1);
+            anim.setGaitStyle(atoi(argv[++i]) != 0);
         } else if (a == "--swing") {
             swing();
         } else if (a == "--springs") { // each spring: its bones, colliders and limit; where its first bone's limit points (the
@@ -580,15 +1221,6 @@ int main(int argc, char** argv) {
                     worst = out, at = model->springs[jt.spring].name;
             }
             fprintf(stderr, "limits: %d bones, the worst %.2f deg out (%s)\n", n, worst, at.c_str());
-        } else if (a == "--springclip") { // file: a line a frame: time, then per kind of spring (its name up to a '.', as the
-                                          // first line lists them) how many of its vertices physics puts inside the body
-                                          // (round a vertical line through the hips, not counting the arms and head), more
-                                          // than 5 mm deeper than the animation has them, and the most (m)
-            need(i, 1);
-            if (springClips)
-                fclose(springClips);
-            springClips = fopen(argv[++i], "w");
-            vertexSpring.clear();
         } else if (a == "--height") {
             need(i, 1);
             height = atof(argv[++i]);
@@ -606,10 +1238,16 @@ int main(int argc, char** argv) {
             need(i, 1);
             orbit    = rad(atof(argv[++i]));
             camChest = false;
+        } else if (a == "--view-world") { // camera around the avatar at a yaw in the world, not turning with the body (degrees)
+            need(i, 1);
+            orbit    = rad(atof(argv[++i]));
+            camWorld = true;
+            camChest = false;
         } else if (a == "--view-chest") { // camera around the avatar at a yaw from where its chest faces (dances turn it), degrees
             need(i, 1);
             orbit    = rad(atof(argv[++i]));
             camChest = true;
+            camWorld = false;
         } else if (a == "--pitch") { // camera elevation, degrees
             need(i, 1);
             pitch = atof(argv[++i]);
@@ -632,6 +1270,109 @@ int main(int argc, char** argv) {
         } else if (a == "--speed") {
             need(i, 1);
             mo.speed = atof(argv[++i]);
+            mo.vel   = {};
+            speedSet = true;
+        } else if (a == "--run") { // 1|0: the player runs (Shift), else walks
+            need(i, 1);
+            mo.run = atoi(argv[++i]) != 0;
+        } else if (a == "--face") { // 1|0: the body turns to where it goes, as in the plugin's third person
+            need(i, 1);
+            face = atoi(argv[++i]) != 0;
+        } else if (a == "--look-cam") { // 1|0: the head looks as the plugin's third person has it (a camera behind, looking -z)
+            need(i, 1);
+            lookCam = atoi(argv[++i]) != 0;
+        } else if (a == "--gait") { // the walking's state
+            if (model)
+                fprintf(stderr, "gait %s\n", anim.gaitStatus().c_str());
+        } else if (a == "--trace") { // file: a line a frame: time, feet x z, yaw, speed, each foot's ankle, heel and ball in the
+                                     // world, the walking's state
+            need(i, 1);
+            if (trace)
+                fclose(trace);
+            trace = fopen(argv[++i], "w");
+        } else if (a == "--bones") { // file: a line a frame: time, the body's yaw, each humanoid bone's joint in the world
+            need(i, 1);
+            if (bones)
+                fclose(bones);
+            bones = fopen(argv[++i], "w");
+        } else if (a == "--springclip") { // file: a line a frame: time, then per kind of spring (its name up to a '.', as the
+                                          // first line lists them) how many of its vertices physics puts inside the body
+                                          // (round a vertical line through the hips, not counting the arms and head), more
+                                          // than 5 mm deeper than the animation has them, and the most (m)
+            need(i, 1);
+            if (springClips)
+                fclose(springClips);
+            springClips = fopen(argv[++i], "w");
+            vertexSpring.clear();
+        } else if (a == "--bodyclip") { // file: a line a frame: time, then per kind of spring (as --springclip has them) how many
+                                        // of its vertices physics puts inside the body more than 5 mm deeper than the
+                                        // animation has them, the most (m) and the bone whose skin that is in: each bone's
+                                        // skin as it is at rest round a line through it, carried as the bone is now (any
+                                        // pose: a dance's, a fall's), the head's and its hair's not counted
+            need(i, 1);
+            if (bodyClips)
+                fclose(bodyClips);
+            bodyClips = fopen(argv[++i], "w");
+            vertexBodyKind.clear();
+        } else if (a == "--springdump") { // file: a line a frame: time, then each spring bone's joint and tail, then each
+                                          // collider's two ends, in the world (m); first what they are, a line each
+            need(i, 1);
+            if (springDump)
+                fclose(springDump);
+            springDump = fopen(argv[++i], "w");
+        } else if (a == "--springtrace") { // file part: a line a frame: time, then each spring bone's tail with the part
+                                             // in its name ("": all) in its parent's frame, x y z (model units)
+            need(i, 2);
+            if (springTrace)
+                fclose(springTrace);
+            springTrace = fopen(argv[i + 1], "w");
+            springPart  = argv[i + 2];
+            i += 2;
+        } else if (a == "--hairclip") { // file: a line a frame: time, then per arm (left, right) how many of the hair's vertices (what
+                                        // springs swing under the head) are inside it (as round as its skin goes out at rest,
+                                        // a sleeve's cuff with it), the deepest (m) and the node that one follows most ("-": none)
+            need(i, 1);
+            if (hairClips)
+                fclose(hairClips);
+            hairClips = fopen(argv[++i], "w");
+            vertexHair.clear();
+        } else if (a == "--clip") { // file: a line a frame: time, then per forearm (left, right) how many of its vertices are inside
+                                    // the body (a skirt with it), the deepest (m) and where that is from the hips (right, up, ahead)
+            need(i, 1);
+            if (clips)
+                fclose(clips);
+            clips = fopen(argv[++i], "w");
+        } else if (a == "--walk") { // the plugin's body through the world from here on (walker.cpp): up its stairs, off ledges
+            walking         = true;
+            body.feet       = feet;
+            body.seenY      = NAN;
+            body.vel        = {vel.x, 0, vel.z};
+            body.onGround   = true;
+            body.overlaps   = [&](const V3& f, float h) {
+                return world.collision.overlaps({{f.x - SWalker::RADIUS, f.y, f.z - SWalker::RADIUS}, {f.x + SWalker::RADIUS, f.y + h, f.z + SWalker::RADIUS}});
+            };
+            mo.ground = [&](float x, float z, float y) { return groundUnder(world.collision, x, z, y); };
+        } else if (a == "--floors") { // x0 z0 x1 z1 step file: every floor over that grid (a line a cell: x z, the heights up)
+            need(i, 6);
+            const float x0 = atof(argv[i + 1]), z0 = atof(argv[i + 2]), x1 = atof(argv[i + 3]), z1 = atof(argv[i + 4]), st = atof(argv[i + 5]);
+            FILE*       f = fopen(argv[i + 6], "w");
+            i += 6;
+            std::vector<SRayHit> hits;
+            const float          top = world.bounds.max.y + 1.f, depth = top - world.bounds.min.y + 2.f;
+            for (float x = x0; x <= x1; x += st)
+                for (float z = z0; z <= z1; z += st) {
+                    hits.clear();
+                    world.collision.raycastAll({x, top, z}, {0, -1, 0}, depth, hits);
+                    std::string line = std::format("{:.2f} {:.2f}", x, z);
+                    for (const auto& h : hits)
+                        if (h.normal.y > 0.7f)
+                            line += std::format(" {:.3f}", top - h.t);
+                    fprintf(f, "%s\n", line.c_str());
+                }
+            fclose(f);
+        } else if (a == "--walklog") { // file: a line a frame (with --walk): the body's height, on the ground, the gait
+            need(i, 1);
+            walkLog = fopen(argv[++i], "w");
         } else if (a == "--vy") {
             need(i, 1);
             mo.vy = atof(argv[++i]);
@@ -639,8 +1380,23 @@ int main(int argc, char** argv) {
             mo.onGround = false;
         } else if (a == "--ground") {
             mo.onGround = true;
-        } else if (a == "--fly") {
-            mo.flying = atoi(argv[++i]) != 0;
+        } else if (a == "--fly") { // 1|0: flying (the plugin's F; going on as it was going); 0 above the ground: falls to it
+            need(i, 1);
+            const bool was = mo.flying;
+            mo.flying      = atoi(argv[++i]) != 0;
+            if (mo.flying && !was && !jumping)
+                ground = feet.y;
+            if (!mo.flying && was && !walking) {
+                if (feet.y > ground + 1e-3f)
+                    jumping = true, mo.onGround = false;
+                else
+                    vel.y = mo.vy = 0, mo.onGround = true;
+            }
+            if (mo.flying)
+                jumping = false;
+        } else if (a == "--movey") { // flying: the velocity up the keys ask for, m/s (the plugin's Space 8, Ctrl -8)
+            need(i, 1);
+            moveY = atof(argv[++i]);
         } else if (a == "--crouch") {
             need(i, 1);
             mo.crouched = atoi(argv[++i]) != 0;
@@ -952,7 +1708,7 @@ int main(int argc, char** argv) {
         } else if (a == "--menu-scroll") {
             need(i, 1);
             menu.scroll(atoi(argv[++i]));
-        } else if (a == "--menu-pick") { // 1-8, 0 = the middle, "cursor" = what it points at
+        } else if (a == "--menu-pick") { // 1-9, 0 = the middle, "cursor" = what it points at
             need(i, 1);
             const std::string n  = argv[++i];
             const auto        it = n == "cursor" ? menu.pick() : menu.pick(atoi(n.c_str()) - 1);
@@ -980,10 +1736,10 @@ int main(int argc, char** argv) {
             else if (!words.empty() && words[0] == "menu")
                 r = menuCommand(menu, {words.begin() + 1, words.end()}, menuDo);
             fprintf(stderr, "ctl %s -> %s\n", req.c_str(), r.empty() ? "(not a command here)" : r.c_str());
-        } else if (a == "--key") { // tab, esc, backspace, enter, 1-8 or an evdev code, as the plugin takes them
+        } else if (a == "--key") { // tab, esc, backspace, enter, 1-9 or an evdev code, as the plugin takes them
             need(i, 1);
             const std::string k    = argv[++i];
-            const uint32_t    code = k == "tab" ? 15 : k == "esc" ? 1 : k == "backspace" ? 14 : k == "enter" ? 28 : k.size() == 1 && k[0] >= '1' && k[0] <= '8' ? (uint32_t)(k[0] - '1' + 2) : (uint32_t)atoi(k.c_str());
+            const uint32_t    code = k == "tab" ? 15 : k == "esc" ? 1 : k == "backspace" ? 14 : k == "enter" ? 28 : k.size() == 1 && k[0] >= '1' && k[0] <= '9' ? (uint32_t)(k[0] - '1' + 2) : (uint32_t)atoi(k.c_str());
             if (code == 15) // Tab opens and closes it
                 menu.open() ? menu.hide() : (void)menu.show();
             else if (!menuKey(menu, code, menuPick))
@@ -1066,13 +1822,90 @@ int main(int argc, char** argv) {
                     (long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count(), res.req.scale, b.min.x, b.min.y, b.min.z,
                     b.max.x, b.max.y, b.max.z, feet.x, feet.y, feet.z, camYaw, d.center.x, d.center.y, d.center.z, d.normal.x, d.normal.y, d.normal.z, d.height,
                     world.sunDir.x, world.sunDir.y, world.sunDir.z);
-        } else if (a == "--fp") { // first person from the feet: yaw pitch (degrees)
+        } else if (a == "--fp") { // first person from the feet: yaw pitch (degrees); 1.65 m up, no body (but its shadow)
             need(i, 2);
             firstPerson = true;
+            fpBody      = false;
             eyeSet      = false;
             camYaw      = atof(argv[i + 1]);
             camPitch    = atof(argv[i + 2]);
             i += 2;
+        } else if (a == "--fpbody") { // first person with the body: yaw pitch (degrees); the camera in the avatar's eyes, its hands in view
+            need(i, 2);
+            fpBody = firstPerson = true;
+            eyeSet               = false;
+            camYaw               = atof(argv[i + 1]);
+            camPitch             = atof(argv[i + 2]);
+            i += 2;
+        } else if (a == "--fpturn") { // yaw pitch, degrees a second: the first person camera turning (the mouse), each frame
+            need(i, 2);
+            fpTurnYaw   = atof(argv[i + 1]);
+            fpTurnPitch = atof(argv[i + 2]);
+            i += 2;
+        } else if (a == "--fpfollow") { // 1|0: the body turns as in the plugin's first person (else as --turn has it)
+            need(i, 1);
+            fpFollow = atoi(argv[++i]) != 0;
+        } else if (a == "--fpoff") { // the body's first person off (the hands the animation's again), its camera gone too
+            fpBody = false;
+            mo.fp  = {};
+        } else if (a == "--fphands") { // ready|touch|type|hold|down: what the hands do in first person
+            need(i, 1);
+            const std::string v = argv[++i];
+            mo.fp.hands         = v == "touch" ? FPH_TOUCH : v == "type" ? FPH_TYPE : v == "hold" ? FPH_HOLD : v == "down" ? FPH_DOWN : FPH_READY;
+        } else if (a == "--fproom") { // meters: how far ahead of the eye there's room for the hands (a wall)
+            need(i, 1);
+            mo.fp.room = atof(argv[++i]);
+        } else if (a == "--fppress") { // a button goes down (touching: the finger pokes), the next frame
+            mo.fp.press = true;
+        } else if (a == "--fptap") { // left|right: a key goes down for that hand (typing), the next frame
+            need(i, 1);
+            mo.fp.tap = std::string(argv[++i]) == "left" ? 0 : 1;
+        } else if (a == "--attack") { // left|right|next: an attack (the plugin's left click on nothing): that arm swung, or whichever's next
+            need(i, 1);
+            const std::string v = argv[++i];
+            fprintf(stderr, "attack %s: %s\n", v.c_str(), model && anim.attack(v == "left" ? 0 : v == "right" ? 1 : -1) ? "ok" : "none");
+        } else if (a == "--attackstatus") { // the attacks' swings, as the plugin's avatar status has them
+            if (model)
+                fprintf(stderr, "attack: %s\n", anim.attackStatus().c_str());
+        } else if (a == "--wrists") { // where each wrist is from the feet, in the avatar's own frame (x right, y up, -z ahead); first
+                                      // person's arms; then where the shoulders (the upper arms' joints) are, the same way
+            if (!model)
+                continue;
+            auto at = [&](std::initializer_list<int> bones) {
+                std::string line;
+                for (int b : bones)
+                    if (const int n = model->human[b]; n >= 0) {
+                        const V3 p = model->fix.point({anim.globals()[n].m[12], anim.globals()[n].m[13], anim.globals()[n].m[14]}) + V3{0, anim.lift(), 0};
+                        line += std::format(" {:.4f} {:.4f} {:.4f}", p.x, p.y, p.z);
+                    }
+                return line;
+            };
+            fprintf(stderr, "wrists:%s arms %.3f shoulders%s\n", at({HB_L_HAND, HB_R_HAND}).c_str(), anim.firstPersonArms(), at({HB_L_UPPER_ARM, HB_R_UPPER_ARM}).c_str());
+        } else if (a == "--fpstatus") { // first person: the camera, how much is in, and where each hand is on the screen
+            if (!model)
+                continue;
+            const auto  e     = anim.eyes();
+            const M4    drawn = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1});
+            const V3    eye   = mo.fp.eye;
+            const M4    vp    = M4::perspective(rad(fov), (float)W / H, 0.05f, 200.f) * M4::lookAt(eye, eye + forwardFrom(rad(camYaw), rad(camPitch)), {0, 1, 0});
+            std::string hands;
+            for (int s = 0; s < 2; ++s) {
+                for (int b : {HB_L_HAND, HB_L_LOWER_ARM}) {
+                    const int n = model->human[b + (s ? HB_R_UPPER_ARM - HB_L_UPPER_ARM : 0)];
+                    if (n < 0)
+                        continue;
+                    const V3    p = drawn.point(model->fix.point(V3{anim.globals()[n].m[12], anim.globals()[n].m[13], anim.globals()[n].m[14]}));
+                    const float c[4] = {vp.m[0] * p.x + vp.m[4] * p.y + vp.m[8] * p.z + vp.m[12], vp.m[1] * p.x + vp.m[5] * p.y + vp.m[9] * p.z + vp.m[13], 0,
+                                        vp.m[3] * p.x + vp.m[7] * p.y + vp.m[11] * p.z + vp.m[15]};
+                    // (the screen from its top left, 0..1 across and down; behind the eye: nan)
+                    const float sx = c[3] > 0 ? 0.5f + 0.5f * c[0] / c[3] : NAN, sy = c[3] > 0 ? 0.5f - 0.5f * c[1] / c[3] : NAN;
+                    hands += std::format(" {}{} {:.3f} {:.3f} ({:.2f} m)", s ? "right" : "left", b == HB_L_HAND ? "wrist" : "elbow", sx, sy, length(p - eye));
+                }
+            }
+            fprintf(stderr, "fp: on %d weight %.2f arms %.2f eye %.3f %.3f %.3f (%.3f up, eyes %s) yaw %.1f pitch %.1f body %.1f;%s\n", fpBody ? 1 : 0, anim.firstPerson(),
+                    anim.firstPersonArms(), eye.x, eye.y, eye.z,
+                    eye.y - feet.y, e ? std::format("{:.3f} {:.3f} {:.3f}", drawn.point(*e).x, drawn.point(*e).y, drawn.point(*e).z).c_str() : "none", camYaw, camPitch,
+                    bodyYaw * DEG, hands.c_str());
         } else if (a == "--eye") { // first person from a point: x y z yaw pitch
             need(i, 5);
             firstPerson = true;
@@ -1213,6 +2046,17 @@ int main(int argc, char** argv) {
                         ++n;
                     }
             fprintf(stderr, "hid %d batches of %s\n", n, what.c_str());
+        } else if (a == "--hide-avatar") { // name: stop drawing the avatar's materials whose name has it (to see what's behind)
+            need(i, 1);
+            const std::string what = argv[++i];
+            int               n    = 0;
+            if (model)
+                for (auto& b : model->batches)
+                    if (model->materials[b.material].name.find(what) != std::string::npos) {
+                        b.count = 0;
+                        ++n;
+                    }
+            fprintf(stderr, "hid %d of the avatar's batches of %s\n", n, what.c_str());
         } else if (a == "--show") { // name: draw them again
             need(i, 1);
             const std::string what = argv[++i];
@@ -1360,7 +2204,7 @@ int main(int argc, char** argv) {
                         break;
                     }
             }
-            float facing = bodyYaw;
+            float facing = camWorld ? 0.f : bodyYaw;
             if (const int chest = model ? model->human[model->human[HB_CHEST] >= 0 ? HB_CHEST : HB_SPINE] : -1; camChest && chest >= 0) {
                 M4 rest = M4::identity();
                 for (int k = chest; k >= 0; k = model->nodes[k].parent)
@@ -1373,7 +2217,7 @@ int main(int argc, char** argv) {
             const V3    toCam  = forwardFrom(facing + orbit, rad(pitch));
             V3          eye    = target + toCam * dist;
             if (firstPerson) {
-                eye    = eyeSet ? eyeAt : feet + V3{0, 1.65f, 0};
+                eye    = eyeSet ? eyeAt : fpBody && model ? mo.fp.eye : feet + V3{0, 1.65f, 0};
                 target = eye + forwardFrom(rad(camYaw), rad(camPitch));
             }
             if (autoExp) {
@@ -1416,6 +2260,7 @@ int main(int argc, char** argv) {
                 f.avatar.batchMaterials = anim.batchMaterials();
                 f.avatar.transform = M4::trs(feet + V3{0, anim.lift(), 0}, Quat::axisAngle({0, 1, 0}, -bodyYaw), {1, 1, 1});
                 f.avatar.visible   = true;
+                f.avatar.firstPerson = firstPerson && fpBody && !eyeSet;
                 f.avatar.outlines  = outlines;
                 f.avatar.sky       = sky;
                 f.avatar.bounce    = bounce;

@@ -63,6 +63,8 @@ namespace h3d::gltf {
     // parses `path` and loads its buffers; on failure returns null and says why
     // (`what` names the file in messages: "map", "avatar")
     DataPtr open(const std::string& path, const std::string& what, std::string& error);
+    // ... the same of a GLB in memory (one built in): its buffer must be its own, in it
+    DataPtr openMemory(const void* bytes, size_t size, const std::string& what, std::string& error);
 
     // the materials of a file in the renderer's terms. The images are only
     // described, decodeImages() fills in their pixels. Without surfaceMaps, normal

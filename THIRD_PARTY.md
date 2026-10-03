@@ -4,9 +4,9 @@
 
 - `cgltf.h`: cgltf 1.15, MIT License, Copyright (c) 2018-2021 Johannes Kuhlmann. Its license is at
   the end of the file.
-- `stb_image.h` (v2.30) and `stb_dxt.h` (v1.12): by Sean Barrett and contributors (stb_dxt originally
-  by Fabian "ryg" Giesen), public domain or MIT, at your choice. The licenses are at the end of
-  each file.
+- `stb_image.h` (v2.30), `stb_dxt.h` (v1.12) and `stb_vorbis.c` (v1.22, emotes' sounds; as nixpkgs'
+  stb 0-unstable-2026-04-15 has it): by Sean Barrett and contributors (stb_dxt originally by Fabian
+  "ryg" Giesen), public domain or MIT, at your choice. The licenses are at the end of each file.
 
 ## The bone-name table in tools/unity2hypr3d.py
 

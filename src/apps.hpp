@@ -37,13 +37,13 @@ namespace h3d {
     // yet: finding and drawing it takes a moment). Kept once loaded
     std::shared_ptr<const SPicture> appIcon(const std::string& icon, int size, bool load = true);
 
-    // Where a window launched from 3D opens: metres in front of the eye, how tall it's made there, and to the side
-    // (> 0 right), turned to face you. The config's plugin:hypr3d:app_rules, "CLASS: DISTANCE HEIGHT [left|right]"
-    // separated by commas (CLASS a regular expression, whole, any case), then the built-in ones: games big and
-    // further, chat apps at the side
+    // Where a window launched from 3D opens: metres in front of the eye, how tall it's made there (0 = auto: as big as
+    // it looks on your screen, made smaller to fit your view), and to the side (> 0 right), turned to face you. The
+    // config's plugin:hypr3d:app_rules, "CLASS: DISTANCE [HEIGHT|auto] [left|right|SIDE]" separated by commas (CLASS a
+    // regular expression, whole, any case), then the built-in ones: games and videos further, chat apps at the side
     struct SAppRule {
         std::string pattern;
-        float       distance = 1.5f, height = 0.9f, side = 0.f;
+        float       distance = 1.5f, height = 0.f, side = 0.f;
     };
     std::vector<SAppRule> parseAppRules(const std::string& spec, std::string& error);
     SAppRule              appRule(const std::vector<SAppRule>& user, const std::string& cls);

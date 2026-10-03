@@ -1433,7 +1433,7 @@ namespace h3d {
         std::vector<std::pair<int, size_t>> order; // (queue, batch)
         for (size_t i = 0; i < model.batches.size(); ++i) {
             const auto& b = model.batches[i];
-            if (!f.avatar.drawn(b))
+            if (!f.avatar.drawn(b) || !f.avatar.range(b).second)
                 continue;
             const auto& m = mats[f.avatar.material(b, i)];
             if ((m.alphaMode == ALPHA_BLEND || m.stencil.reads()) == late)
@@ -1503,7 +1503,8 @@ namespace h3d {
             const auto& b     = model.batches[i];
             const auto& m     = mats[f.avatar.material(b, i)];
             const bool  blend = m.alphaMode == ALPHA_BLEND;
-            const auto  draw  = [&] { glDrawElements(GL_TRIANGLES, b.count, GL_UNSIGNED_INT, (void*)(b.first * sizeof(uint32_t))); };
+            const auto [first, count] = f.avatar.range(b);
+            const auto  draw  = [&] { glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, (void*)(first * sizeof(uint32_t))); };
             if (blend) {
                 glDepthFunc(GL_LEQUAL);
                 glDepthMask(GL_FALSE);

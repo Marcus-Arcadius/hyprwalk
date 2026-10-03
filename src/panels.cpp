@@ -110,7 +110,9 @@ namespace h3d {
                 nullptr);
         }
 
-        void addLayers(std::vector<SPanel>& out, PHLMONITOR mon, int layer, float depth, int& order) {
+        // `lift`: how much of a fullscreen window's hiding (Hyprland fades the top layer's surfaces that were there before
+        // it to 0) is undone, 0..1
+        void addLayers(std::vector<SPanel>& out, PHLMONITOR mon, int layer, float depth, int& order, float lift = 0.f) {
             for (const auto& ref : mon->m_layerSurfaceLayers[layer]) {
                 const auto ls = ref.lock();
                 if (!ls || (!ls->m_mapped && !ls->m_fadingOut))
@@ -119,7 +121,9 @@ namespace h3d {
                 if (!drawable(surf))
                     continue;
 
-                const float alpha = ls->m_alpha->value();
+                float alpha = ls->m_alpha->value();
+                if (!ls->m_fadingOut && !ls->m_aboveFullscreen)
+                    alpha += (1.f - alpha) * lift;
                 if (alpha <= 0.f)
                     continue;
 
@@ -178,8 +182,10 @@ namespace h3d {
     namespace {
 
         // windows in `placed` were put somewhere in the world: their workspace
-        // fading in and out doesn't apply to them
-        void addWindow(std::vector<SPanel>& out, PHLMONITOR mon, PHLWINDOW w, float depth, int& order, const std::unordered_set<uintptr_t>& placed) {
+        // fading in and out doesn't apply to them. `lift`: how much of a fullscreen window's hiding (Hyprland fades the
+        // rest of its workspace to 0) is undone for this one, 0..1
+        void addWindow(std::vector<SPanel>& out, PHLMONITOR mon, PHLWINDOW w, float depth, int& order, const std::unordered_set<uintptr_t>& placed,
+                       float lift = 0.f) {
             const auto ws = w->m_workspace;
             const auto surf = w->wlSurface() ? w->wlSurface()->resource() : nullptr;
             if (!drawable(surf))
@@ -190,9 +196,11 @@ namespace h3d {
                 pos += ws->m_renderOffset->value();
             pos -= mon->m_position;
 
-            float alpha = w->alphaValue(Desktop::View::WINDOW_ALPHA_FADE) * w->alphaValue(Desktop::View::WINDOW_ALPHA_FULLSCREEN) *
-                w->alphaValue(Desktop::View::WINDOW_ALPHA_LAYOUT) * w->alphaValue(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE) *
-                w->alphaValue(Desktop::View::WINDOW_ALPHA_ACTIVE);
+            float fs = w->alphaValue(Desktop::View::WINDOW_ALPHA_FULLSCREEN);
+            if (!w->m_fadingOut)
+                fs += (1.f - fs) * lift;
+            float alpha = w->alphaValue(Desktop::View::WINDOW_ALPHA_FADE) * fs * w->alphaValue(Desktop::View::WINDOW_ALPHA_LAYOUT) *
+                w->alphaValue(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE) * w->alphaValue(Desktop::View::WINDOW_ALPHA_ACTIVE);
             if (ws && !w->m_pinned && !placed.contains(reinterpret_cast<uintptr_t>(w.get())))
                 alpha *= ws->m_alpha->value();
             if (alpha <= 0.f)
@@ -227,7 +235,7 @@ namespace h3d {
         }
     }
 
-    std::vector<SPanel> collectPanels(PHLMONITOR mon, float spacing, const std::unordered_set<uintptr_t>& always) {
+    std::vector<SPanel> collectPanels(PHLMONITOR mon, float spacing, const std::unordered_set<uintptr_t>& always, float inWorld) {
         std::vector<SPanel> out;
         if (!mon)
             return out;
@@ -235,6 +243,17 @@ namespace h3d {
         int        order = 0;
         const auto ws    = mon->m_activeWorkspace;
         const bool fullscreen = ws && ws->m_hasFullscreenWindow && ws->m_fullscreenMode == FSMODE_FULLSCREEN;
+        // in 3D a fullscreen (or maximized) window hides the rest of its workspace only on the desktop wall, while it's
+        // there itself: one out in the world (placed, in tiling mode's row) covers nothing on the wall, and nothing out
+        // in the world is under it
+        const auto  fsWindow = ws && ws->m_hasFullscreenWindow ? ws->getFullscreenWindow() : nullptr;
+        const bool  fsOut    = fsWindow && always.contains(reinterpret_cast<uintptr_t>(fsWindow.get()));
+        const float in3D     = std::clamp(inWorld, 0.f, 1.f);
+        const auto  lift     = [&](const PHLWINDOW& w) { return fsOut || (w && always.contains(reinterpret_cast<uintptr_t>(w.get()))) ? in3D : 0.f; };
+        // (Hyprland doesn't render one hidden under a fullscreen window at all)
+        const auto  underFs = [&](const PHLWINDOW& w) {
+            return fsWindow && w->m_workspace == ws && !w->isAllowedOverFullscreen() && !w->m_fadingOut && w->visibleOnMonitor(mon);
+        };
 
         addLayers(out, mon, 0, DEPTH_BACKGROUND, order);
         addLayers(out, mon, 1, DEPTH_BOTTOM, order);
@@ -245,17 +264,17 @@ namespace h3d {
         for (const auto& w : g_pCompositor->m_windows) {
             if (!w || w->isHidden() || (!w->m_isMapped && !w->m_fadingOut))
                 continue;
-            if (!g_pHyprRenderer->shouldRenderWindow(w, mon)) {
+            // (an X11 menu or tooltip is under a fullscreen window or not as the window it belongs to is)
+            const auto owner = w->m_isX11 && w->isX11OverrideRedirect() ? x11Owner(w) : nullptr;
+            if (!g_pHyprRenderer->shouldRenderWindow(w, mon) && !(underFs(w) && lift(owner ? owner : w) > 0.f)) {
                 if (w->m_isMapped && always.contains(reinterpret_cast<uintptr_t>(w.get())))
                     elsewhere.push_back(w);
                 continue;
             }
 
-            if (w->m_isX11 && w->isX11OverrideRedirect()) {
-                if (const auto owner = x11Owner(w)) {
-                    x11Popups.emplace_back(w, owner);
-                    continue;
-                }
+            if (owner) {
+                x11Popups.emplace_back(w, owner);
+                continue;
             }
 
             if (w->onSpecialWorkspace())
@@ -275,16 +294,17 @@ namespace h3d {
             tiled.push_back(focusedTiled);
 
         for (auto& w : tiled)
-            addWindow(out, mon, w, DEPTH_TILED, order, always);
-        for (auto& w : fullscreen ? std::vector<PHLWINDOW>{} : floating)
-            addWindow(out, mon, w, DEPTH_FLOATING, order, always);
+            addWindow(out, mon, w, DEPTH_TILED, order, always, lift(w));
+        for (auto& w : floating) // (with a fullscreen one, those under it that it doesn't hide; the ones over it after it)
+            if (!fullscreen || (lift(w) > 0.f && !w->shouldRenderOverFullscreen()))
+                addWindow(out, mon, w, DEPTH_FLOATING, order, always, lift(w));
         for (auto& w : full)
             addWindow(out, mon, w, DEPTH_TILED, order, always);
         if (fullscreen) {
             // floating windows allowed over a fullscreen one
             for (auto& w : floating)
                 if (w->shouldRenderOverFullscreen())
-                    addWindow(out, mon, w, DEPTH_FLOATING, order, always);
+                    addWindow(out, mon, w, DEPTH_FLOATING, order, always, lift(w));
         }
         for (auto& w : pinned)
             addWindow(out, mon, w, DEPTH_FLOATING, order, always);
@@ -293,7 +313,7 @@ namespace h3d {
         for (auto& w : specialFloating)
             addWindow(out, mon, w, DEPTH_SPECIAL + 1.f, order, always);
         for (auto& w : elsewhere)
-            addWindow(out, mon, w, DEPTH_FLOATING, order, always);
+            addWindow(out, mon, w, DEPTH_FLOATING, order, always, lift(w));
         // X11 menus and tooltips over the window they belong to, as its popups: carried along when it's placed in the
         // world (their positions are the X server's, relative to where it is on the desktop)
         for (const auto& [w, owner] : x11Popups) {
@@ -301,7 +321,7 @@ namespace h3d {
             const bool   owned = it != out.end();
             const float  depth = owned ? it->depth + DEPTH_POPUP : DEPTH_FLOATING;
             const size_t n     = out.size();
-            addWindow(out, mon, w, depth, order, always);
+            addWindow(out, mon, w, depth, order, always, lift(owner));
             if (owned && out.size() > n) {
                 out[n].kind     = PANEL_POPUP;
                 out[n].window   = owner;
@@ -333,8 +353,12 @@ namespace h3d {
             });
         }
 
+        // (with a fullscreen window, as Hyprland draws them: the ones mapped over it (a notification) at their own alpha,
+        // the ones faded out under it not; a bar on the wall, the fullscreen window out in the world, lifted)
         if (!fullscreen)
             addLayers(out, mon, 2, DEPTH_TOP, order);
+        else
+            addLayers(out, mon, 2, DEPTH_TOP, order, fsOut ? in3D : 0.f);
         addLayers(out, mon, 3, DEPTH_OVERLAY, order);
 
         // painter's order: deeper (closer to the wall) first, then 2D stacking

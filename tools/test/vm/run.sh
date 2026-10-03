@@ -16,9 +16,11 @@
 #                  llvmpipe in the VM
 #
 # Only synthetic things go into the VM: those two avatars, ToonTest.glb and TestRoom.glb (assets.py), LitCourt.glb
-# (litmap.py), the vowels (synth/vowels.py, and 30 dB down: synth/attenuate.py) and a microphone's hiss, overlay.qml
-# (a shell's see-through overlay, for quickshell), wheel.py, touchpad.py, gamepad.py, the test apps written here
-# (h3dgame.c, which vm.nix builds, tkapp.py, page.html, electron/ and obsws.py), the live check script and
+# (litmap.py), the vowels (synth/vowels.py, and 30 dB down: synth/attenuate.py), a microphone's hiss and an emote's
+# song (two tones, HandsSong.ogg, made with ffmpeg), overlay.qml
+# (a shell's see-through overlay, for quickshell), launcher.qml (a launcher on a keybind, the same way) and topbar.qml
+# (a bar on the top layer), wheel.py, touchpad.py, gamepad.py, the test apps written here
+# (h3dgame.c, which vm.nix builds, tkapp.py, tkfs.py, page.html, electron/ and obsws.py), the live check script and
 # hypr3d.so; the apps the checks run are open-source ones from nixpkgs (vm.nix). OUTDIR gets results.txt (a line
 # per check), results.json, frames/ (grim's PNGs from inside the VMs), logs/ (Hyprland's logs, the journal,
 # pw-dump, the apps' own logs in logs/apps; logs/hidpi: the second VM's), live/ (the live check's results and
@@ -66,7 +68,8 @@ say "Hyprland: $HYPR_OUT"
 IN="$OUT/in"
 rm -rf "$IN"
 mkdir -p "$IN/wav" "$IN/emotes"
-cp "$REPO/hypr3d.so" "$VM/wheel.py" "$VM/touchpad.py" "$VM/gamepad.py" "$VM/tkapp.py" "$VM/obsws.py" "$VM/page.html" "$VM/overlay.qml" "$IN/"
+cp "$REPO/hypr3d.so" "$VM/wheel.py" "$VM/touchpad.py" "$VM/gamepad.py" "$VM/tkapp.py" "$VM/tkfs.py" "$VM/obsws.py" "$VM/page.html" "$VM/overlay.qml" \
+    "$VM/launcher.qml" "$VM/topbar.qml" "$IN/"
 cp -r "$VM/electron" "$IN/"
 python3 "$VM/assets.py" "$IN" > /dev/null
 python3 "$VM/litmap.py" "$IN" > /dev/null
@@ -96,12 +99,17 @@ for f in BoothAccessories.glb BoothAccessories.hypr3d.json BoothGimmicks.hands.v
 done
 cp "$AVATARS/BoothAccessories.glb" "$AVATARS/BoothGimmicks.hands.vrma" "$IN/"
 cp "$AVATARS/BoothGimmicks.hands.vrma" "$IN/emotes/Hands.vrma"
-# its settings with two emotes more: BoothGimmicks' hand poses (a 7 s VRM animation) at twice its speed and as it is
+# a song for an emote (its "sound"): 440 Hz on the left, 660 Hz on the right, 2 s, Ogg Vorbis
+ffmpeg -v error -y -f lavfi -i "aevalsrc=exprs=0.5*sin(2*PI*440*t)|0.5*sin(2*PI*660*t):s=48000:d=2" -c:a libvorbis -q:a 6 "$IN/HandsSong.ogg" ||
+    die "ffmpeg couldn't make HandsSong.ogg"
+# its settings with three emotes more: BoothGimmicks' hand poses (a 7 s VRM animation) at twice its speed, as it is,
+# and over and over with that song
 python3 - "$AVATARS/BoothAccessories.hypr3d.json" "$IN/BoothAccessories.hypr3d.json" << 'EOF'
 import json, sys
 s = json.load(open(sys.argv[1], encoding='utf-8'))
 s['emotes'] = s.get('emotes', []) + [{'name': 'Hands Fast', 'file': 'BoothGimmicks.hands.vrma', 'speed': 2},
-                                     {'name': 'Hands Slow', 'file': 'BoothGimmicks.hands.vrma'}]
+                                     {'name': 'Hands Slow', 'file': 'BoothGimmicks.hands.vrma'},
+                                     {'name': 'Hands Song', 'file': 'BoothGimmicks.hands.vrma', 'loop': True, 'sound': 'HandsSong.ogg'}]
 json.dump(s, open(sys.argv[2], 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
 EOF
 # the vowels sung for longer (the WAVs are 0.8 s): the same file eight times over, and a man's o then hiss

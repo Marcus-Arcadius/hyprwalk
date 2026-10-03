@@ -90,7 +90,10 @@ namespace h3d {
     // collects the panels visible on a monitor, sorted back to front on the
     // desktop wall; `spacing` is the distance between stacking levels in meters.
     // Windows in `always` are included even when their workspace isn't shown.
-    std::vector<SPanel> collectPanels(PHLMONITOR mon, float spacing, const std::unordered_set<uintptr_t>& always = {});
+    // `inWorld`: 0 on the flat 2D desktop .. 1 fully in 3D. In 3D a fullscreen (or maximized) window hides the rest of
+    // its workspace only on the desktop wall, while it's on the wall itself: out in the world (in `always`) it covers
+    // nothing there, and the windows out in the world are never under it
+    std::vector<SPanel> collectPanels(PHLMONITOR mon, float spacing, const std::unordered_set<uintptr_t>& always = {}, float inWorld = 0.f);
 
     // the window an X11 override-redirect one (a menu, a tooltip) belongs to, null = none (a window of its own)
     PHLWINDOW x11Owner(const PHLWINDOW& w);

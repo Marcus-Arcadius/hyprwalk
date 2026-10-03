@@ -30,8 +30,8 @@ namespace h3d {
         // evdev codes
         enum : uint32_t {
             K_ESC       = 1,
-            K_1         = 2, // .. K_8 = 9
-            K_8         = 9,
+            K_1         = 2, // .. K_9 = 10
+            K_9         = 10,
             K_BACKSPACE = 14,
             K_E         = 18,
             K_ENTER     = 28,
@@ -88,6 +88,16 @@ namespace h3d {
             return emote(args, rest, loadEmote);
         if (sub == "parts" || sub == "toggle" || sub == "shape" || sub == "slider")
             return outfit(args);
+        if (sub == "attack") { // an arm swung at what's ahead, as a left click on nothing does: whichever's next, or that one
+            if (!avatar)
+                return noAvatar();
+            const std::string v = args.size() > 2 ? args[2] : "";
+            if (!v.empty() && v != "left" && v != "right")
+                return "error: avatar attack [left|right]";
+            if (!m_anim.attack(v == "left" ? 0 : v == "right" ? 1 : -1))
+                return "error: " + avatar->name + " has no arms to swing (not a humanoid)";
+            return m_anim.attackStatus();
+        }
         if (sub == "physics") { // hair, skirts and the like swing (spring bones), or hang as the animation has them
             const std::string v = args.size() > 2 ? args[2] : "";
             if (v == "on" || v == "off" || v == "toggle")
@@ -108,11 +118,18 @@ namespace h3d {
         const auto& all = m_anim.emotes();
         if (args.size() < 3) {
             std::string list;
-            for (size_t i = 0; i < all.size(); ++i)
-                list += std::format(R"({}{{"name": "{}", "from": "{}", "loop": {}, "hold": {}, "duration": {:.2f}, "speed": {:.3f}}})", i ? ", " : "",
-                                    jsonEscape(all[i]->name), jsonEscape(all[i]->from), all[i]->loop, all[i]->hold, all[i]->anim.duration, all[i]->speed);
+            for (size_t i = 0; i < all.size(); ++i) {
+                const auto& s = all[i]->sound;
+                list += std::format(R"({}{{"name": "{}", "from": "{}", "loop": {}, "hold": {}, "duration": {:.2f}, "speed": {:.3f}, "sound": {}}})", i ? ", " : "",
+                                    jsonEscape(all[i]->name), jsonEscape(all[i]->from), all[i]->loop, all[i]->hold, all[i]->anim.duration, all[i]->speed,
+                                    s ? std::format(R"({{"file": "{}", "duration": {:.2f}, "rate": {}, "channels": {}}})",
+                                                    jsonEscape(std::filesystem::path(s->file).filename().string()), s->duration(), s->rate, s->channels)
+                                      : "null");
+            }
+            // (and how far into the one playing it is: with a sound, where that's heard)
             const int e = m_anim.emote();
-            return std::format(R"({{"playing": "{}", "loading": {}, "emotes": [{}]}})", e >= 0 ? jsonEscape(all[e]->name) : "", emotesLoading, list);
+            return std::format(R"({{"playing": "{}", "time": {:.3f}, "loading": {}, "sound": {}, "emotes": [{}]}})", e >= 0 ? jsonEscape(all[e]->name) : "",
+                               e >= 0 ? m_anim.emoteTime() : 0.f, emotesLoading, emoteSound, list);
         }
         if (args.size() == 3 && (args[2] == "stop" || args[2] == "none" || args[2] == "off")) {
             m_anim.stopEmote();
@@ -484,7 +501,7 @@ namespace h3d {
             case K_G:
             case K_X: return true; // they're for what the crosshair points at, and it's hidden
             default:
-                if (k >= K_1 && k <= K_8) {
+                if (k >= K_1 && k <= K_9) { // (9: the root's ninth; nothing on a page of eight, or a dial)
                     pick(menu.pick((int)(k - K_1)));
                     return true;
                 }

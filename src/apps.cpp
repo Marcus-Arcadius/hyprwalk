@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cairo/cairo.h>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -323,18 +324,34 @@ namespace h3d {
                 continue;
             const size_t colon = p.rfind(':');
             if (colon == std::string::npos) {
-                error = std::format("app rule \"{}\": CLASS: DISTANCE HEIGHT [left|right|SIDE]", p);
+                error = std::format("app rule \"{}\": CLASS: DISTANCE [HEIGHT|auto] [left|right|SIDE]", p);
                 continue;
             }
             SAppRule           r;
             r.pattern = trim(p.substr(0, colon));
             std::istringstream in(p.substr(colon + 1));
-            std::string        side;
-            if (!(in >> r.distance >> r.height) || r.distance < 0.3f || r.height < 0.05f) {
-                error = std::format("app rule \"{}\": a distance and a height in metres", p);
+            // the height: metres, or auto (as big as on your screen), which it is when left out: left or right can come
+            // straight after the distance, a side in metres only after a height or auto
+            std::string height, side;
+            if (!(in >> r.distance) || r.distance < 0.3f) {
+                error = std::format("app rule \"{}\": the distance is metres (0.3 or more)", p);
                 continue;
             }
-            if (in >> side)
+            if (in >> height) {
+                if (height == "left" || height == "right")
+                    side = height;
+                else if (height != "auto") {
+                    char* end = nullptr;
+                    r.height  = std::strtof(height.c_str(), &end);
+                    if (end == height.c_str() || *end || !std::isfinite(r.height) || r.height < 0.05f) {
+                        error = std::format("app rule \"{}\": the height is metres (0.05 or more) or auto", p);
+                        continue;
+                    }
+                }
+            }
+            if (side.empty())
+                in >> side;
+            if (!side.empty())
                 r.side = side == "left" ? -1.f : side == "right" ? 1.f : std::strtof(side.c_str(), nullptr);
             try {
                 (void)std::regex(r.pattern, std::regex::icase);
@@ -348,13 +365,15 @@ namespace h3d {
     }
 
     SAppRule appRule(const std::vector<SAppRule>& user, const std::string& cls) {
+        // (no heights: each comes as big as on your screen. A height of their own made a window as tall as the screen
+        // half as big as it is there)
         static const std::vector<SAppRule> BUILT_IN = {
-            // games (Steam's, Proton's, gamescope's): big and further off
-            {"steam_app_.*|gamescope|.*\\.exe|steam_proton|chocolate-doom|supertux2|retroarch|.*minecraft.*|h3dgame.*", 2.0f, 1.3f, 0.f},
-            // chat and calls: to the left, closer and smaller
-            {"discord|vesktop|webcord|equibop|signal|telegram.*|org\\.telegram\\..*|element|slack|zoom|teams.*", 1.3f, 0.75f, -1.f},
+            // games (Steam's, Proton's, gamescope's): further off
+            {"steam_app_.*|gamescope|.*\\.exe|steam_proton|chocolate-doom|supertux2|retroarch|.*minecraft.*|h3dgame.*", 2.0f, 0.f, 0.f},
+            // chat and calls: to the left, closer
+            {"discord|vesktop|webcord|equibop|signal|telegram.*|org\\.telegram\\..*|element|slack|zoom|teams.*", 1.3f, 0.f, -1.f},
             // videos
-            {"mpv|vlc|org\\.videolan\\.vlc|io\\.github\\.celluloid_player\\.celluloid|.*\\.showtime", 2.0f, 1.2f, 0.f},
+            {"mpv|vlc|org\\.videolan\\.vlc|io\\.github\\.celluloid_player\\.celluloid|.*\\.showtime", 2.0f, 0.f, 0.f},
         };
         for (const auto* rules : {&user, &BUILT_IN})
             for (const auto& r : *rules) {

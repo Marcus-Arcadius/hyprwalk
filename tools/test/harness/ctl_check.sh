@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ctl_check.sh: the plugin's avatar commands and Action Menu glue (src/control.cpp, which main.cpp and the harness
 # share) driven through the harness as hyprctl and the keyboard and mouse would: sliders (one and two axes, by
-# number and percent), toggles and the material variants they switch, the menu's pages, a slider's dial by the mouse,
-# the wheel and a click, a two-axis puppet's stick, an emote's speed, and a node held in the world (MA's World Fixed
-# Object) while the avatar walks away.
+# number and percent), toggles and the material variants they switch, the menu's pages (the root's nine), a slider's
+# dial by the mouse, the wheel and a click, a two-axis puppet's stick, an emote's speed and its sound (listed, or
+# said not to be there), and a node held in the world (MA's World Fixed Object) while the avatar walks away.
 #   tools/test/harness/ctl_check.sh DIR
 # DIR has BoothAccessories.glb and SynthDances.glb with their settings and emote files, as regress.sh --keep (with
-# --items) leaves them in OUT/new. Needs build/test/shot (tools/test/harness/build.sh).
+# --items) leaves them in OUT/new. Needs build/test/shot (tools/test/harness/build.sh), and ffmpeg for the sound.
 set -uo pipefail
 DIR="${1:?usage: ctl_check.sh DIR, the OUT/new that regress.sh --keep leaves}"
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -39,6 +39,18 @@ if [[ -f "$A" ]]; then
     check 'Backspace and Esc: closed' "$out" 'ctl menu -> {"open": false}'
     check 'what the dial and the stick set, kept' "$out" '{"name": "ニーハイの緩さ", "value": 0.250}'
     check '...' "$out" '{"name": "しっぽの向き", "value": [0.414, 0.207]}'
+    # the root page's nine (no "More"): Avatars last, its hint the avatar's name; a wheel notch back from the middle and
+    # the mouse up and left (320 degrees round, the ninth's middle) point at it, and pick takes 1-9
+    out="$("$SHOT" --size 1280x800 --avatar "$A" --key tab --ctl menu --wheel -1 --ctl menu --key esc --key tab --ctl menu \
+        --mouse -96 -115 --ctl menu --ctl "menu pick 10" 2>&1)"
+    check 'the root page: nine, Avatars last, its hint the avatar'"'"'s name' "$out" '{"slot": 9, "label": "Avatars", "hint": "BoothAccessories", "on": false, "disabled": false, "submenu": true'
+    hl="$(grep '^ctl menu -> ' <<< "$out" | grep -o '"highlight": -\?[0-9]*' | awk '{printf "%s ", $2}')"
+    if [[ "$hl" == "0 9 0 9 " ]]; then
+        echo "ok   ... the wheel back from the middle and the mouse at 320 degrees: the ninth"
+    else
+        echo "FAIL the ninth by the wheel and the mouse: highlights $hl(want 0 9 0 9)"; FAILS=$((FAILS + 1))
+    fi
+    check '... pick takes 1-9' "$out" 'ctl menu pick 10 -> error: pick 1-9, or 0 for the middle'
     # its tail held in the world ("fixed", as the converter writes MA's World Fixed Object), without its spring
     W="$(mktemp -d)"
     cp "$A" "$W/"
@@ -74,6 +86,22 @@ if [[ -f "$D" ]]; then
         echo "ok   twice as fast: in 90 frames where it is in 180"
     else
         echo "FAIL twice as fast: 90 frames and 180 differ"; FAILS=$((FAILS + 1))
+    fi
+    # an emote's sound (the settings file's "sound", next to it): decoded as the avatar loads and listed with it; one
+    # that isn't there is said, and its emote plays without (the harness plays no sound: tools/test/sound does)
+    if command -v ffmpeg > /dev/null; then
+        ffmpeg -v error -y -f lavfi -i "aevalsrc=exprs=0.5*sin(2*PI*440*t):s=44100:d=1.5" -c:a libvorbis "$T/song.ogg"
+        sed -e 's/"name": "Loli Kami Requiem",/"name": "Loli Kami Requiem", "sound": "song.ogg",/' \
+            -e 's/"name": "Doodle Dance",/"name": "Doodle Dance", "sound": "gone.ogg",/' "$DIR/SynthDances.hypr3d.json" > "$T/SynthDances.hypr3d.json"
+        out="$("$SHOT" --size 64x64 --avatar "$T/SynthDances.glb" --ctl "avatar emote" --ctl "avatar emote Loli Kami Requiem" --frames 10 \
+            --ctl "avatar emote" 2>&1)"
+        check 'an emote'"'"'s sound, listed with it' "$out" '"sound": {"file": "song.ogg", "duration": 1.50, "rate": 44100, "channels": 1}'
+        check '... in the log' "$out" 'sound song.ogg, 1.5 s)'
+        check 'one that isn'"'"'t there: said' "$out" 'gone.ogg can'"'"'t be read'
+        check '... its emote without one' "$out" '"name": "Doodle Dance", "from": "SynthDances.Doodle Dance.vrma", "loop": true, "hold": false, "duration"'
+        check 'playing one: how far into it (no speaker here)' "$out" '{"playing": "Loli Kami Requiem", "time": 0.'
+    else
+        echo "skipped: an emote's sound (no ffmpeg to make one)"
     fi
 else
     echo "skipped: no $D"

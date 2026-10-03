@@ -19,7 +19,8 @@ options:
                      running Modular Avatar's Setup Outfit would; repeatable
   --emote NAME|PATH  add a humanoid animation clip as an emote, as putting it in the avatar's
                      Action layer would: a .anim file, a clip by name, or the clips of a package,
-                     zip or folder (less still poses when it has clips that move); repeatable
+                     zip or folder (less still poses when it has clips that move), each with its
+                     song if one is beside it; repeatable
 
 What it carries over, from the avatar descriptor and the files it points to:
   the humanoid bone map (from the FBX import settings), visemes, the blink shape, the eye bones,
@@ -41,7 +42,11 @@ settings file's "emotes". Their muscle curves become bone turns for the avatar's
 curves move the hips, and shape key curves (MMD faces too) set the avatar's shape keys or VRM
 expressions. Weighted keys are Unity's Bezier spans, and a state with Foot IK plants the feet on
 the clip's goals. A dance motion set up with MA goes on with --outfit, like an outfit; one sold as
-bare clips goes on with --emote, named as its clip, looping if the clip loops.
+bare clips goes on with --emote, named as its clip with its words spaced out, looping if the clip
+loops. A looping clip's "Loop" is left off (FreddyFazbearPumpItUp_Loop: Freddy Fazbear Pump It Up)
+unless it is one of a set (Thumbs up Entry, Thumbs up Loop). A bare clip's song (the sound file of
+its name beside it, or its folder's one sound file when it is the folder's one clip) is copied next
+to the GLB as OUT.<name>.ogg, the emote's "sound", when it is Ogg Vorbis (all hypr3d plays).
 
 Modular Avatar setups are built as MA builds them for VRChat: Merge Armature (an outfit's bones
 join the avatar's and its meshes follow the avatar's bones), Bone Proxy, Move To, Replace Object,
@@ -66,7 +71,7 @@ it is. Features for VRChat's own systems (security locks, avatar scale, toes, ta
 person fixes and the like) change nothing hypr3d shows.
 
 What it does not: shader effects beyond the above (toon shading, matcaps, rim lights and the like),
-constraints, particles, audio, contacts; VRCFury's SPS, TPS and OGB (each is named in a warning). MA's
+constraints, particles, audio (but a bare clip's song), contacts; VRCFury's SPS, TPS and OGB (each is named in a warning). MA's
 World Fixed Object is held in the world where its rest pose was when the avatar appeared (the settings
 file's "fixed"): MA fixes it to the world's origin, and hypr3d's worlds put you at their start. Full Controller layers other than FX, Gesture and Action have nothing to do
 here. Blender imports only binary FBX files, so a model in any other format stops the conversion.
@@ -635,8 +640,8 @@ def set_prop(data, path, val):
 # ---------------------------------------------------------------- the assets: packages, zips, folders
 
 SKIP_DIRS = {'Library', 'Temp', 'Logs', 'obj', 'UserSettings', 'Build', 'Builds', 'node_modules'}
-SKIP_EXT = {'.wav', '.mp3', '.ogg', '.aif', '.aiff', '.flac', '.mp4', '.mov', '.webm', '.avi',
-            '.dll', '.so', '.dylib', '.cs', '.pdb', '.mdb', '.exe'}
+SKIP_EXT = {'.mp4', '.mov', '.webm', '.avi', '.dll', '.so', '.dylib', '.cs', '.pdb', '.mdb', '.exe'}
+AUDIO_EXT = {'.ogg', '.wav', '.mp3', '.aif', '.aiff', '.flac'}  # (kept: a bare clip's song, see clip_sound)
 IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.tga', '.psd', '.tif', '.tiff', '.bmp', '.exr', '.hdr',
              '.gif', '.dds', '.webp'}
 MODEL_EXT = {'.fbx', '.obj', '.dae', '.3ds', '.dxf', '.blend', '.ma', '.mb', '.max', '.c4d'}
@@ -7610,6 +7615,7 @@ class HumanClip:
         self.tdof = set()  # the bones it moves as well as turns (Translation DoF), which only some avatars take
         self.foot_ik = False  # its state has Foot IK on (action_clips)
         self.src = None  # (asset guid or file, fileID): where it was read from
+        self.sound = None  # (where it is in the input, the file): its song, played with it (find_emotes, clip_sound)
         end = 0.0
         for c in listof(body.get('m_FloatCurves')) or listof(body.get('m_EditorCurves')):
             c = dictof(c)
@@ -7799,19 +7805,25 @@ def find_emotes(db, want):
     for the buyer to put in their Action layer)"""
     path = os.path.abspath(os.path.expanduser(want))
     files, many = [], False  # [(UFile, the guid or file it is, where it is, for the log)]
+    sounds = []  # [(where it is, the file)]: the sound files beside them, for their songs
     if os.path.isfile(path) and path.lower().endswith('.anim'):
         try:
             files.append((UFile(path), os.path.realpath(path), os.path.basename(path)))
         except OSError as e:
             raise Fail('cannot read %s: %s' % (want, e))
+        d = os.path.dirname(path)
+        sounds = [(f, os.path.join(d, f)) for f in sorted(os.listdir(d)) if os.path.splitext(f)[1].lower() in AUDIO_EXT]
     elif os.path.exists(path):
         if os.path.isfile(path) and not path.lower().endswith(('.unitypackage', '.zip')):
             raise Fail('--emote %s: not an animation clip (.anim), a package, a zip or a folder' % want)
-        pool = sorted((a for a in input_assets(db, path) if a.ext == '.anim'), key=lambda a: a.path)
+        held = input_assets(db, path)
+        pool = sorted((a for a in held if a.ext == '.anim'), key=lambda a: a.path)
         files, many = [(db.yaml(a.guid), a.guid, a.path) for a in pool], True
+        sounds = sorted((a.path, a.file) for a in held if a.ext in AUDIO_EXT)
     else:
         low, stem = want.lower(), plain_name(want)
         clips = [a for a in db.assets.values() if a.ext == '.anim']
+        sounds = sorted((a.path, a.file) for a in db.assets.values() if a.ext in AUDIO_EXT)
         for test in (lambda a: a.name.lower() == low, lambda a: stem and plain_name(a.name) == stem,
                      lambda a: low in a.name.lower(), lambda a: low in a.path.lower()):
             hits = sorted((a for a in clips if test(a)), key=lambda a: a.path)
@@ -7841,8 +7853,60 @@ def find_emotes(db, want):
         found = [(w, c) for w, c in found if c.moves]
     if not found:
         raise Fail('no humanoid animation clip in %s' % want)
-    return [(c.name.replace('_', ' ').strip() or os.path.splitext(os.path.basename(w))[0], c,
-             c.loop and c.length > 0, 1.0, set()) for w, c in found]
+    for where, c in found:
+        c.sound = clip_sound(where, sounds, [w for w, _ in found])
+        if c.sound:
+            log('--emote %s: %s plays %s' % (want, where, c.sound[0]))
+    names = [spaced_words(c.name.replace('_', ' ').strip()) or os.path.splitext(os.path.basename(w))[0]
+             for w, c in found]
+    loops = [c.loop and c.length > 0 for _, c in found]
+    for i, n in enumerate(names):  # X_Loop, the loop of X: X, unless X is taken or it is one of a set (X Intro, X End)
+        short = re.sub(r'\s+loop$', '', n, flags=re.I)
+        low = short.lower()
+        if loops[i] and short != n and not any(m.lower() == low or m.lower().startswith(low + ' ')
+                                               for j, m in enumerate(names) if j != i):
+            names[i] = short
+    return [(n, c, loop, 1.0, set()) for n, (_, c), loop in zip(names, found, loops)]
+
+
+def clip_sound(where, sounds, clips):
+    """a bare clip's song, as its package puts it beside it for the buyer to play with it: the sound file of the clip's
+    name in its folder, else a folder's one sound file when the clip is the folder's one clip (of clips, where each is);
+    (where it is, the file), or None"""
+    def split(p):
+        folder, _, name = p.replace('\\', '/').rpartition('/')
+        return folder, os.path.splitext(name)[0].lower()
+
+    folder, stem = split(where)
+    here = [s for s in sounds if split(s[0])[0] == folder]
+    named = [s for s in here if split(s[0])[1] == stem]
+    if named:
+        return named[0]
+    if len(here) == 1 and sum(1 for w in clips if split(w)[0] == folder) == 1:
+        return here[0]
+    return None
+
+
+def write_sound(name, sound, fn):
+    """an emote's song (clip_sound's) copied to fn for the settings file's "sound": the file name, or None (and a
+    warning) when it is not Ogg Vorbis, all hypr3d plays"""
+    try:
+        with open(sound[1], 'rb') as f:
+            head = f.read(64)
+    except OSError as e:
+        warn('emote "%s": its sound %s cannot be read (%s), so it is left out' % (name, sound[0], e))
+        return None
+    if not (head.startswith(b'OggS') and b'\x01vorbis' in head):
+        warn('emote "%s": its sound %s is not Ogg Vorbis, all hypr3d plays, so it is left out' % (name, sound[0]))
+        return None
+    shutil.copyfile(sound[1], fn)
+    return os.path.basename(fn)
+
+
+def spaced_words(name):
+    """a clip's name with its words spaced out: FreddyFazbearPumpItUp -> Freddy Fazbear Pump It Up, FallBackward2 ->
+    Fall Backward 2 (a capital after a capital starts no word: pHM, VRSuya, INTERNET stay whole)"""
+    return re.sub(r'(?<=[a-z])(?=[A-Z][a-z])|(?<=[a-z])(?=[0-9])|(?<=[0-9])(?=[A-Z][a-z])', ' ', name)
 
 
 def write_vrma(path, axes, names, clip, shapes, speed=1.0):
@@ -9965,10 +10029,13 @@ def write_emotes(db, av, human, ma, acts, out):
             e['hold'] = True  # as VRChat holds its last frame till the menu item goes off
         if abs(speed - 1.0) > 1e-4:
             e['speed'] = _r(speed, 4)
+        song = getattr(clip, 'sound', None) and write_sound(name, clip.sound, os.path.splitext(fn)[0] + '.ogg')
+        if song:
+            e['sound'] = song
         emotes.append(e)
-        log('emote "%s": %s, %.2f s%s%s, %d face curve(s) -> %s' % (
+        log('emote "%s": %s, %.2f s%s%s, %d face curve(s) -> %s%s' % (
             name, clip.name, dur, ' looping' if loop else '', ', Foot IK' if clip.foot_ik else '', faces,
-            os.path.basename(fn)))
+            os.path.basename(fn), ' and its sound ' + song if song else ''))
     return emotes
 
 

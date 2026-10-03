@@ -25,6 +25,7 @@ namespace h3d {
         std::shared_ptr<SAvatarModel> avatar;                 // null = none
         bool                          loading       = false; // an avatar is on its way
         bool                          emotesLoading = false; // emote files are
+        std::string                   emoteSound    = "null"; // (JSON) what plays an emote's sound, as the plugin has it
         std::string                   expression;            // held, by the name it was asked for (kept for the next avatar)
         float                         expressionWeight = 1;
         // set by hand, for when the avatar is loaded again
@@ -35,8 +36,8 @@ namespace h3d {
 
         // a new avatar is in the animator: what was set by hand, again
         void loaded();
-        // hyprctl hypr3d avatar expression|gesture|emote|emotes|parts|toggle|shape|slider|physics ...; "" = not one of
-        // these. An emote file or folder goes to loadEmote(file, loop), whose answer it gives
+        // hyprctl hypr3d avatar expression|gesture|emote|emotes|parts|toggle|shape|slider|physics|attack ...; "" = not one
+        // of these. An emote file or folder goes to loadEmote(file, loop), whose answer it gives
         std::string command(const std::vector<std::string>& args, const std::string& rest,
                             const std::function<std::string(const std::string& file, int loop)>& loadEmote);
         // a toggle, else the parts of that name; state 1 on (shown), 0 off (hidden), -1 as the settings file has it,
@@ -61,7 +62,7 @@ namespace h3d {
 
     // the Action Menu's input as the plugin takes it (evdev codes); true = the menu took it. A pick goes to pick
     using FMenuPick = std::function<void(const std::optional<SMenuItem>&)>;
-    bool menuKey(CActionMenu& menu, uint32_t key, const FMenuPick& pick); // Esc, Backspace, Enter, 1-8
+    bool menuKey(CActionMenu& menu, uint32_t key, const FMenuPick& pick); // Esc, Backspace, Enter, 1-9
     bool menuButton(CActionMenu& menu, uint32_t button, const FMenuPick& pick); // left picks, right back, middle closes
     void menuWheel(CActionMenu& menu, float& fraction, float notches);          // round it, a notch an item
     // hyprctl hypr3d menu [open [page]|close|toggle|back|pick [n]|move dx dy|scroll n] (the menu's state without

@@ -6,6 +6,7 @@
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 
 #define CGLTF_IMPLEMENTATION
 #include "third_party/cgltf.h"
@@ -19,5 +20,10 @@
 
 #define STB_DXT_IMPLEMENTATION
 #include "third_party/stb_dxt.h"
+
+// (emotes' sounds, src/sound.cpp: decoded from memory, whole; last, as it leaves its own macros and typedefs behind)
+#define STB_VORBIS_NO_PUSHDATA_API
+#define STB_VORBIS_NO_STDIO
+#include "third_party/stb_vorbis.c"
 
 #pragma GCC diagnostic pop

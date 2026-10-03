@@ -42,15 +42,16 @@ namespace h3d {
     };
 
     // The Action Menu, like VRChat's: a ring of up to eight things to pick around a button in the middle that goes
-    // back; a page with more gets a "More" slot. The owner makes the pages, and they're asked for again every frame so
-    // they show what's on. While it's open the mouse moves a cursor in it instead of turning the camera: a click picks
-    // what the cursor points at, the wheel goes round, and 1-8 pick directly.
+    // back (the root page nine); a page with more gets a "More" slot. The owner makes the pages, and they're asked
+    // for again every frame so they show what's on. While it's open the mouse moves a cursor in it instead of turning
+    // the camera: a click picks what the cursor points at, the wheel goes round, and 1-9 pick directly.
     class CActionMenu {
       public:
         using FPages = std::function<SMenuPage(const std::string& id)>;
         using FDial  = std::function<void(const SMenuItem& item, float value, float value2)>; // a slider's dial moved
-        static constexpr int  SLOTS = 8;
-        static constexpr auto ROOT  = "main";
+        static constexpr int  SLOTS      = 8;
+        static constexpr int  ROOT_SLOTS = 9; // the root's: Avatars came last, the others keeping their numbers
+        static constexpr auto ROOT       = "main";
 
         explicit CActionMenu(FPages pages, FDial dial = {}) : m_pages(std::move(pages)), m_onDial(std::move(dial)) {}
 
@@ -72,7 +73,7 @@ namespace h3d {
         std::optional<SMenuItem> pick(); // what the cursor points at
         std::optional<SMenuItem> pick(int slot);
         int                      highlighted() const; // the slot the cursor points at, -1 = the middle, -2 = nothing
-        const SMenuPage&         page() const {       // as shown: up to eight items
+        const SMenuPage&         page() const {       // as shown: up to eight items (the root nine)
             return m_page;
         }
         std::string path() const; // "main/emotes", a later part of a long page as "emotes:2", a dial "outfit/~Hue"
@@ -138,9 +139,14 @@ namespace h3d {
         MA_SLIDER, // arg: the model's slider; its dial sets it
         MA_LIPSYNC, // the microphone moves the mouth, or not
         MA_LIPSYNC_GAIN, // its dial: the microphone's gain for lip sync (0 = automatic, then up to 60 dB)
-        // the plugin's own pages (main.cpp): apps and windows
+        // the plugin's own pages (main.cpp): apps, windows, maps and avatars
         MA_LAUNCH, // target: a desktop id, or a command
         MA_WINDOW, // target: the window's address; arg: eWindowAction
+        MA_TILING, // tiling mode (T) on or off
+        MA_TILING_FOLLOW, // its row going with you, or staying where it is (Y)
+        MA_MENU_BACK,     // back a page (Keep it, on a window's Close page)
+        MA_MAP,           // target: the map's file, "" = the courtyard
+        MA_AVATAR,        // target: the avatar's file
     };
 
     // what the Windows page does to a window
@@ -157,12 +163,13 @@ namespace h3d {
 
     // what the pages show
     struct SActionState {
-        const SAvatarModel*    avatar  = nullptr;
+        const SAvatarModel*    avatar  = nullptr; // (its name: the Avatars item's hint)
         const CAvatarAnimator* anim    = nullptr;
-        bool                   loading = false; // an avatar is on its way
+        bool                   loading = false; // an avatar is on its way (the Avatars item's hint: loading…)
         bool                   third = false, fly = false;
         bool                   lipsync = false, microphone = true; // on; there is a microphone to have it on with
         float                  micGain = NAN, micGainNow = 0;      // lip sync's gain set (NAN: automatic), and what it is, dB
+        std::string            map;                                // the Maps item's hint: the world shown, or loading…
     };
     constexpr float MIC_GAIN_MAX = 60.f; // dB, the gain dial's end
 

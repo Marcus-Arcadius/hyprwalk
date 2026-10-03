@@ -751,6 +751,9 @@ namespace h3d::gltf {
         return true;
     }
 
+    // what open() and openMemory() check of a file they've read (its buffers loaded)
+    static DataPtr checked(DataPtr guard, const std::string& what, std::string& error);
+
     DataPtr open(const std::string& path, const std::string& what, std::string& error) {
         cgltf_options opt{};
         cgltf_data*   data = nullptr;
@@ -763,6 +766,32 @@ namespace h3d::gltf {
             error = std::format("couldn't load the buffers of the {} (missing .bin next to it?)", what);
             return {nullptr, cgltf_free};
         }
+        return checked(std::move(guard), what, error);
+    }
+
+    DataPtr openMemory(const void* bytes, size_t size, const std::string& what, std::string& error) {
+        cgltf_options opt{};
+        cgltf_data*   data = nullptr;
+        if (const auto r = cgltf_parse(&opt, bytes, size, &data); r != cgltf_result_success) {
+            error = std::format("the {} isn't a glTF/GLB cgltf can read (error {})", what, (int)r);
+            return {nullptr, cgltf_free};
+        }
+        DataPtr guard(data, cgltf_free);
+        // (a GLB's own buffer is in it; one in a file of its own isn't)
+        for (size_t i = 0; i < data->buffers_count; ++i)
+            if (data->buffers[i].uri) {
+                error = std::format("the {} has a buffer in a file of its own", what);
+                return {nullptr, cgltf_free};
+            }
+        if (cgltf_load_buffers(&opt, data, nullptr) != cgltf_result_success) {
+            error = std::format("couldn't load the buffers of the {}", what);
+            return {nullptr, cgltf_free};
+        }
+        return checked(std::move(guard), what, error);
+    }
+
+    static DataPtr checked(DataPtr guard, const std::string& what, std::string& error) {
+        cgltf_data* data = guard.get();
         // What the file says must fit what it has (accessors in their buffer views, the views in their buffers,
         // indices under their vertex counts, morph targets and animations counted alike, no loops among the nodes),
         // else reading it runs past its data: cgltf_validate. First what it takes for granted: it reads a sparse
