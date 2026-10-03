@@ -26,12 +26,16 @@ avatar converted with `tools/unity2hypr3d.py`.
 ## Building
 
 hypr3d is built against the Hyprland it runs in: a plugin has to be compiled with the headers and the
-compiler of that exact Hyprland build. It was written for Hyprland 0.55.2 on NixOS.
+compiler of that exact Hyprland build, and one built for another Hyprland won't load (it says so; build
+it again). It builds against Hyprland 0.55 and 0.56 (`src/compat.hpp` has what changed between them),
+with GCC 15 or newer. It was written on NixOS, with 0.55.2.
 
 ```sh
 ./build.sh          # builds hypr3d.so
 ./build.sh clean
 ```
+
+### On NixOS
 
 `build.sh` finds the running Hyprland binary (`pgrep`, then `/proc/<pid>/exe`) and asks Nix for the
 derivation that built it (`nix-store --query --deriver`). It builds that derivation's `dev` output,
@@ -46,9 +50,49 @@ to `pkg-config`'s path. The plugin then links `libpipewire-0.3` from that PipeWi
 PipeWire running, or its derivation gone), hypr3d builds without a microphone, and lip sync says so
 when you turn it on. The `dev` output may not be in the binary cache; then Nix builds PipeWire once.
 
-On other distributions, `make` should work anywhere `pkg-config` finds the headers of the Hyprland
-you run (`hyprland`, `pixman-1`, `libdrm`, `glesv2`, `egl`, `cairo` and `pangocairo`, and
-`libpipewire-0.3` for the microphone if it is there). This is untested.
+This works the same for Hyprland from nixpkgs and from Hyprland's flake (tried with the flake's 0.55.2
+and nixpkgs' 0.56.2).
+
+### On Arch, Fedora, openSUSE, Debian, Ubuntu and others
+
+Install the development package of the Hyprland you run (its headers) and the libraries hypr3d uses,
+then run `./build.sh`. When Hyprland isn't from Nix, it finds the headers with `pkg-config`, says which
+Hyprland runs and which headers it found (and warns when they're not the same version), and runs `make`.
+
+| Distribution | Hyprland | Install |
+|---|---|---|
+| Arch Linux | 0.56.2 | `sudo pacman -S --needed base-devel hyprland pango libpipewire` (Arch's `hyprland` has its headers) |
+| Fedora 44 | 0.56.2, from the [sdegler/hyprland](https://copr.fedorainfracloud.org/coprs/sdegler/hyprland/) COPR (Fedora has none) | `sudo dnf copr enable sdegler/hyprland`, then `sudo dnf install gcc-c++ make pkgconf hyprland-devel pango-devel pixman-devel pipewire-devel` |
+| openSUSE Tumbleweed | 0.56.2 | `sudo zypper install gcc-c++ make pkgconf hyprland-devel glslang-devel pango-devel libpixman-1-0-devel pipewire-devel` (`glslang-devel`: Hyprland's headers need it, but `hyprland-devel` doesn't bring it) |
+| Debian sid | 0.56.2 | `sudo apt install build-essential pkgconf hyprland-dev libpango1.0-dev libpixman-1-dev libpipewire-0.3-dev` |
+| Ubuntu 26.10 | 0.56.2 | the same as Debian's |
+
+Each of these was built with `./build.sh` in a fresh container of that distribution (October 2026), and
+every symbol the plugin needs was found in that distribution's Hyprland. Older releases have older
+Hyprlands that hypr3d doesn't build against (Ubuntu 26.04 LTS has 0.53.3). PipeWire's development
+files are only for lip sync's microphone: without them hypr3d builds without one.
+
+After updating Hyprland, log out and back in before building again. Until then the old Hyprland runs,
+and a plugin built with the new headers won't load into it.
+
+### With hyprpm
+
+hyprpm, Hyprland's plugin manager, gets the headers of the Hyprland you run by itself (it makes them
+from Hyprland's source), so it also works where there's no development package, or with a Hyprland you
+built. It needs `git`, `cmake`, `cpio`, `pkg-config`, `gcc` and `g++`, and what building Hyprland
+needs, since it configures Hyprland's source.
+
+```sh
+hyprpm update                                           # the headers of the Hyprland that runs
+hyprpm add https://github.com/Marcus-Arcadius/hypr3d    # builds it with them (see hyprpm.toml)
+hyprpm enable hypr3d
+hyprpm reload                                           # loads it
+```
+
+To load it when you log in, put `exec-once = hyprpm reload -n` in `hyprland.conf`, or with a Lua
+config `hl.on("hyprland.start", function() hl.exec_cmd("hyprpm reload -n") end)`. After Hyprland
+updates, `hyprpm update` builds it again. While the repository is private, git needs your GitHub
+login to clone it (for example `gh auth setup-git`).
 
 ## Loading
 
@@ -1661,6 +1705,9 @@ a cycle reads as a whole in Blender, but the plugin keeps its own stepping.
   already in a NixOS store) alive until `OUTDIR` is deleted. While it runs, the VMs' disks and the
   driver's sockets are in a folder under `/tmp` (`H3D_VM_TMP` picks another), deleted afterwards: the
   test driver puts them in `XDG_RUNTIME_DIR`, a small tmpfs that a core dump fills.
+  To check another Hyprland, build hypr3d for it and run this with the same `HYPR_BIN`. nixpkgs' is
+  `HYPR_BIN=$(nix build --no-link --print-out-paths nixpkgs#hyprland)/bin/Hyprland` (0.56.2 when hypr3d
+  was made to build against 0.56; its checks passed there as they do on 0.55.2).
 - `tools/test/live/check.sh OUTDIR [--mic] [--avatar FILE] [--map FILE|--no-map] [--app CMD]...`: for
   what only your own desktop can check: your GPU and monitor, your voice, and your own apps. You run it, in your Hyprland session,
   and don't touch the mouse or keyboard while it runs. It loads `hypr3d.so` and compares your desktop
@@ -1784,6 +1831,9 @@ or `bash`.
 
 ## Known limits
 
+- With Hyprland 0.56 a window or a layer (a bar, a launcher) that closes is gone from the 3D view at
+  once, not faded out: 0.56 fades out a picture of it, which hypr3d doesn't draw in 3D (the 2D desktop
+  shows it as ever). With 0.55 the window itself fades out, in 3D too.
 - The attack's punches were made on Hatsune Miku NT. Another humanoid gets the same turns of its bones
   (in first person, its hands where hers were in the view): on a very different build the fist lands a
   little elsewhere, and long hair hanging in front of the shoulders can be brushed by the arms.

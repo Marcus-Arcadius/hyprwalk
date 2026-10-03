@@ -36,6 +36,8 @@ namespace h3d {
         int fd() const {
             return m_fd;
         }
+        // a load is on its way: started, and its result not taken yet (a result waiting counts, as the main thread
+        // only takes it in between Hyprland's requests: within one hyprctl --batch it's still on its way)
         bool busy() const {
             return m_busy;
         }
@@ -58,7 +60,6 @@ namespace h3d {
                     std::lock_guard lk(m_mutex);
                     m_result = std::move(r);
                 }
-                m_busy             = false;
                 const uint64_t one = 1;
                 if (m_fd >= 0)
                     (void)!write(m_fd, &one, sizeof(one));
@@ -83,8 +84,11 @@ namespace h3d {
             std::lock_guard lk(m_mutex);
             auto            r = std::move(m_result);
             m_result.reset();
-            if (r && m_thread.joinable())
-                m_thread.join(); // done anyway, it only had to write the eventfd
+            if (r) {
+                if (m_thread.joinable())
+                    m_thread.join(); // done anyway, it only had to write the eventfd
+                m_busy = false;
+            }
             return r;
         }
 

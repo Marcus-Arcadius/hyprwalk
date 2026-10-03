@@ -1,4 +1,5 @@
 #include "panels.hpp"
+#include "compat.hpp"
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
@@ -101,7 +102,7 @@ namespace h3d {
                     p.box    = CBox{base + popup->coordsRelativeToParent(), surf->m_current.size};
                     p.depth  = parentDepth + DEPTH_POPUP;
                     p.order  = order++;
-                    p.alpha  = std::clamp(popup->m_alpha->value() * alphaMul, 0.f, 1.f);
+                    p.alpha  = std::clamp(hypr::alpha(popup) * alphaMul, 0.f, 1.f);
                     p.hitRoot = surf;
                     addTree(p, surf, CBox{{0, 0}, p.box.size()}, false);
                     if (!p.surfaces.empty() && p.alpha > 0.f)
@@ -115,14 +116,14 @@ namespace h3d {
         void addLayers(std::vector<SPanel>& out, PHLMONITOR mon, int layer, float depth, int& order, float lift = 0.f) {
             for (const auto& ref : mon->m_layerSurfaceLayers[layer]) {
                 const auto ls = ref.lock();
-                if (!ls || (!ls->m_mapped && !ls->m_fadingOut))
+                if (!ls || (!ls->m_mapped && !hypr::fadingOut(ls)))
                     continue;
                 const auto surf = ls->resource();
                 if (!drawable(surf))
                     continue;
 
-                float alpha = ls->m_alpha->value();
-                if (!ls->m_fadingOut && !ls->m_aboveFullscreen)
+                float alpha = hypr::alpha(ls);
+                if (!hypr::fadingOut(ls) && !ls->m_aboveFullscreen)
                     alpha += (1.f - alpha) * lift;
                 if (alpha <= 0.f)
                     continue;
@@ -131,7 +132,7 @@ namespace h3d {
                 p.key   = reinterpret_cast<uintptr_t>(ls.get());
                 p.kind  = PANEL_LAYER;
                 p.layer = layer;
-                p.box   = CBox{ls->m_realPosition->value() - mon->m_position, ls->m_realSize->value()};
+                p.box   = CBox{hypr::realPosition(ls)->value() - mon->m_position, hypr::realSize(ls)->value()};
                 p.depth = depth;
                 p.order = order++;
                 p.alpha = alpha;
@@ -160,20 +161,20 @@ namespace h3d {
         for (int hops = 0; up && up->m_overrideRedirect && hops < 16; ++hops)
             up = up->m_parent.lock();
         if (up)
-            for (const auto& o : g_pCompositor->m_windows)
+            for (const auto& o : hypr::windows())
                 if (o && o->m_isMapped && o->m_xwaylandSurface.lock() == up)
                     return o;
         const auto focus = Desktop::focusState()->window();
-        const auto at    = w->m_realPosition->value();
+        const auto at    = hypr::realPosition(w)->value();
         PHLWINDOW  over;
-        for (const auto& o : g_pCompositor->m_windows) {
+        for (const auto& o : hypr::windows()) {
             if (!o || o == w || !o->m_isX11 || o->isX11OverrideRedirect() || !o->m_isMapped || o->isHidden())
                 continue;
             if (const auto os = o->m_xwaylandSurface.lock(); xs->m_pid > 0 && os && os->m_pid > 0 && os->m_pid != xs->m_pid)
                 continue; // another app's
             if (o == focus)
                 return o;
-            if (!over && CBox{o->m_realPosition->value(), o->m_realSize->value()}.containsPoint(at))
+            if (!over && CBox{hypr::realPosition(o)->value(), hypr::realSize(o)->value()}.containsPoint(at))
                 over = o;
         }
         return over;
@@ -191,13 +192,13 @@ namespace h3d {
             if (!drawable(surf))
                 return;
 
-            Vector2D pos = w->m_realPosition->value() + w->m_floatingOffset;
+            Vector2D pos = hypr::realPosition(w)->value() + w->m_floatingOffset;
             if (ws && !w->m_pinned)
                 pos += ws->m_renderOffset->value();
             pos -= mon->m_position;
 
             float fs = w->alphaValue(Desktop::View::WINDOW_ALPHA_FULLSCREEN);
-            if (!w->m_fadingOut)
+            if (!hypr::fadingOut(w))
                 fs += (1.f - fs) * lift;
             float alpha = w->alphaValue(Desktop::View::WINDOW_ALPHA_FADE) * fs * w->alphaValue(Desktop::View::WINDOW_ALPHA_LAYOUT) *
                 w->alphaValue(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE) * w->alphaValue(Desktop::View::WINDOW_ALPHA_ACTIVE);
@@ -210,12 +211,12 @@ namespace h3d {
             p.key      = reinterpret_cast<uintptr_t>(w.get());
             p.kind     = PANEL_WINDOW;
             p.window   = w;
-            p.box      = CBox{pos, w->m_realSize->value()};
+            p.box      = CBox{pos, hypr::realSize(w)->value()};
             p.depth    = depth;
             p.order    = order++;
             p.alpha    = std::clamp(alpha, 0.f, 1.f);
             p.focused  = w == Desktop::focusState()->window();
-            p.rounding = w->isFullscreen() ? 0.f : w->rounding();
+            p.rounding = hypr::fullscreenOrMaximized(w) ? 0.f : w->rounding();
             if (p.box.w < 1 || p.box.h < 1)
                 return;
 
@@ -242,17 +243,17 @@ namespace h3d {
 
         int        order = 0;
         const auto ws    = mon->m_activeWorkspace;
-        const bool fullscreen = ws && ws->m_hasFullscreenWindow && ws->m_fullscreenMode == FSMODE_FULLSCREEN;
+        const bool fullscreen = ws && hypr::hasFullscreen(ws);
         // in 3D a fullscreen (or maximized) window hides the rest of its workspace only on the desktop wall, while it's
         // there itself: one out in the world (placed, in tiling mode's row) covers nothing on the wall, and nothing out
         // in the world is under it
-        const auto  fsWindow = ws && ws->m_hasFullscreenWindow ? ws->getFullscreenWindow() : nullptr;
+        const auto  fsWindow = ws ? hypr::fullscreenWindow(ws) : nullptr;
         const bool  fsOut    = fsWindow && always.contains(reinterpret_cast<uintptr_t>(fsWindow.get()));
         const float in3D     = std::clamp(inWorld, 0.f, 1.f);
         const auto  lift     = [&](const PHLWINDOW& w) { return fsOut || (w && always.contains(reinterpret_cast<uintptr_t>(w.get()))) ? in3D : 0.f; };
         // (Hyprland doesn't render one hidden under a fullscreen window at all)
         const auto  underFs = [&](const PHLWINDOW& w) {
-            return fsWindow && w->m_workspace == ws && !w->isAllowedOverFullscreen() && !w->m_fadingOut && w->visibleOnMonitor(mon);
+            return fsWindow && w->m_workspace == ws && !w->isAllowedOverFullscreen() && !hypr::fadingOut(w) && w->visibleOnMonitor(mon);
         };
 
         addLayers(out, mon, 0, DEPTH_BACKGROUND, order);
@@ -261,8 +262,8 @@ namespace h3d {
         std::vector<PHLWINDOW> tiled, floating, full, special, specialFloating, pinned, elsewhere;
         std::vector<std::pair<PHLWINDOW, PHLWINDOW>> x11Popups; // (an X11 menu or tooltip, the window it belongs to)
         PHLWINDOW              focusedTiled;
-        for (const auto& w : g_pCompositor->m_windows) {
-            if (!w || w->isHidden() || (!w->m_isMapped && !w->m_fadingOut))
+        for (const auto& w : hypr::windows()) {
+            if (!w || w->isHidden() || (!w->m_isMapped && !hypr::fadingOut(w)))
                 continue;
             // (an X11 menu or tooltip is under a fullscreen window or not as the window it belongs to is)
             const auto owner = w->m_isX11 && w->isX11OverrideRedirect() ? x11Owner(w) : nullptr;
@@ -279,7 +280,7 @@ namespace h3d {
 
             if (w->onSpecialWorkspace())
                 (w->m_isFloating ? specialFloating : special).push_back(w);
-            else if (w->isFullscreen())
+            else if (hypr::fullscreenOrMaximized(w))
                 full.push_back(w);
             else if (w->m_pinned)
                 pinned.push_back(w);

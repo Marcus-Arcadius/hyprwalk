@@ -6710,9 +6710,10 @@ def s_fullscreen():
     ev = fs_events("hd2")
     told = ctl("hypr3d", "log", "12")
     i = ev.index("fullscreen>>1") if "fullscreen>>1" in ev else -1
+    # (Hyprland 0.55 says so right after the fullscreen event, 0.56 right before it)
+    nofocus = ev[i + 1:i + 2] == ["activewindow>>,"] or ev[max(i - 2, 0):i] == ["activewindow>>,", "activewindowv2>>"]
     check("31", "Helldivers 2's way: the game maps, its second window maps and takes the keyboard, the game goes fullscreen, and Hyprland gives the keyboard to no window",
-          i > 0 and any(e.startswith("openwindow>>") and "hd2main" in e for e in ev[:i]) and ev[i + 1:i + 2] == ["activewindow>>,"],
-          f"before it: {act0}; {ev[:16]}")
+          i > 0 and any(e.startswith("openwindow>>") and "hd2main" in e for e in ev[:i]) and nofocus, f"before it: {act0}; {ev[:16]}")
     check("31", "... the game is given the keyboard, and played by itself", p and p["title"] == "hd2main" and "fullscreen with no window focused: focused and played" in told,
           f"{p}; {told.strip()[-240:]}")
     got, moved = fs_keys("31-hd2")

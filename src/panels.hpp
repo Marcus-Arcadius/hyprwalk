@@ -3,7 +3,11 @@
 #include "globals.hpp"
 #include "math3d.hpp"
 
+#if __has_include(<hyprland/src/output/Monitor.hpp>) // Hyprland 0.56 and later
+#include <hyprland/src/output/Monitor.hpp>
+#else
 #include <hyprland/src/helpers/Monitor.hpp>
+#endif
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/Texture.hpp>
 

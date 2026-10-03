@@ -1,0 +1,12 @@
+# For hyprpm, Hyprland's plugin manager: hyprpm add https://github.com/Marcus-Arcadius/hypr3d
+# (see Building in README.md). It builds with the headers `hyprpm update` fetched for the Hyprland you run.
+
+[repository]
+name = "hypr3d"
+authors = ["Marcus-Arcadius"]
+
+[hypr3d]
+description = "Your desktop as a place you walk around in: windows in 3D, an avatar, maps"
+authors = ["Marcus-Arcadius"]
+output = "hypr3d.so"
+build = ["make -j$(nproc)"]

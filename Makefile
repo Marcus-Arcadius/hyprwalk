@@ -15,12 +15,15 @@ endif
 CXXFLAGS ?= -O2 -g
 CXXFLAGS += -std=c++26 -fPIC -fno-gnu-unique -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers \
             -DWLR_USE_UNSTABLE $(PIPEWIRE) $(shell pkg-config --cflags $(PKGS))
-LDFLAGS  += -shared $(shell pkg-config --libs $(LIBS))
+LDFLAGS  += -shared
+# (after the objects: a linker with --as-needed, as Debian's and Ubuntu's have it, leaves out a library named
+# before what uses it)
+LDLIBS   += $(shell pkg-config --libs $(LIBS))
 
 all: $(PLUGIN)
 
 $(PLUGIN): $(OBJ)
-	$(CXX) $(LDFLAGS) -o $@ $^
+	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 build/%.o: src/%.cpp Makefile | build
 	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
