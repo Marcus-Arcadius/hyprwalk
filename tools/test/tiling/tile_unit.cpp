@@ -10,7 +10,7 @@
 #include <numbers>
 #include <string>
 
-using namespace h3d;
+using namespace hyprwalk;
 
 namespace {
     int  g_passed = 0, g_failed = 0;

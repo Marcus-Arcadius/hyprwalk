@@ -3,7 +3,7 @@
 import sys, os, json, struct
 import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
-import unity2hypr3d as u
+import unity2hyprwalk as u
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:]
 files, poses = [], []  # poses[k]: the --pose turns given after file k

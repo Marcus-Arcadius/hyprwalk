@@ -9,7 +9,7 @@
 #include <optional>
 #include <thread>
 
-namespace h3d {
+namespace hyprwalk {
 
     // thrown from inside a load when it gets cancelled
     struct SCancelled {};

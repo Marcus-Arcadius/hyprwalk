@@ -6,7 +6,7 @@
 #include <memory>
 #include <string>
 
-namespace h3d {
+namespace hyprwalk {
 
     // what the speaker is doing
     struct SSpeakerStatus {
@@ -24,7 +24,7 @@ namespace h3d {
         uint64_t    frames   = 0;   // given PipeWire since play()
     };
 
-    // Plays an emote's sound through PipeWire to the default output (the "hypr3d emote sound" stream, named after the
+    // Plays an emote's sound through PipeWire to the default output (the "hyprwalk emote sound" stream, named after the
     // emote), one at a time, once or looping. It starts where the dance will be when it's heard; clock() then gives the
     // heard position so the dance keeps time despite dropped or slow frames. Built without PipeWire, play() says so.
     class CSpeaker {

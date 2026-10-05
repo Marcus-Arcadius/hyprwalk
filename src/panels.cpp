@@ -14,7 +14,7 @@
 
 #include <algorithm>
 
-namespace h3d {
+namespace hyprwalk {
 
     namespace {
         // stacking level per surface kind; times the layer spacing, its distance in front of the wall

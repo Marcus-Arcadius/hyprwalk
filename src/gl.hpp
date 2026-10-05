@@ -4,7 +4,7 @@
 
 #include <string>
 
-namespace h3d::gl {
+namespace hyprwalk::gl {
 
     // compiles and links a program, returns 0 on failure (and logs why)
     GLuint makeProgram(const char* name, const std::string& vs, const std::string& fs);

@@ -1,7 +1,7 @@
 # ma_unit.py: ModularAvatar on small hand-made hierarchies, against what MA 1.18.7's code does
 import sys, os, math
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
-import unity2hypr3d as u
+import unity2hyprwalk as u
 import bpy
 from mathutils import Matrix, Vector, Quaternion
 
@@ -838,7 +838,7 @@ def cut(cutters, cuts0, kept):
         P = u.gltf_array(js, out, p['attributes']['POSITION'])
         t = u.gltf_array(js, out, p['indices'])[:, 0].astype(int).reshape(-1, 3)
         tris = {frozenset((int(round(P[i][0])), int(round(P[i][1]))) for i in tri) for tri in t}
-        name = p.get('extras', {}).get('hypr3d_part')
+        name = p.get('extras', {}).get('hyprwalk_part')
         if name:
             parts[name] = tris
         else:

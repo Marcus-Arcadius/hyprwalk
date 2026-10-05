@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# toon_check.sh: toon shading and matcaps (MToon's, and unity2hypr3d's "hypr3d_toon" and "hypr3d_matcap" extras) on
+# toon_check.sh: toon shading and matcaps (MToon's, and unity2hyprwalk's "hyprwalk_toon" and "hyprwalk_matcap" extras) on
 # toonballs.py's six balls, side on to the sun so N·L goes from 1 to -1 across each: a plain ball falls off with N·L,
 # a toon ball is flat either side of a sharp step, a matcap brightens where white, toon in shadow is all shade.
 #

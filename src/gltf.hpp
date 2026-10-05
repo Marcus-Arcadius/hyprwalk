@@ -15,7 +15,7 @@ struct cgltf_data;
 
 // glTF loading shared by maps and avatars: opening a file, reading its materials and decoding their textures.
 
-namespace h3d::gltf {
+namespace hyprwalk::gltf {
 
     inline void check(const std::atomic<bool>& cancel) {
         if (cancel)
@@ -79,6 +79,6 @@ namespace h3d::gltf {
     void decodeImages(cgltf_data* data, const std::string& dir, std::vector<SMapImage>& images, const std::vector<int>& slots, const std::atomic<bool>& cancel,
                       std::vector<std::string>& log, int compress = 0);
 
-    // decodes HYPR3D_lighting (tools/cs2map.py); false if the file has none. out.skyImage stays a file image index
+    // decodes HYPRWALK_lighting (tools/cs2map.py); false if the file has none. out.skyImage stays a file image index
     bool readLighting(cgltf_data* data, const std::string& dir, SMapLighting& out, const std::atomic<bool>& cancel, std::vector<std::string>& log);
 }

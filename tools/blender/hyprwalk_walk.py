@@ -1,14 +1,14 @@
-"""h3d_walk: the walk and run cycles of hypr3d's avatars, made in Blender: assets/walk.vrma and assets/run.vrma.
+"""hyprwalk_walk: the walk and run cycles of hyprwalk's avatars, made in Blender: assets/walk.vrma and assets/run.vrma.
 
-hypr3d steps the feet itself; these cycles move the rest of the body in step. Each is one stride in place, the left
-heel landing at its start and the right half way; its legs step like hypr3d's, for previewing, but hypr3d keeps its own.
+hyprwalk steps the feet itself; these cycles move the rest of the body in step. Each is one stride in place, the left
+heel landing at its start and the right half way; its legs step like hyprwalk's, for previewing, but hyprwalk keeps its own.
 
-In Blender, with a humanoid armature in the scene (bones named by its hypr3d settings file's "humanoid"):
-    import h3d_walk
-    h3d_walk.build(settings)        # key the actions "Walk" and "Run" on the armature from CYCLES
-    h3d_walk.show("Run")            # that one on the armature, looping
-    h3d_walk.export()               # both as VRM animations into the repo's assets/ (then ./build.sh)
-    h3d_walk.export(folder, prefix="Miku.")   # or next to an avatar, for its settings file's "walk" (no rebuild)
+In Blender, with a humanoid armature in the scene (bones named by its hyprwalk settings file's "humanoid"):
+    import hyprwalk_walk
+    hyprwalk_walk.build(settings)        # key the actions "Walk" and "Run" on the armature from CYCLES
+    hyprwalk_walk.show("Run")            # that one on the armature, looping
+    hyprwalk_walk.export()               # both as VRM animations into the repo's assets/ (then ./build.sh)
+    hyprwalk_walk.export(folder, prefix="Miku.")   # or next to an avatar, for its settings file's "walk" (no rebuild)
 
 Edit the keys and export again, or change the numbers below and build again. Angles in degrees, distances in meters,
 phases in strides; her left is +X, ahead -Y.
@@ -27,7 +27,7 @@ FPS = 60
 
 # ---------------------------------------------------------------- the cycles
 
-# frames: stride length (hypr3d plays it by its own step phase, at any speed); duty: share of it a foot is down; stride:
+# frames: stride length (hyprwalk plays it by its own step phase, at any speed); duty: share of it a foot is down; stride:
 # foot travel (m); drop: mean hips drop; bob: twice a stride, highest at bobTop; sway: toward the standing foot; wide:
 # feet out from the middle; hips yaw (the leading leg's hip ahead), roll (down on the swing side, most at rollAt),
 # pitch; arms hang `out`, swing `ahead` and `back` `lag` after the legs, elbow `bend0` to `bend1` coming ahead, forearm
@@ -55,7 +55,7 @@ CYCLES = {
     ),
 }
 
-# hypr3d's step curves (src/avatar.cpp): foot pitch (radians, toes down > 0) in stance and swing; lift in leg lengths
+# hyprwalk's step curves (src/avatar.cpp): foot pitch (radians, toes down > 0) in stance and swing; lift in leg lengths
 CURVES = {
     "walk": dict(
         stance=[(0, -0.26), (0.12, -0.03), (0.2, 0), (0.5, 0), (0.75, 0.24), (1, 0.9)],
@@ -71,7 +71,7 @@ CURVES = {
 KEYS = 16  # keys per stride, plus the end (= the start)
 
 # ---------------------------------------------------------------- the frame above and Blender's
-# hypr3d poses in its own frame: +x the body's left, +y up, +z ahead; Blender's here: +X left, +Z up, -Y ahead
+# hyprwalk poses in its own frame: +x the body's left, +y up, +z ahead; Blender's here: +X left, +Z up, -Y ahead
 
 M_FB = Matrix(((1, 0, 0), (0, 0, -1), (0, 1, 0)))  # frame above -> Blender: x -> X, y -> Z, z -> -Y
 
@@ -115,7 +115,7 @@ def frame_to(t0, h0, t, h):
 
 
 def through(keys, s):
-    """Catmull-Rom through (t, v) keys, level at the ends (as hypr3d's through())"""
+    """Catmull-Rom through (t, v) keys, level at the ends (as hyprwalk's through())"""
     if s <= keys[0][0]:
         return keys[0][1]
     if s >= keys[-1][0]:
@@ -261,7 +261,7 @@ def pose_at(B, c, p, extra=(0.0, 0.0)):
         col = c["collar"]
         T[side + "Shoulder"] = T["Chest"] @ axis_angle((0, 1, 0), -sx * r(col["ahead"]) * w) @ \
             axis_angle((0, 0, 1), sx * r(col["up"]) * w * w)
-    # legs: feet placed as hypr3d steps them; hip joints from the posed pelvis
+    # legs: feet placed as hyprwalk steps them; hip joints from the posed pelvis
     curves = CURVES[c["legs"]]
     pelvis = move
     for s, side in enumerate(("Left", "Right")):
@@ -288,7 +288,7 @@ def pose_at(B, c, p, extra=(0.0, 0.0)):
 
 
 def arm_turns(s, u, f, along, palm, chest):
-    """upper arm, forearm and hand turns from the T pose for directions in the chest's frame (as hypr3d's CPoser: the
+    """upper arm, forearm and hand turns from the T pose for directions in the chest's frame (as hyprwalk's CPoser: the
     forearm takes half the hand's twist)"""
     t0 = Vector((1.0 if s == 0 else -1.0, 0, 0))
     h0 = Vector((0, -1.0 if s == 0 else 1.0, 0))
@@ -344,7 +344,7 @@ ARMS = ("Shoulder", "UpperArm", "LowerArm", "Hand", "Thumb", "Index", "Middle", 
 
 class Dress:
     """body radius round the hips' vertical line per height and bearing (frame above), from vertices weighted most to
-    hips, spine, chest or legs below the chest; matches hypr3d's SBodyClearance"""
+    hips, spine, chest or legs below the chest; matches hyprwalk's SBodyClearance"""
 
     ROW, BINS = 0.02, 72
 

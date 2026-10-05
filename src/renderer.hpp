@@ -9,7 +9,7 @@
 
 #include <unordered_map>
 
-namespace h3d {
+namespace hyprwalk {
 
     // where the 2D desktop sits in the world: a rectangle on a wall
     struct SScreenMapping {

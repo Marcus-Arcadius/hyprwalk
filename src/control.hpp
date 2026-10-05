@@ -11,11 +11,11 @@
 #include <tuple>
 #include <vector>
 
-namespace h3d {
+namespace hyprwalk {
 
     std::string jsonEscape(const std::string& s);
 
-    // Avatar commands (hyprctl hypr3d avatar ..., Action Menu items and dials) apart from Hyprland, so main.cpp and the
+    // Avatar commands (hyprctl hyprwalk avatar ..., Action Menu items and dials) apart from Hyprland, so main.cpp and the
     // offscreen harness (tools/test/harness/shot.cpp --ctl, --key) share them. Remembers manual settings for reloads.
     class CAvatarControl {
       public:
@@ -35,7 +35,7 @@ namespace h3d {
 
         // a new avatar is in the animator: reapply manual settings
         void loaded();
-        // hyprctl hypr3d avatar expression|gesture|emote|emotes|parts|toggle|shape|slider|physics|attack ...; "" = not
+        // hyprctl hyprwalk avatar expression|gesture|emote|emotes|parts|toggle|shape|slider|physics|attack ...; "" = not
         // one of these. Emote files and folders go to loadEmote(file, loop), whose answer it returns
         std::string command(const std::vector<std::string>& args, const std::string& rest,
                             const std::function<std::string(const std::string& file, int loop)>& loadEmote);
@@ -63,7 +63,7 @@ namespace h3d {
     bool menuKey(CActionMenu& menu, uint32_t key, const FMenuPick& pick); // Esc, Backspace, Enter, 1-9
     bool menuButton(CActionMenu& menu, uint32_t button, const FMenuPick& pick); // left picks, right back, middle closes
     void menuWheel(CActionMenu& menu, float& fraction, float notches);          // a notch per item
-    // hyprctl hypr3d menu [open [page]|close|toggle|back|pick [n]|move dx dy|scroll n]; `action` runs a pick
+    // hyprctl hyprwalk menu [open [page]|close|toggle|back|pick [n]|move dx dy|scroll n]; `action` runs a pick
     std::string menuStatus(const CActionMenu& menu);
     std::string menuCommand(CActionMenu& menu, const std::vector<std::string>& args, const std::function<std::string(const SMenuItem&)>& action);
 }

@@ -6,7 +6,7 @@ import bpy, bmesh, os, io, math, hashlib, random, struct, tarfile, gzip, zipfile
 import numpy as np
 from mathutils import Matrix, Vector
 
-import unity2hypr3d as u
+import unity2hyprwalk as u
 
 
 # ---------------------------------------------------------------- Unity YAML out

@@ -187,7 +187,7 @@ check("a static g_vTexCoordScale/Offset: the base color's transform", base_xf('b
 check("with a moving offset: that in place of the static one, its scroll on top of g_vTexCoordScrollSpeed",
       (base_xf('mist'), [round(x, 6) for x in s2('mist').get('scroll', [])]), ({'scale': [3.0, 3.0]}, [-0.026, 0.0]))
 check("csgo_lightmappedgeneric's color takes its first layer's transform, not g_vTexCoordScale", base_xf('layer scale'), None)
-check('a dynamic parameter hypr3d does not do is left out', ('scroll' in s2('pulse'), base_xf('pulse')), (False, None))
+check('a dynamic parameter hyprwalk does not do is left out', ('scroll' in s2('pulse'), base_xf('pulse')), (False, None))
 check('with a warning', any("dynamic parameters aren't done" in w and 'g_flOpacityScale of pulse' in w for w in cs2map.WARNINGS), True)
 
 # tints
@@ -315,7 +315,7 @@ def tnode(name, mesh_name, mat, parent=None):
 
 m_clouds = tnode('n0_lr0_c0_s_cb_nomerge1.meshset_0', 'n0_lr0_c0_s_cb_nomerge1.meshset_0', clouds)
 m_other = tnode('some_prop.meshset_0', 'some_prop.meshset_0', clouds)  # the same material where no draw call is tinted
-backdrop = tdoc.add('nodes', {'name': 'hypr3d_backdrop'})
+backdrop = tdoc.add('nodes', {'name': 'hyprwalk_backdrop'})
 tdoc.roots.append(backdrop)
 agg = 'node000_world_lr0_agg3_2_windows'
 f1, f2, f3 = (tnode(agg, f'{agg}_fragment{k}', m, backdrop) for k, m in ((1, win_b), (2, win_a), (3, win_c)))

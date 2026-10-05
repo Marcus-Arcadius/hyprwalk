@@ -1,4 +1,4 @@
-PLUGIN   := hypr3d.so
+PLUGIN   := hyprwalk.so
 SRC      := $(wildcard src/*.cpp)
 OBJ      := $(SRC:src/%.cpp=build/%.o)
 DEP      := $(OBJ:.o=.d)
@@ -10,7 +10,7 @@ LIBS     := glesv2 egl cairo pangocairo hyprgraphics
 ifeq ($(shell pkg-config --exists libpipewire-0.3 && echo yes),yes)
 PKGS     += libpipewire-0.3
 LIBS     += libpipewire-0.3
-PIPEWIRE := -DH3D_PIPEWIRE
+PIPEWIRE := -DHYPRWALK_PIPEWIRE
 endif
 CXXFLAGS ?= -O2 -g
 CXXFLAGS += -std=c++26 -fPIC -fno-gnu-unique -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers \

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# run.sh: hypr3d.so in a real Hyprland in headless NixOS VMs (vm.nix), driven by QMP input events (so they go through
+# run.sh: hyprwalk.so in a real Hyprland in headless NixOS VMs (vm.nix), driven by QMP input events (so they go through
 # libinput and Hyprland's input stack to the plugin's hooks), with PipeWire and a virtual microphone singing test
 # vowels. checks.py is the checklist.
 #
 #   tools/test/vm/run.sh [--avatars DIR] [--booth DIR] [--only ITEMS] [--gpu virgl] OUTDIR
 #
 #   --avatars DIR  take BoothAccessories.glb (with its settings) and BoothGimmicks.hands.vrma from DIR, as
-#                  regress.sh --keep leaves them in OUT/new; else convert them here (synth/booth.py, unity2hypr3d.py)
+#                  regress.sh --keep leaves them in OUT/new; else convert them here (synth/booth.py, unity2hyprwalk.py)
 #   --booth DIR    the Booth-style packages to convert (booth.py makes them there if missing)
 #   --only ITEMS   only these checks.py sections, comma-separated ("0" starts Hyprland and loads the plugin)
-#   --gpu virgl    draw on this machine's GPU through virglrenderer (QEMU egl-headless on H3D_RENDERNODE, default
+#   --gpu virgl    draw on this machine's GPU through virglrenderer (QEMU egl-headless on HYPRWALK_RENDERNODE, default
 #                  /dev/dri/renderD129) instead of llvmpipe in the VM
 #
 # Hyprland is the running one (as for build.sh) or HYPR_BIN's. OUTDIR gets results.txt, results.json, frames/, logs/,
@@ -38,7 +38,7 @@ say() { echo ":: $*"; }
 die() { echo "run.sh: $*" >&2; exit 1; }
 START=$(date +%s)
 
-# the Hyprland hypr3d.so was built for: the running one, found as build.sh does
+# the Hyprland hyprwalk.so was built for: the running one, found as build.sh does
 HYPR_BIN="${HYPR_BIN:-}"
 if [[ -z "$HYPR_BIN" ]]; then
     pid="$(pgrep -x Hyprland | head -n1 || true)"
@@ -49,14 +49,14 @@ if [[ -z "$HYPR_BIN" ]]; then
 fi
 HYPR_OUT="${HYPR_BIN%/bin/*}"
 [[ -x "$HYPR_OUT/bin/Hyprland" ]] || die "no Hyprland in $HYPR_OUT"
-[[ -f "$REPO/hypr3d.so" ]] || die "no hypr3d.so: build it with ./build.sh"
+[[ -f "$REPO/hyprwalk.so" ]] || die "no hyprwalk.so: build it with ./build.sh"
 say "Hyprland: $HYPR_OUT"
 
 # what goes into the VM
 IN="$OUT/in"
 rm -rf "$IN"
 mkdir -p "$IN/wav" "$IN/emotes"
-cp "$REPO/hypr3d.so" "$VM/wheel.py" "$VM/touchpad.py" "$VM/gamepad.py" "$VM/tkapp.py" "$VM/tkfs.py" "$VM/obsws.py" "$VM/page.html" "$VM/overlay.qml" \
+cp "$REPO/hyprwalk.so" "$VM/wheel.py" "$VM/touchpad.py" "$VM/gamepad.py" "$VM/tkapp.py" "$VM/tkfs.py" "$VM/obsws.py" "$VM/page.html" "$VM/overlay.qml" \
     "$VM/launcher.qml" "$VM/topbar.qml" "$IN/"
 cp -r "$VM/electron" "$IN/"
 python3 "$VM/assets.py" "$IN" > /dev/null
@@ -75,14 +75,14 @@ if [[ -z "$AVATARS" ]]; then
         blender -b --factory-startup --python-exit-code 1 -P "$REPO/tools/test/synth/booth.py" -- "$B" > "$OUT/work/booth.log" 2>&1 ||
             { tail -n 20 "$OUT/work/booth.log"; die "booth.py failed"; }
     fi
-    say "converting BoothAccessories and BoothGimmicks (unity2hypr3d.py)"
-    python3 "$REPO/tools/unity2hypr3d.py" "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_Accessories_MA_v1.0.unitypackage" \
+    say "converting BoothAccessories and BoothGimmicks (unity2hyprwalk.py)"
+    python3 "$REPO/tools/unity2hyprwalk.py" "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_Accessories_MA_v1.0.unitypackage" \
         -o "$AVATARS/BoothAccessories.glb" > "$OUT/work/BoothAccessories.log" 2>&1 || die "converting BoothAccessories failed, see $OUT/work"
-    python3 "$REPO/tools/unity2hypr3d.py" "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_Gimmicks_VRCFury_v1.0.unitypackage" \
+    python3 "$REPO/tools/unity2hyprwalk.py" "$B/SynthChan_v1.0.unitypackage" --outfit "$B/SynthChan_Gimmicks_VRCFury_v1.0.unitypackage" \
         -o "$AVATARS/BoothGimmicks.glb" > "$OUT/work/BoothGimmicks.log" 2>&1 || die "converting BoothGimmicks failed, see $OUT/work"
 fi
 # copied by name, so nothing else in the folder comes along
-for f in BoothAccessories.glb BoothAccessories.hypr3d.json BoothGimmicks.hands.vrma; do
+for f in BoothAccessories.glb BoothAccessories.hyprwalk.json BoothGimmicks.hands.vrma; do
     [[ -f "$AVATARS/$f" ]] || die "no $AVATARS/$f"
 done
 cp "$AVATARS/BoothAccessories.glb" "$AVATARS/BoothGimmicks.hands.vrma" "$IN/"
@@ -91,7 +91,7 @@ cp "$AVATARS/BoothGimmicks.hands.vrma" "$IN/emotes/Hands.vrma"
 ffmpeg -v error -y -f lavfi -i "aevalsrc=exprs=0.5*sin(2*PI*440*t)|0.5*sin(2*PI*660*t):s=48000:d=2" -c:a libvorbis -q:a 6 "$IN/HandsSong.ogg" ||
     die "ffmpeg couldn't make HandsSong.ogg"
 # its settings plus three emotes of BoothGimmicks' 7 s hand poses: double speed, normal, and looped with the song
-python3 - "$AVATARS/BoothAccessories.hypr3d.json" "$IN/BoothAccessories.hypr3d.json" << 'EOF'
+python3 - "$AVATARS/BoothAccessories.hyprwalk.json" "$IN/BoothAccessories.hyprwalk.json" << 'EOF'
 import json, sys
 s = json.load(open(sys.argv[1], encoding='utf-8'))
 s['emotes'] = s.get('emotes', []) + [{'name': 'Hands Fast', 'file': 'BoothGimmicks.hands.vrma', 'speed': 2},
@@ -130,7 +130,7 @@ EOF
 wait
 
 say "building the VM's test driver (vm.nix)"
-nix-build "$VM/vm.nix" -A driver --argstr hyprland "$HYPR_OUT" --argstr gpu "$GPU" --argstr rendernode "${H3D_RENDERNODE:-/dev/dri/renderD129}" \
+nix-build "$VM/vm.nix" -A driver --argstr hyprland "$HYPR_OUT" --argstr gpu "$GPU" --argstr rendernode "${HYPRWALK_RENDERNODE:-/dev/dri/renderD129}" \
     -o "$OUT/driver" > "$OUT/nix-build.log" 2>&1 ||
     { tail -n 30 "$OUT/nix-build.log"; die "nix-build failed, see $OUT/nix-build.log"; }
 BUILT=$(date +%s)
@@ -139,14 +139,14 @@ say "running the checks (checks.py); the VM has no window"
 rm -rf "$OUT/frames" "$OUT/logs" "$OUT/live" "$OUT/results.txt" "$OUT/results.json"
 # the driver keeps disk images, its shared folder and sockets in XDG_RUNTIME_DIR (before TMPDIR): use a per-run dir on
 # disk (the runtime tmpfs is small and a core dump fills it) with a short path (socket paths are limited)
-RUNDIR="$(mktemp -d "${H3D_VM_TMP:-/tmp}/h3d-vm.XXXXXX")"
+RUNDIR="$(mktemp -d "${HYPRWALK_VM_TMP:-/tmp}/hyprwalk-vm.XXXXXX")"
 trap 'rm -rf "$RUNDIR"' EXIT
 set +e
 # no DISPLAY or WAYLAND_DISPLAY: the driver starts QEMU with -nographic. virgl needs QEMU's egl-headless display
 # instead: a WAYLAND_DISPLAY that goes nowhere stops -nographic, and egl-headless opens no window
 NODISPLAY=(-u WAYLAND_DISPLAY)
 [[ "$GPU" == virgl ]] && NODISPLAY=(WAYLAND_DISPLAY=/nonexistent/no-display)
-env -u DISPLAY "${NODISPLAY[@]}" TMPDIR="$RUNDIR" XDG_RUNTIME_DIR="$RUNDIR" H3D_IN="$IN" H3D_OUT="$OUT" H3D_ONLY="$ONLY" \
+env -u DISPLAY "${NODISPLAY[@]}" TMPDIR="$RUNDIR" XDG_RUNTIME_DIR="$RUNDIR" HYPRWALK_IN="$IN" HYPRWALK_OUT="$OUT" HYPRWALK_ONLY="$ONLY" \
     "$OUT/driver/bin/nixos-test-driver" --test-script "$VM/checks.py" -o "$OUT" > "$OUT/driver.log" 2>&1
 STATUS=$?
 set -e

@@ -3,11 +3,11 @@ import sys, os, json, struct, math
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
-import unity2hypr3d as u
+import unity2hyprwalk as u
 
 glb = (sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:])[0]
 js, binc = u.read_glb(glb)
-st = json.load(open(glb[:-4] + '.hypr3d.json'))
+st = json.load(open(glb[:-4] + '.hyprwalk.json'))
 nodes = js['nodes']
 parent = {}
 for i, n in enumerate(nodes):

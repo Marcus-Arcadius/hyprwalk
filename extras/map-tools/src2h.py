@@ -1,4 +1,4 @@
-# Source (inches, z up) origin + angles -> harness --eye args (glTF meters, y up; hypr3d yaw/pitch)
+# Source (inches, z up) origin + angles -> harness --eye args (glTF meters, y up; hyprwalk yaw/pitch)
 import sys
 def conv(o, a, eye=0.0):
     x, y, z = o

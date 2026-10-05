@@ -46,8 +46,8 @@ Rebuild as usual. Here's what that costs:
 - Everything that depends on the Hyprland package gets rebuilt too: the astroland plugin (`plugin`), and the portal
   (`portal`, which is xdph with this Hyprland). These are small.
 - Your plugins keep loading. The plugin API hash is the git commit (39d7e20), and the patch doesn't change it. The
-  patches only touch .cpp files, with no header changes, so the ABI stays the same too. hypr3d.so built for the
-  current Hyprland loads into the patched one. You can still run `./build.sh` in the hypr3d repo after switching, so
+  patches only touch .cpp files, with no header changes, so the ABI stays the same too. hyprwalk.so built for the
+  current Hyprland loads into the patched one. You can still run `./build.sh` in the hyprwalk repo after switching, so
   that it builds against the new store path.
 - The Hyprland you're running now is the old binary until you log out and back in. So the first logout after
   switching can still crash once. After that, exits are clean.

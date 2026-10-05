@@ -1,4 +1,4 @@
-# emote_unit.py: tools/unity2hypr3d.py's --emote on small hand-made clips: a motion sold as bare humanoid clips (no
+# emote_unit.py: tools/unity2hyprwalk.py's --emote on small hand-made clips: a motion sold as bare humanoid clips (no
 # prefab, controller or menu), read as a .unitypackage, inside a Booth-style .zip, as a folder, as loose .anim files and
 # by a clip's name; then emote names and songs.
 #   blender -b --factory-startup --python-exit-code 1 -P emote_unit.py
@@ -7,7 +7,7 @@ sys.dont_write_bytecode = True  # no __pycache__ in tools/
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))  # tools/
 sys.path.insert(0, HERE)
-import unity2hypr3d as u
+import unity2hyprwalk as u
 import unitygen as g
 
 FAILS = []
@@ -183,7 +183,7 @@ os.makedirs(OUT)
 check('an Ogg Vorbis song is copied for the settings file\'s "sound"',
       u.write_sound('Song Dance', found['Song Dance'].sound, os.path.join(OUT, 'Av.Song Dance.ogg')), 'Av.Song Dance.ogg')
 check('... byte for byte', open(os.path.join(OUT, 'Av.Song Dance.ogg'), 'rb').read() == VORBIS, True)
-check('a WAV is not (hypr3d plays Ogg Vorbis)',
+check('a WAV is not (hyprwalk plays Ogg Vorbis)',
       (u.write_sound('Wav Dance', found['Wav Dance'].sound, os.path.join(OUT, 'Av.Wav Dance.ogg')),
        os.path.exists(os.path.join(OUT, 'Av.Wav Dance.ogg'))), (None, False))
 check('... and why, in a warning', any('WavDance.wav is not Ogg Vorbis' in w for w in u.WARNINGS), True)

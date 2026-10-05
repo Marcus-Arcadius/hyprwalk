@@ -1,4 +1,4 @@
-// hypr3d: walk around your Hyprland desktop in first person, its windows drawn as panels in a 3D world
+// hyprwalk: walk around your Hyprland desktop in first person, its windows drawn as panels in a 3D world
 
 #include "apps.hpp"
 #include "compat.hpp"
@@ -67,9 +67,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace h3d {
+namespace hyprwalk {
     namespace {
-        // recent log lines for hyprctl hypr3d log (Hyprland logs only with debug:disable_logs off)
+        // recent log lines for hyprctl hyprwalk log (Hyprland logs only with debug:disable_logs off)
         constexpr size_t        LOG_LINES = 400;
         std::mutex              g_logMutex;
         std::deque<std::string> g_logLines;
@@ -91,17 +91,17 @@ namespace h3d {
 
     void log(const std::string& s) {
         remember("INFO", s);
-        Log::logger->log(Log::INFO, "[hypr3d] {}", s);
+        Log::logger->log(Log::INFO, "[hyprwalk] {}", s);
     }
 
     void notify(const std::string& s, bool error) {
         if (error) {
             remember("ERR", s);
-            Log::logger->log(Log::ERR, "[hypr3d] {}", s); // INFO is hidden unless debug logs are on
+            Log::logger->log(Log::ERR, "[hyprwalk] {}", s); // INFO is hidden unless debug logs are on
         } else
             log(s);
         if (PHANDLE)
-            HyprlandAPI::addNotification(PHANDLE, "[hypr3d] " + s, error ? CHyprColor{1.0, 0.35, 0.35, 1.0} : CHyprColor{0.45, 0.8, 1.0, 1.0}, error ? 8000 : 4000);
+            HyprlandAPI::addNotification(PHANDLE, "[hyprwalk] " + s, error ? CHyprColor{1.0, 0.35, 0.35, 1.0} : CHyprColor{0.45, 0.8, 1.0, 1.0}, error ? 8000 : 4000);
     }
 
     std::string logLines(size_t n) {
@@ -113,7 +113,7 @@ namespace h3d {
     }
 }
 
-using namespace h3d;
+using namespace hyprwalk;
 
 namespace {
     PHLWINDOW   parentOf(const PHLWINDOW& w);
@@ -266,7 +266,7 @@ namespace {
 
 }
 
-constexpr const char* C3D_PASS_NAME = "CHypr3DElement";
+constexpr const char* C3D_PASS_NAME = "CHyprwalkElement";
 
 enum eMode : uint8_t {
     MODE_OFF = 0,
@@ -710,7 +710,7 @@ class CDesktop3D {
     std::vector<SModelFile>                      m_mapFiles, m_avatarFiles;
     std::chrono::steady_clock::time_point        m_mapFilesRead{}, m_avatarFilesRead{};
     struct SLaunch {
-        std::string                           token; // HYPR3D_LAUNCH, marks its windows
+        std::string                           token; // HYPRWALK_LAUNCH, marks its windows
         std::string                           what, cls; // expected class, "" = any
         std::string                           steam;     // Steam app id: only its window is ours
         int64_t                               pid = 0;
@@ -1270,36 +1270,36 @@ void CDesktop3D::init() {
     wl_event_source_timer_update(m_configTimer, 1000);
 
     m_ctlCommand = HyprlandAPI::registerHyprCtlCommand(PHANDLE, SHyprCtlCommand{
-                                                                    .name  = "hypr3d",
+                                                                    .name  = "hyprwalk",
                                                                     .exact = false,
                                                                     .fn    = [this](eHyprCtlOutputFormat, std::string request) { return hyprctl(request); },
                                                                 });
 
-    HyprlandAPI::addDispatcherV2(PHANDLE, "hypr3d:toggle", [this](std::string) {
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprwalk:toggle", [this](std::string) {
         toggle();
         return SDispatchResult{};
     });
 
-    // hypr3d:play [on|off|toggle] [here|fill]
-    HyprlandAPI::addDispatcherV2(PHANDLE, "hypr3d:play", [this](std::string arg) {
+    // hyprwalk:play [on|off|toggle] [here|fill]
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprwalk:play", [this](std::string arg) {
         const std::string r = playDispatch(arg);
         return r.starts_with("error: ") ? SDispatchResult{.success = false, .error = r.substr(7)} : SDispatchResult{};
     });
 
-    // hypr3d:menu [page|command]
-    HyprlandAPI::addDispatcherV2(PHANDLE, "hypr3d:menu", [this](std::string arg) {
+    // hyprwalk:menu [page|command]
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprwalk:menu", [this](std::string arg) {
         const std::string r = menuDispatch(arg);
         return r.starts_with("error: ") ? SDispatchResult{.success = false, .error = r.substr(7)} : SDispatchResult{};
     });
 
-    // hypr3d:away toggles away (Super+Esc)
-    HyprlandAPI::addDispatcherV2(PHANDLE, "hypr3d:away", [this](std::string) {
+    // hyprwalk:away toggles away (Super+Esc)
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprwalk:away", [this](std::string) {
         const std::string r = setAway(!m_away);
         return r.starts_with("error: ") ? SDispatchResult{.success = false, .error = r.substr(7)} : SDispatchResult{};
     });
 
-    // hypr3d:tile [here|follow]: T, Shift+T, Y
-    HyprlandAPI::addDispatcherV2(PHANDLE, "hypr3d:tile", [this](std::string arg) {
+    // hyprwalk:tile [here|follow]: T, Shift+T, Y
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprwalk:tile", [this](std::string arg) {
         const std::string r = tileDispatch(arg);
         return r.starts_with("error: ") ? SDispatchResult{.success = false, .error = r.substr(7)} : SDispatchResult{};
     });
@@ -1367,10 +1367,10 @@ void CDesktop3D::shutdown() {
     if (m_ctlCommand)
         HyprlandAPI::unregisterHyprCtlCommand(PHANDLE, m_ctlCommand);
     m_ctlCommand.reset();
-    HyprlandAPI::removeDispatcher(PHANDLE, "hypr3d:toggle");
-    HyprlandAPI::removeDispatcher(PHANDLE, "hypr3d:menu");
-    HyprlandAPI::removeDispatcher(PHANDLE, "hypr3d:play");
-    HyprlandAPI::removeDispatcher(PHANDLE, "hypr3d:tile");
+    HyprlandAPI::removeDispatcher(PHANDLE, "hyprwalk:toggle");
+    HyprlandAPI::removeDispatcher(PHANDLE, "hyprwalk:menu");
+    HyprlandAPI::removeDispatcher(PHANDLE, "hyprwalk:play");
+    HyprlandAPI::removeDispatcher(PHANDLE, "hyprwalk:tile");
 
     if (Render::GL::g_pHyprOpenGL) {
         Render::GL::g_pHyprOpenGL->makeEGLCurrent();
@@ -1532,7 +1532,7 @@ void CDesktop3D::checkAvatarConfig() {
     if (const std::string gain = g_cfgLipSyncGain ? g_cfgLipSyncGain->value() : "auto"; gain != m_lipsyncGainConfigured) {
         m_lipsyncGainConfigured = gain;
         if (const std::string r = setLipSyncGain(gain); r.starts_with("error"))
-            notify(r + " (plugin:hypr3d:lipsync_gain)", true);
+            notify(r + " (plugin:hyprwalk:lipsync_gain)", true);
     }
     if (const std::string source = g_cfgLipSyncSource ? g_cfgLipSyncSource->value() : ""; source != m_lipsyncSourceConfigured) {
         m_lipsyncSourceConfigured = source;
@@ -1754,7 +1754,7 @@ std::string CDesktop3D::avatarStatus() const {
                        emote >= 0 ? jsonEscape(m_anim.emotes()[emote]->name) : "", m_anim.emotes().size(), m_anim.attackStatus(), m_anim.gaitStatus());
 }
 
-// hyprctl hypr3d avatar emote FILE|FOLDER: build, then play the first emote
+// hyprctl hyprwalk avatar emote FILE|FOLDER: build, then play the first emote
 std::string CDesktop3D::loadEmoteFile(const std::string& file, int loop) {
     if (std::ranges::find(m_emoteFiles, file) == m_emoteFiles.end())
         m_emoteFiles.push_back(file);
@@ -1766,7 +1766,7 @@ std::string CDesktop3D::loadEmoteFile(const std::string& file, int loop) {
 
 std::string CDesktop3D::setView(bool third) {
     if (third && !m_avatar)
-        return m_avatarLoader.busy() ? "error: the avatar is still loading" : "error: no avatar loaded (set plugin:hypr3d:avatar or use hyprctl hypr3d avatar <file>)";
+        return m_avatarLoader.busy() ? "error: the avatar is still loading" : "error: no avatar loaded (set plugin:hyprwalk:avatar or use hyprctl hyprwalk avatar <file>)";
     if (third && !m_thirdPerson)
         m_camBoom = 0.3f; // pull out from the head
     m_thirdPerson = third;
@@ -2016,7 +2016,7 @@ bool CDesktop3D::enter(PHLMONITOR mon) {
     if (const std::string want = configuredMonitor(); !mon && !want.empty()) {
         mon = monitorNamed(want);
         if (!mon)
-            notify(std::format("plugin:hypr3d:monitor: no monitor {} is connected, so 3D goes on the focused one", want), true);
+            notify(std::format("plugin:hyprwalk:monitor: no monitor {} is connected, so 3D goes on the focused one", want), true);
     }
     if (!mon)
         mon = Desktop::focusState()->monitor();
@@ -2217,7 +2217,7 @@ std::optional<Vector2D> CDesktop3D::desktopSpot() const {
     return nearest->middle();
 }
 
-// Super+Esc, hyprctl hypr3d away, hypr3d:away
+// Super+Esc, hyprctl hyprwalk away, hyprwalk:away
 std::string CDesktop3D::setAway(bool away) {
     const auto mon = m_monitor.lock();
     if (m_mode != MODE_ACTIVE || !mon)
@@ -3459,7 +3459,7 @@ std::string CDesktop3D::setPlay(bool on, std::optional<bool> fill) {
     return "playing";
 }
 
-// hypr3d:play, hl.plugin.hypr3d.play(), hyprctl hypr3d play: [on|off|toggle] [here|fill]; a view alone means on
+// hyprwalk:play, hl.plugin.hyprwalk.play(), hyprctl hyprwalk play: [on|off|toggle] [here|fill]; a view alone means on
 std::string CDesktop3D::playDispatch(const std::string& arg) {
     std::istringstream in(unquote(arg));
     std::string        v, view;
@@ -3505,14 +3505,14 @@ void CDesktop3D::checkPlayConfig() {
         m_play.size           = std::isnan(size) ? PLAY_SIZE : std::clamp(size, PLAY_SIZE_MIN, PLAY_SIZE_MAX);
         m_play.centre         = m_play.on && !m_play.fill;
         if (m_play.size != size)
-            notify(std::format("plugin:hypr3d:play_size is {} to {}, not {}: {} then", PLAY_SIZE_MIN, PLAY_SIZE_MAX, size, m_play.size), true);
+            notify(std::format("plugin:hyprwalk:play_size is {} to {}, not {}: {} then", PLAY_SIZE_MIN, PLAY_SIZE_MAX, size, m_play.size), true);
     }
     const std::string v = configuredPlayView();
     if (v == m_play.configured)
         return;
     m_play.configured = v;
     if (!v.empty() && v != "here" && v != "fill")
-        notify(std::format("plugin:hypr3d:play_view is here or fill, not {}: P plays here", v), true);
+        notify(std::format("plugin:hyprwalk:play_view is here or fill, not {}: P plays here", v), true);
 }
 
 void CDesktop3D::endPlay() {
@@ -3521,7 +3521,7 @@ void CDesktop3D::endPlay() {
     m_play.sizeTell.clear();
 }
 
-// play ended on its own: hold the game's keys back from hypr3d (updateHolds)
+// play ended on its own: hold the game's keys back from hyprwalk (updateHolds)
 void CDesktop3D::playEnded(const char* why) {
     if (!m_play.on)
         return;
@@ -4810,7 +4810,7 @@ void CDesktop3D::updateHolds() {
     }
     if (now - m_held.at > std::chrono::duration<float>(PLAY_PAUSE_IDLE)) {
         m_held.on = false;
-        notify("walking again: the keys are hypr3d's");
+        notify("walking again: the keys are hyprwalk's");
     }
 }
 
@@ -4823,7 +4823,7 @@ const std::vector<SAppEntry>& CDesktop3D::apps() {
     return m_apps;
 }
 
-// files with `exts` in $XDG_DATA_HOME/hypr3d/FOLDER and its subfolders, then `also`
+// files with `exts` in $XDG_DATA_HOME/hyprwalk/FOLDER and its subfolders, then `also`
 void CDesktop3D::listModelFiles(std::vector<SModelFile>& out, const char* folder, std::initializer_list<std::string_view> exts, std::initializer_list<std::string> also) {
     namespace fs = std::filesystem;
     out.clear();
@@ -4842,7 +4842,7 @@ void CDesktop3D::listModelFiles(std::vector<SModelFile>& out, const char* folder
     };
     const char*    xdg  = getenv("XDG_DATA_HOME");
     const char*    home = getenv("HOME");
-    const fs::path dir  = (xdg && *xdg ? fs::path(xdg) : fs::path(home ? home : "/tmp") / ".local/share") / "hypr3d" / folder;
+    const fs::path dir  = (xdg && *xdg ? fs::path(xdg) : fs::path(home ? home : "/tmp") / ".local/share") / "hyprwalk" / folder;
     std::error_code ec;
     for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
         if (isModel(it->path())) {
@@ -4915,7 +4915,7 @@ std::string CDesktop3D::pickAvatar(const std::string& path) {
     return requestAvatar(want, g_cfgAvatarHeight ? g_cfgAvatarHeight->value() : 0.f);
 }
 
-// starts an app like exec, with HYPR3D_LAUNCH so its window opens in front of you
+// starts an app like exec, with HYPRWALK_LAUNCH so its window opens in front of you
 std::string CDesktop3D::launch(const std::string& what) {
     std::string cmd = what, cls, name = what;
     if (const SAppEntry* e = findApp(apps(), what)) {
@@ -4956,7 +4956,7 @@ std::string CDesktop3D::launch(const std::string& what) {
     l.what  = name;
     l.cls   = cls;
     l.at    = std::chrono::steady_clock::now();
-    const auto pid = Config::Supplementary::executor()->spawnRawProc(std::format("export HYPR3D_LAUNCH={}; {}", l.token, cmd));
+    const auto pid = Config::Supplementary::executor()->spawnRawProc(std::format("export HYPRWALK_LAUNCH={}; {}", l.token, cmd));
     if (!pid || !*pid)
         return "error: couldn't start " + name;
     l.pid = (int64_t)*pid;
@@ -4985,7 +4985,7 @@ void CDesktop3D::onWindowOpen(const PHLWINDOW& w) {
     const std::string cls = classOf(w);
     bool              launched = false;
     const auto        env      = w->getEnv();
-    const auto        token    = env.find("HYPR3D_LAUNCH");
+    const auto        token    = env.find("HYPRWALK_LAUNCH");
     const auto        steamId  = env.contains("SteamAppId") ? env.at("SteamAppId") : env.contains("SteamGameId") ? env.at("SteamGameId") : "";
     const auto        parents  = m_launches.empty() ? std::vector<int64_t>{} : ancestry(w->getPID());
     // a Steam game's first window: hint how to play it (updateHolds)
@@ -5375,7 +5375,7 @@ std::string CDesktop3D::setTileFollow(bool on) {
     return on ? "following" : "staying";
 }
 
-// hypr3d:tile dispatcher and hl.plugin.hypr3d.tile(): none = T, here = Shift+T, follow = Y
+// hyprwalk:tile dispatcher and hl.plugin.hyprwalk.tile(): none = T, here = Shift+T, follow = Y
 std::string CDesktop3D::tileDispatch(const std::string& arg) {
     const std::string a = unquote(arg);
     if (a == "here")
@@ -5385,7 +5385,7 @@ std::string CDesktop3D::tileDispatch(const std::string& arg) {
     return setTiling(!m_tiling.on);
 }
 
-// plugin:hypr3d:tiling and tiling_follow: applied at start and when they change
+// plugin:hyprwalk:tiling and tiling_follow: applied at start and when they change
 void CDesktop3D::checkTilingConfig() {
     if (const int f = !g_cfgTilingFollow || g_cfgTilingFollow->value(); f != m_tiling.configuredFollow) {
         const bool first          = m_tiling.configuredFollow < 0;
@@ -6513,7 +6513,7 @@ std::string CDesktop3D::menuCommand(const std::vector<std::string>& args) {
             setAway(false); // the menu needs the mouse and keys
         setTyping(false);
     }
-    return h3d::menuCommand(m_menu, args, [this](const SMenuItem& it) { return menuAction(it); });
+    return hyprwalk::menuCommand(m_menu, args, [this](const SMenuItem& it) { return menuAction(it); });
 }
 
 std::string CDesktop3D::menuDispatch(const std::string& arg) {
@@ -6564,7 +6564,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
     for (std::string s; in >> s;)
         args.push_back(s);
     if (!args.empty())
-        args.erase(args.begin()); // "hypr3d"
+        args.erase(args.begin()); // "hyprwalk"
 
     const std::string cmd = args.empty() ? "status" : args[0];
     auto              num = [&](size_t i, float def) {
@@ -6579,7 +6579,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
         toggle();
         return "ok";
     }
-    if (cmd == "on") { // on [MONITOR] (else plugin:hypr3d:monitor's or focused)
+    if (cmd == "on") { // on [MONITOR] (else plugin:hyprwalk:monitor's or focused)
         PHLMONITOR mon;
         if (args.size() > 1) {
             std::string name = args[1];
@@ -6899,7 +6899,7 @@ std::string CDesktop3D::hyprctl(const std::string& request) {
             m_sens = std::clamp(num(1, m_sens), 0.00005f, 0.05f);
         return std::format("{}", m_sens);
     }
-    return "usage: hyprctl hypr3d [status|toggle|on [monitor]|off [now]|away [on|off|toggle]|type [on|off]|play [on|off|toggle] [here|fill]|camera|look dx dy|turn yaw pitch|tp x y z|walk secs [forward|back|left|right]|jump|fly|click "
+    return "usage: hyprctl hyprwalk [status|toggle|on [monitor]|off [now]|away [on|off|toggle]|type [on|off]|play [on|off|toggle] [here|fill]|camera|look dx dy|turn yaw pitch|tp x y z|walk secs [forward|back|left|right]|jump|fly|click "
            "[left|right|middle]|sens [value]|aim [window]|grab|place|hold dist [scale]|pin|tile [on|off|toggle|here|follow [on|off|toggle]]|reset-windows [forget]|windows|panels|log [lines]|launch what|apps|window sel action|map [path|none|reload|forget|scale s]|spawn [here]|desktop [here [height]]|"
            "avatar [path|none|reload|height m|expression [name [weight]|none]|gesture [left|right|both gesture]|parts [reset]|toggle name [on|off|reset]|"
            "shape name [weight|reset]|physics [on|off|toggle]|emote [name|number|file|folder [once|loop]|stop]|lipsync [on|off|toggle|gain dB|auto|source name|default]]|"
@@ -6942,7 +6942,7 @@ namespace {
         return reinterpret_cast<F>(dlsym(RTLD_DEFAULT, name));
     }
 
-    // hl.plugin.hypr3d.menu([args]): as hyprctl hypr3d menu (none: toggle, a page: open it)
+    // hl.plugin.hyprwalk.menu([args]): as hyprctl hyprwalk menu (none: toggle, a page: open it)
     int luaMenu(lua_State* L) {
         using FType       = int (*)(lua_State*, int);
         using FToString   = const char* (*)(lua_State*, int, size_t*);
@@ -6966,7 +6966,7 @@ namespace {
         return 1;
     }
 
-    // hl.plugin.hypr3d.tile([here|follow]): T, Shift+T or Y; returns what hyprctl hypr3d tile says
+    // hl.plugin.hyprwalk.tile([here|follow]): T, Shift+T or Y; returns what hyprctl hyprwalk tile says
     int luaTile(lua_State* L) {
         using FType       = int (*)(lua_State*, int);
         using FToString   = const char* (*)(lua_State*, int, size_t*);
@@ -6990,7 +6990,7 @@ namespace {
         return 1;
     }
 
-    // hl.plugin.hypr3d.play([on|off|toggle] [here|fill]): as hyprctl hypr3d play
+    // hl.plugin.hyprwalk.play([on|off|toggle] [here|fill]): as hyprctl hyprwalk play
     int luaPlay(lua_State* L) {
         using FType       = int (*)(lua_State*, int);
         using FToString   = const char* (*)(lua_State*, int, size_t*);
@@ -7026,82 +7026,82 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     const std::string CLIENT_HASH = __hyprland_api_get_client_hash();
     if (HASH != CLIENT_HASH) {
         notify("built for a different Hyprland version, rebuild it with ./build.sh", true);
-        throw std::runtime_error("[hypr3d] version mismatch");
+        throw std::runtime_error("[hyprwalk] version mismatch");
     }
 
-    // plugin { hypr3d { layer_spacing = ..., wallpaper = ... } }
-    g_cfgSpacing = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:layer_spacing", "meters between stacked desktop layers in 3D", 0.02f,
+    // plugin { hyprwalk { layer_spacing = ..., wallpaper = ... } }
+    g_cfgSpacing = makeShared<Config::Values::CFloatValue>("plugin:hyprwalk:layer_spacing", "meters between stacked desktop layers in 3D", 0.02f,
                                                           Config::Values::SFloatValueOptions{.min = 0.f, .max = 0.5f});
-    g_cfgWallpaper = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:wallpaper", "keep the wallpaper on the desktop wall in 3D", false);
+    g_cfgWallpaper = makeShared<Config::Values::CBoolValue>("plugin:hyprwalk:wallpaper", "keep the wallpaper on the desktop wall in 3D", false);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgSpacing);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgWallpaper);
-    // plugin { hypr3d { map = "~/maps/de_dust2.glb", map_scale = 0 } }
-    g_cfgMap      = makeShared<Config::Values::CStringValue>("plugin:hypr3d:map", "glTF map to walk around in instead of the courtyard", "");
-    g_cfgMapScale = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:map_scale", "meters per map unit, 0 = guess", 0.f,
+    // plugin { hyprwalk { map = "~/maps/de_dust2.glb", map_scale = 0 } }
+    g_cfgMap      = makeShared<Config::Values::CStringValue>("plugin:hyprwalk:map", "glTF map to walk around in instead of the courtyard", "");
+    g_cfgMapScale = makeShared<Config::Values::CFloatValue>("plugin:hyprwalk:map_scale", "meters per map unit, 0 = guess", 0.f,
                                                             Config::Values::SFloatValueOptions{.min = 0.f, .max = 1000.f});
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgMap);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgMapScale);
-    // plugin { hypr3d { avatar = "~/avatars/me.vrm", avatar_height = 0, avatar_physics = true } }
-    g_cfgAvatar       = makeShared<Config::Values::CStringValue>("plugin:hypr3d:avatar", "glTF / GLB / VRM avatar, seen in third person (V)", "");
-    g_cfgAvatarHeight = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:avatar_height", "the avatar's height in meters, 0 = as it comes", 0.f,
+    // plugin { hyprwalk { avatar = "~/avatars/me.vrm", avatar_height = 0, avatar_physics = true } }
+    g_cfgAvatar       = makeShared<Config::Values::CStringValue>("plugin:hyprwalk:avatar", "glTF / GLB / VRM avatar, seen in third person (V)", "");
+    g_cfgAvatarHeight = makeShared<Config::Values::CFloatValue>("plugin:hyprwalk:avatar_height", "the avatar's height in meters, 0 = as it comes", 0.f,
                                                                 Config::Values::SFloatValueOptions{.min = 0.f, .max = 20.f});
-    g_cfgAvatarPhysics = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:avatar_physics", "the avatar's hair, skirt and the like swing as it moves", true);
-    // plugin { hypr3d { first_person_body = true } }
-    g_cfgFirstPersonBody = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:first_person_body",
+    g_cfgAvatarPhysics = makeShared<Config::Values::CBoolValue>("plugin:hyprwalk:avatar_physics", "the avatar's hair, skirt and the like swing as it moves", true);
+    // plugin { hyprwalk { first_person_body = true } }
+    g_cfgFirstPersonBody = makeShared<Config::Values::CBoolValue>("plugin:hyprwalk:first_person_body",
                                                                   "first person from the avatar's eyes: its body below, its hands in view doing what you do", true);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgFirstPersonBody);
-    // plugin { hypr3d { lipsync = false } }: nothing heard is kept or sent
-    g_cfgLipSync = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:lipsync", "lip sync: the microphone moves the avatar's mouth while in 3D", false);
+    // plugin { hyprwalk { lipsync = false } }: nothing heard is kept or sent
+    g_cfgLipSync = makeShared<Config::Values::CBoolValue>("plugin:hyprwalk:lipsync", "lip sync: the microphone moves the avatar's mouth while in 3D", false);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgLipSync);
-    // plugin { hypr3d { lipsync_gain = auto, lipsync_source = "" } }
-    g_cfgLipSyncGain = makeShared<Config::Values::CStringValue>("plugin:hypr3d:lipsync_gain",
+    // plugin { hyprwalk { lipsync_gain = auto, lipsync_source = "" } }
+    g_cfgLipSyncGain = makeShared<Config::Values::CStringValue>("plugin:hyprwalk:lipsync_gain",
                                                                 "lip sync: how much louder the microphone counts, dB (-20 to 60), or auto: it goes by your voice", "auto");
-    g_cfgLipSyncSource = makeShared<Config::Values::CStringValue>("plugin:hypr3d:lipsync_source",
+    g_cfgLipSyncSource = makeShared<Config::Values::CStringValue>("plugin:hyprwalk:lipsync_source",
                                                                   "lip sync: the microphone, by its name or description (wpctl status), \"\" = the default one", "");
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgLipSyncGain);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgLipSyncSource);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAvatar);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAvatarHeight);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAvatarPhysics);
-    g_cfgAvatarEmotes = makeShared<Config::Values::CStringValue>("plugin:hypr3d:avatar_emotes",
+    g_cfgAvatarEmotes = makeShared<Config::Values::CStringValue>("plugin:hyprwalk:avatar_emotes",
                                                                  "more emotes: VRM animations (.vrma) or glTF clips, files or folders separated by commas", "");
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAvatarEmotes);
-    // plugin { hypr3d { emote_volume = 0.5 } }
-    g_cfgEmoteVolume = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:emote_volume",
+    // plugin { hyprwalk { emote_volume = 0.5 } }
+    g_cfgEmoteVolume = makeShared<Config::Values::CFloatValue>("plugin:hyprwalk:emote_volume",
                                                                "how loud emotes' sounds (a dance's song) play: 1 as loud as they are, 0 not at all", EMOTE_VOLUME,
                                                                Config::Values::SFloatValueOptions{.min = 0.f, .max = 1.f});
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgEmoteVolume);
-    // plugin { hypr3d { apps = firefox, discord, obs; app_rules = steam_app_.*: 2.2 1.5, discord: 1.2 auto left } }
-    g_cfgApps     = makeShared<Config::Values::CStringValue>("plugin:hypr3d:apps", "the Apps page's favourites: desktop ids, names or commands, separated by commas", "");
-    g_cfgAppRules = makeShared<Config::Values::CStringValue>("plugin:hypr3d:app_rules",
+    // plugin { hyprwalk { apps = firefox, discord, obs; app_rules = steam_app_.*: 2.2 1.5, discord: 1.2 auto left } }
+    g_cfgApps     = makeShared<Config::Values::CStringValue>("plugin:hyprwalk:apps", "the Apps page's favourites: desktop ids, names or commands, separated by commas", "");
+    g_cfgAppRules = makeShared<Config::Values::CStringValue>("plugin:hyprwalk:app_rules",
                                                              "where apps launched from 3D open: CLASS: DISTANCE [HEIGHT|auto] [left|right|SIDE], separated by commas", "");
-    g_cfgPinSize  = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:pin_size", "how much of the view's height a window pinned to it takes", 0.3f,
+    g_cfgPinSize  = makeShared<Config::Values::CFloatValue>("plugin:hyprwalk:pin_size", "how much of the view's height a window pinned to it takes", 0.3f,
                                                            Config::Values::SFloatValueOptions{.min = 0.05f, .max = 1.f});
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgApps);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgAppRules);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgPinSize);
-    // plugin { hypr3d { monitor = DP-1 } }
-    g_cfgMonitor = makeShared<Config::Values::CStringValue>("plugin:hypr3d:monitor",
+    // plugin { hyprwalk { monitor = DP-1 } }
+    g_cfgMonitor = makeShared<Config::Values::CStringValue>("plugin:hyprwalk:monitor",
                                                             "the monitor 3D goes on: its name (DP-1) or desc: and its description; \"\" = the focused one", "");
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgMonitor);
-    // plugin { hypr3d { walk_speed = 1.6, run_speed = 4.5 } }: m/s
-    g_cfgWalkSpeed = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:walk_speed", "how fast you walk in 3D, m/s", WALK_SPEED,
+    // plugin { hyprwalk { walk_speed = 1.6, run_speed = 4.5 } }: m/s
+    g_cfgWalkSpeed = makeShared<Config::Values::CFloatValue>("plugin:hyprwalk:walk_speed", "how fast you walk in 3D, m/s", WALK_SPEED,
                                                              Config::Values::SFloatValueOptions{.min = 0.3f, .max = 10.f});
-    g_cfgRunSpeed  = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:run_speed", "how fast you run in 3D (Shift), m/s", RUN_SPEED,
+    g_cfgRunSpeed  = makeShared<Config::Values::CFloatValue>("plugin:hyprwalk:run_speed", "how fast you run in 3D (Shift), m/s", RUN_SPEED,
                                                             Config::Values::SFloatValueOptions{.min = 0.5f, .max = 15.f});
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgWalkSpeed);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgRunSpeed);
-    // plugin { hypr3d { tiling = false, tiling_follow = true } }
-    g_cfgTiling       = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:tiling", "tiling mode (T): the windows in 3D side by side round you", false);
-    g_cfgTilingFollow = makeShared<Config::Values::CBoolValue>("plugin:hypr3d:tiling_follow", "tiling mode's row goes with you (Y), else it stays where it is", true);
+    // plugin { hyprwalk { tiling = false, tiling_follow = true } }
+    g_cfgTiling       = makeShared<Config::Values::CBoolValue>("plugin:hyprwalk:tiling", "tiling mode (T): the windows in 3D side by side round you", false);
+    g_cfgTilingFollow = makeShared<Config::Values::CBoolValue>("plugin:hyprwalk:tiling_follow", "tiling mode's row goes with you (Y), else it stays where it is", true);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgTiling);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgTilingFollow);
-    // plugin { hypr3d { play_view = here } }
-    g_cfgPlayView = makeShared<Config::Values::CStringValue>("plugin:hypr3d:play_view",
+    // plugin { hyprwalk { play_view = here } }
+    g_cfgPlayView = makeShared<Config::Values::CStringValue>("plugin:hyprwalk:play_view",
                                                              "how P plays a window: here (where it is, the view as it was) or fill (facing it, filling the view); Shift+P the other", "here");
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgPlayView);
-    // plugin { hypr3d { play_size = 0.5 } }
-    g_cfgPlaySize = makeShared<Config::Values::CFloatValue>("plugin:hypr3d:play_size",
+    // plugin { hyprwalk { play_size = 0.5 } }
+    g_cfgPlaySize = makeShared<Config::Values::CFloatValue>("plugin:hyprwalk:play_size",
                                                             "played here in tiling mode's ring, how much of the view a window takes (0.25 to 0.94); Super+wheel changes it while you play",
                                                             PLAY_SIZE);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfgPlaySize);
@@ -7109,17 +7109,17 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_p3D = std::make_unique<CDesktop3D>();
     g_p3D->init();
 
-    HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "toggle", luaToggle);
-    HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "enter", luaEnter);
-    HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "exit", luaExit);
-    HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "type", luaType);
-    HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "play", luaPlay);
-    HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "away", luaAway);
-    HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "tile", luaTile);
-    HyprlandAPI::addLuaFunction(PHANDLE, "hypr3d", "menu", luaMenu);
+    HyprlandAPI::addLuaFunction(PHANDLE, "hyprwalk", "toggle", luaToggle);
+    HyprlandAPI::addLuaFunction(PHANDLE, "hyprwalk", "enter", luaEnter);
+    HyprlandAPI::addLuaFunction(PHANDLE, "hyprwalk", "exit", luaExit);
+    HyprlandAPI::addLuaFunction(PHANDLE, "hyprwalk", "type", luaType);
+    HyprlandAPI::addLuaFunction(PHANDLE, "hyprwalk", "play", luaPlay);
+    HyprlandAPI::addLuaFunction(PHANDLE, "hyprwalk", "away", luaAway);
+    HyprlandAPI::addLuaFunction(PHANDLE, "hyprwalk", "tile", luaTile);
+    HyprlandAPI::addLuaFunction(PHANDLE, "hyprwalk", "menu", luaMenu);
 
     log("loaded");
-    return {"hypr3d", "Walk around your desktop in first person", "hypr3d", "0.1"};
+    return {"hyprwalk", "Walk around your desktop in first person", "hyprwalk", "0.1"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

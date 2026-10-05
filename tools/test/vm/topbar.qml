@@ -13,7 +13,7 @@ ShellRoot {
                 required property var modelData
                 screen: modelData
 
-                WlrLayershell.namespace: "h3d-topbar"
+                WlrLayershell.namespace: "hyprwalk-topbar"
                 WlrLayershell.layer: WlrLayer.Top
                 color: "#ff8800"
                 anchors {

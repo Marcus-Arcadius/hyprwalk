@@ -17,7 +17,7 @@
 
 // The player's avatar: a skinned glTF / GLB / VRM model and its animator (named clips, else procedural for humanoids).
 
-namespace h3d {
+namespace hyprwalk {
 
     // skinned vertex in mesh space; joints index SAvatarModel::joints
     struct SAvatarVertex {
@@ -401,7 +401,7 @@ namespace h3d {
         std::vector<std::array<V3, 2>> reach;
     };
 
-    // walk / run body clip without legs (tools/blender/h3d_walk.py): over a stride from the left heel strike, bone
+    // walk / run body clip without legs (tools/blender/hyprwalk_walk.py): over a stride from the left heel strike, bone
     // turns from the T pose in the gait frame (+x left, +y up, +z ahead), the hips' move in hip heights, and means
     struct SGaitClip {
         std::string                             name;
@@ -460,7 +460,7 @@ namespace h3d {
         std::vector<SAvatarToggle> toggles;
         std::vector<SAvatarSlider> sliders;
         std::vector<int>           fixed; // MA World Fixed Objects: stay where spawned
-        std::string                settings; // its "<name>.hypr3d.json", "" = none
+        std::string                settings; // its "<name>.hyprwalk.json", "" = none
         // KHR_materials_variants: names; per SAvatarBatch::variants, (variant, material) pairs; [0] = none
         std::vector<std::string>                      variants;
         std::vector<std::vector<std::pair<int, int>>> variantMaps{{}};

@@ -1,4 +1,4 @@
-# limit_unit.py: tools/unity2hypr3d.py's PhysBone limits (as VRMC_springBone_limit, rotations mirrored for the GLB) and
+# limit_unit.py: tools/unity2hyprwalk.py's PhysBone limits (as VRMC_springBone_limit, rotations mirrored for the GLB) and
 # Immobile (All Motion -> "parentImmobile") on booth.py's SynthChan.
 #   python3 tools/test/synth/limit_unit.py [BOOTHDIR]   (booth.py's packages; made in a temporary directory if not given)
 import sys, os, json, math, struct, shutil, subprocess, tempfile
@@ -38,9 +38,9 @@ if not os.path.isfile(os.path.join(booth, 'SynthChan_v1.0.unitypackage')):
     subprocess.run(['blender', '-b', '--factory-startup', '--python-exit-code', '1', '-P', os.path.join(HERE, 'booth.py'),
                     '--', booth], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 glb = os.path.join(W, 'SynthChan.glb')
-subprocess.run([sys.executable, os.path.join(TOOLS, 'unity2hypr3d.py'), os.path.join(booth, 'SynthChan_v1.0.unitypackage'),
+subprocess.run([sys.executable, os.path.join(TOOLS, 'unity2hyprwalk.py'), os.path.join(booth, 'SynthChan_v1.0.unitypackage'),
                 '-o', glb], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-st = json.load(open(glb[:-4] + '.hypr3d.json'))
+st = json.load(open(glb[:-4] + '.hyprwalk.json'))
 data = open(glb, 'rb').read()
 js = json.loads(data[20:20 + struct.unpack_from('<I', data, 12)[0]])
 

@@ -1,5 +1,5 @@
 # runs inside Blender: blender -b --factory-startup --python-exit-code 1 -P lighttool.py -- job.json
-# converts CS2's decompiled lightmaps and probe atlases to the PNGs hypr3d reads: HDR as RGBE (8-bit mantissas, shared
+# converts CS2's decompiled lightmaps and probe atlases to the PNGs hyprwalk reads: HDR as RGBE (8-bit mantissas, shared
 # exponent in alpha), single channels as grey, 3D atlases as a grid of slices; rows top first
 import bpy, sys, json, zlib, struct, time
 import numpy as np

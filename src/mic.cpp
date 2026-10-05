@@ -7,7 +7,7 @@
 #include <mutex>
 #include <unordered_map>
 
-#ifdef H3D_PIPEWIRE
+#ifdef HYPRWALK_PIPEWIRE
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
 #include <spa/param/props.h>
@@ -15,9 +15,9 @@
 #include <spa/utils/string.h>
 #endif
 
-namespace h3d {
+namespace hyprwalk {
 
-#ifdef H3D_PIPEWIRE
+#ifdef HYPRWALK_PIPEWIRE
     namespace {
         using Clock = std::chrono::steady_clock;
 
@@ -369,7 +369,7 @@ namespace h3d {
             return true;
         static std::once_flag init;
         std::call_once(init, [] { pw_init(nullptr, nullptr); });
-        m->loop = pw_thread_loop_new("hypr3d-lipsync", nullptr);
+        m->loop = pw_thread_loop_new("hyprwalk-lipsync", nullptr);
         if (!m->loop || pw_thread_loop_start(m->loop) != 0) {
             error = "couldn't start a PipeWire thread";
             stop();
@@ -416,13 +416,13 @@ namespace h3d {
                 m->target = name;
             }
             pw_properties* props = pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Capture", PW_KEY_MEDIA_ROLE, "Communication", PW_KEY_APP_NAME,
-                                                     "hypr3d", PW_KEY_NODE_NAME, "hypr3d-lipsync", PW_KEY_NODE_DESCRIPTION, "hypr3d lip sync", nullptr);
+                                                     "hyprwalk", PW_KEY_NODE_NAME, "hyprwalk-lipsync", PW_KEY_NODE_DESCRIPTION, "hyprwalk lip sync", nullptr);
             // a missing target gets the default from WirePlumber (status() tells which). Not node.dont-fallback:
             // WirePlumber 0.5.17 makes a stream whose target is the default follow the default, then ends it with
             // dont-fallback ("not found")
             if (!name.empty())
                 pw_properties_set(props, PW_KEY_TARGET_OBJECT, name.c_str());
-            m->stream = pw_stream_new(m->core, "hypr3d lip sync", props);
+            m->stream = pw_stream_new(m->core, "hyprwalk lip sync", props);
             ok        = m->stream != nullptr;
         }
         if (ok) {
@@ -547,7 +547,7 @@ namespace h3d {
     }
 
     bool CMicrophone::start(std::string& error, const std::string&) {
-        error = "hypr3d was built without PipeWire (build.sh finds the one that runs)";
+        error = "hyprwalk was built without PipeWire (build.sh finds the one that runs)";
         return false;
     }
 

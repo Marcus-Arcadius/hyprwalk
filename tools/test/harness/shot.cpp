@@ -1,4 +1,4 @@
-// Offscreen test harness for hypr3d: drives the real renderer and avatar animator on a surfaceless EGL context and
+// Offscreen test harness for hyprwalk: drives the real renderer and avatar animator on a surfaceless EGL context and
 // writes PNGs; no compositor needed. Arguments run in order, each changing the state; --out renders a picture:
 //   shot --avatar a.vrm --frames 30 --view 0 --out front.png --view 180 --out back.png
 #include "avatar.hpp"
@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-namespace h3d {
+namespace hyprwalk {
     void log(const std::string& s) {
         fprintf(stderr, "[log] %s\n", s.c_str());
     }
@@ -37,7 +37,7 @@ namespace h3d {
     }
 }
 
-using namespace h3d;
+using namespace hyprwalk;
 
 namespace {
     // runs a load as CBackgroundLoader does: an exception becomes a failed load
@@ -1696,7 +1696,7 @@ int main(int argc, char** argv) {
                 fprintf(stderr, "menu at %s\n", menu.open() ? menu.path().c_str() : "(closed)");
         } else if (a == "--menu-close") {
             menu.hide();
-        } else if (a == "--ctl") { // a hyprctl hypr3d "avatar ..." or "menu ..." request
+        } else if (a == "--ctl") { // a hyprctl hyprwalk "avatar ..." or "menu ..." request
             need(i, 1);
             const std::string        req = argv[++i];
             std::istringstream       in(req);

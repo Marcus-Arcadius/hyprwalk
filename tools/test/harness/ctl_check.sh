@@ -54,7 +54,7 @@ if [[ -f "$A" ]]; then
     W="$(mktemp -d)"
     cp "$A" "$W/"
     python3 -c 'import json, sys; s = json.load(open(sys.argv[1], encoding="utf-8")); s["fixed"] = ["Tail"]; s.pop("springs", None)
-json.dump(s, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)' "${A%.glb}.hypr3d.json" "$W/BoothAccessories.hypr3d.json"
+json.dump(s, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)' "${A%.glb}.hyprwalk.json" "$W/BoothAccessories.hyprwalk.json"
     out="$("$SHOT" --size 64x64 --avatar "$W/BoothAccessories.glb" --frames 5 --where Tail --where Head --accel 40 --move 0 3 --frames 60 \
         --where Tail --where Head 2>&1)"
     rm -rf "$W"
@@ -74,7 +74,7 @@ if [[ -f "$D" ]]; then
     trap 'rm -rf "$T"' EXIT
     cp "$D" "$DIR"/SynthDances.*.vrma "$T/"
     # the same with an emote at twice its speed
-    sed 's/"name": "Loli Kami Requiem",/"name": "Loli Kami Requiem", "speed": 2,/' "$DIR/SynthDances.hypr3d.json" > "$T/SynthDances.hypr3d.json"
+    sed 's/"name": "Loli Kami Requiem",/"name": "Loli Kami Requiem", "speed": 2,/' "$DIR/SynthDances.hyprwalk.json" > "$T/SynthDances.hyprwalk.json"
     where=(--where Hand_L --where Hand_R --where Head)
     fast="$("$SHOT" --size 64x64 --avatar "$T/SynthDances.glb" --ctl "avatar emote" --ctl "avatar emote Loli Kami Requiem once" \
         --frames 90 "${where[@]}" 2>&1)"
@@ -91,7 +91,7 @@ if [[ -f "$D" ]]; then
     if command -v ffmpeg > /dev/null; then
         ffmpeg -v error -y -f lavfi -i "aevalsrc=exprs=0.5*sin(2*PI*440*t):s=44100:d=1.5" -c:a libvorbis "$T/song.ogg"
         sed -e 's/"name": "Loli Kami Requiem",/"name": "Loli Kami Requiem", "sound": "song.ogg",/' \
-            -e 's/"name": "Doodle Dance",/"name": "Doodle Dance", "sound": "gone.ogg",/' "$DIR/SynthDances.hypr3d.json" > "$T/SynthDances.hypr3d.json"
+            -e 's/"name": "Doodle Dance",/"name": "Doodle Dance", "sound": "gone.ogg",/' "$DIR/SynthDances.hyprwalk.json" > "$T/SynthDances.hyprwalk.json"
         out="$("$SHOT" --size 64x64 --avatar "$T/SynthDances.glb" --ctl "avatar emote" --ctl "avatar emote Loli Kami Requiem" --frames 10 \
             --ctl "avatar emote" 2>&1)"
         check 'an emote'"'"'s sound, listed with it' "$out" '"sound": {"file": "song.ogg", "duration": 1.50, "rate": 44100, "channels": 1}'

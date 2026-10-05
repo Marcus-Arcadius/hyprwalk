@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace h3d {
+namespace hyprwalk {
 
     // an emote's sound ("sound" in the settings file): an Ogg Vorbis file decoded whole to interleaved 16-bit mono or
     // stereo, played by speaker.hpp

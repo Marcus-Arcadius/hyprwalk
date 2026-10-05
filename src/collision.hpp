@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace h3d {
+namespace hyprwalk {
 
     struct SRayHit {
         float t = 0;

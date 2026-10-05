@@ -14,7 +14,7 @@
 #include <set>
 #include <string_view>
 
-namespace h3d {
+namespace hyprwalk {
 
     namespace {
         using gltf::check;
@@ -1495,7 +1495,7 @@ namespace h3d {
 
         bool gaitClip(const void* bytes, size_t size, const std::string& what, const std::atomic<bool>& cancel, SGaitClip& out, std::string& error);
 
-        // built in walk and run (tools/blender/h3d_walk.py)
+        // built in walk and run (tools/blender/hyprwalk_walk.py)
         constexpr unsigned char WALK_VRMA[] = {
 #embed "../assets/walk.vrma"
         };
@@ -1846,12 +1846,13 @@ namespace h3d {
                 targets.clear();
             }
 
-            // own part from extras' "hypr3d_part" (unity2hypr3d's Mesh Cutter splits)
+            // own part from extras' "hyprwalk_part" (unity2hyprwalk's Mesh Cutter splits)
             int primitivePart(const cgltf_primitive& prim, int nodePart, int ni, size_t gi) {
                 SJson j;
                 if (!prim.extras.data || !CJsonReader(prim.extras.data).read(j))
                     return nodePart;
-                const std::string name(jstr(j.get("hypr3d_part")));
+                const SJson*      part = j.get("hyprwalk_part");
+                const std::string name(jstr(part ? part : j.get("hypr3d_part"))); // hypr3d_: converted before the rename
                 if (name.empty())
                     return nodePart;
                 for (size_t p = nodePart + 1; p < model.parts.size(); ++p)
@@ -2182,11 +2183,11 @@ namespace h3d {
                 else if (model.humanoid) {
                     if (height < 0.5f || height > 2.5f) {
                         s = 1.75f / height;
-                        log.push_back(std::format("the avatar is {:.3g} units tall, scaling it to 1.75 m (set plugin:hypr3d:avatar_height to override)", height));
+                        log.push_back(std::format("the avatar is {:.3g} units tall, scaling it to 1.75 m (set plugin:hyprwalk:avatar_height to override)", height));
                     }
                 } else if (extent < 0.2f || extent > 3.f) {
                     s = 1.2f / extent;
-                    log.push_back(std::format("the avatar is {:.3g} units across, scaling it to 1.2 m (set plugin:hypr3d:avatar_height to override)", extent));
+                    log.push_back(std::format("the avatar is {:.3g} units across, scaling it to 1.2 m (set plugin:hyprwalk:avatar_height to override)", extent));
                 }
 
                 const V3   rt   = normalize(cross(fwd, UP));
@@ -2768,23 +2769,24 @@ namespace h3d {
                 return false;
             }
 
-            // AVATAR.hypr3d.json beside the model (see the README)
+            // AVATAR.hyprwalk.json beside the model (see the README), or AVATAR.hypr3d.json from before the rename
             void readSettings(const std::filesystem::path& file) {
                 std::error_code ec;
-                for (const auto& p : {std::filesystem::path(file).replace_extension(".hypr3d.json"), std::filesystem::path(file.string() + ".hypr3d.json")}) {
-                    std::vector<uint8_t> text;
-                    if (!std::filesystem::is_regular_file(p, ec) || !gltf::readFile(p.string(), text))
-                        continue;
-                    settingsName = p.filename().string();
-                    CJsonReader r(std::string_view((const char*)text.data(), text.size()));
-                    if (!r.read(settings) || settings.type != SJson::J_OBJ) {
-                        log.push_back(std::format("{} isn't valid JSON (line {}), left out", settingsName, r.line()));
-                        settings = {};
+                for (const char* ext : {".hyprwalk.json", ".hypr3d.json"})
+                    for (const auto& p : {std::filesystem::path(file).replace_extension(ext), std::filesystem::path(file.string() + ext)}) {
+                        std::vector<uint8_t> text;
+                        if (!std::filesystem::is_regular_file(p, ec) || !gltf::readFile(p.string(), text))
+                            continue;
+                        settingsName = p.filename().string();
+                        CJsonReader r(std::string_view((const char*)text.data(), text.size()));
+                        if (!r.read(settings) || settings.type != SJson::J_OBJ) {
+                            log.push_back(std::format("{} isn't valid JSON (line {}), left out", settingsName, r.line()));
+                            settings = {};
+                            return;
+                        }
+                        model.settings = p.string();
                         return;
                     }
-                    model.settings = p.string();
-                    return;
-                }
             }
 
             // settings names the model lacks
@@ -3490,7 +3492,7 @@ namespace h3d {
                         const SJson* disc   = c.get("disc");
                         int          k      = -1;
                         if (disc && disc->type == SJson::J_OBJ) {
-                            // older hypr3d reads a disc as a sphere of "radius"
+                            // older hyprwalk reads a disc as a sphere of "radius"
                             k = addCollider(node, o, o + normalize(jvec(disc->get("normal"), {0, 1, 0})), (float)jnum(c.get("radius"), 0.05) * metersAt(node), COLLIDER_DISC);
                             model.springColliders[k].disc = std::max((float)jnum(disc->get("radius"), 0), 0.f) * metersAt(node);
                         } else

@@ -15,7 +15,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace h3d {
+namespace hyprwalk {
 
     enum ePanelKind : uint8_t {
         PANEL_LAYER = 0,

@@ -1,6 +1,6 @@
 # checks.py: the checklist tools/test/vm/run.sh runs through nixos-test-driver in vm.nix's VMs (`machine` at 1280x800,
 # `hidpi` at 1920x1200, scales 1.5 and 2). Input goes through QMP input-send-event, the kernel, libinput and Hyprland. A
-# section that throws fails as a whole; "known" failures (bugs outside hypr3d) don't count.
+# section that throws fails as a whole; "known" failures (bugs outside hyprwalk) don't count.
 import datetime as dt
 import json
 import math
@@ -12,13 +12,13 @@ import time
 import traceback
 from pathlib import Path
 
-IN = Path(os.environ["H3D_IN"])  # run.sh's inputs, copied to H in the VM
-OUT = Path(os.environ["H3D_OUT"])
+IN = Path(os.environ["HYPRWALK_IN"])  # run.sh's inputs, copied to H in the VM
+OUT = Path(os.environ["HYPRWALK_OUT"])
 FRAMES, LOGS, RAW = OUT / "frames", OUT / "logs", OUT / "raw"
 HOME = "/home/alice"
-H = f"{HOME}/h3d"
+H = f"{HOME}/hyprwalk"
 CFG = f"{HOME}/.config/hypr"
-SO = f"{H}/hypr3d.so"
+SO = f"{H}/hyprwalk.so"
 AV = f"{H}/BoothAccessories.glb"
 TOON = f"{H}/ToonTest.glb"
 ROOM = f"{H}/TestRoom.glb"
@@ -40,7 +40,7 @@ RESULTS = []
 
 
 def check(item, what, ok, detail="", known=""):
-    """known: why it fails, for a bug outside hypr3d (reported, not counted)"""
+    """known: why it fails, for a bug outside hyprwalk (reported, not counted)"""
     ok = bool(ok)
     RESULTS.append({"item": item, "check": what, "ok": ok, "detail": str(detail), "known": "" if ok else known})
     tag = "ok" if ok else "known" if known else "FAIL"
@@ -90,19 +90,19 @@ def ctlj(*args):
 
 
 def st():
-    return ctlj("hypr3d", "status")
+    return ctlj("hyprwalk", "status")
 
 
 def av():
-    return ctlj("hypr3d", "avatar")
+    return ctlj("hyprwalk", "avatar")
 
 
 def menu():
-    return ctlj("hypr3d", "menu")
+    return ctlj("hyprwalk", "menu")
 
 
 def lipsync():
-    return ctlj("hypr3d", "avatar", "lipsync")
+    return ctlj("hyprwalk", "avatar", "lipsync")
 
 
 def wait_for(what, fn, timeout=20, every=0.1):
@@ -258,14 +258,14 @@ hl.config({
     ecosystem = { no_update_news = true, no_donation_nag = true },
 })
 -- the plugin's Lua functions, bound to keys (they're looked up when the key is pressed)
-hl.bind("SUPER + grave", function() hl.plugin.hypr3d.toggle() end)
-hl.bind("SUPER + M", function() hl.plugin.hypr3d.menu() end)
+hl.bind("SUPER + grave", function() hl.plugin.hyprwalk.toggle() end)
+hl.bind("SUPER + M", function() hl.plugin.hyprwalk.menu() end)
 -- shortcuts that must reach Hyprland in 3D (Super, Ctrl+Alt), and one that mustn't (a plain key)
-hl.bind("SUPER + Y", hl.dsp.exec_cmd("touch /tmp/h3d-super-y"))
-hl.bind("CTRL + ALT + Y", hl.dsp.exec_cmd("touch /tmp/h3d-ctrl-alt-y"))
-hl.bind("Y", hl.dsp.exec_cmd("touch /tmp/h3d-plain-y"))
+hl.bind("SUPER + Y", hl.dsp.exec_cmd("touch /tmp/hyprwalk-super-y"))
+hl.bind("CTRL + ALT + Y", hl.dsp.exec_cmd("touch /tmp/hyprwalk-ctrl-alt-y"))
+hl.bind("Y", hl.dsp.exec_cmd("touch /tmp/hyprwalk-plain-y"))
 -- the test games opaque (as a fullscreen game is anyway, decoration:fullscreen_opacity), so their colours can be read
-hl.window_rule({ name = "h3d-games-opaque", match = { class = "h3dgame.*|chocolate-doom|supertux2" }, opacity = "1.0 override 1.0 override" })
+hl.window_rule({ name = "hyprwalk-games-opaque", match = { class = "hyprwalkgame.*|chocolate-doom|supertux2" }, opacity = "1.0 override 1.0 override" })
 '''
 
 BASE_CONF = r'''
@@ -310,9 +310,9 @@ ecosystem {
     no_update_news = true
     no_donation_nag = true
 }
-bind = SUPER, grave, hypr3d:toggle
-bind = SUPER, M, hypr3d:menu
-bind = SUPER, O, hypr3d:menu, options
+bind = SUPER, grave, hyprwalk:toggle
+bind = SUPER, M, hyprwalk:menu
+bind = SUPER, O, hyprwalk:menu, options
 '''
 
 
@@ -329,7 +329,7 @@ def lua_config(plugin=None, load=False, scale=1, layout="dwindle"):
     if load:
         text += f'hl.plugin.load("{SO}")\n'
     if plugin:
-        text += "hl.config({ plugin = { hypr3d = {\n" + "".join(f"    {k} = {lua_value(v)},\n" for k, v in plugin.items()) + "} } })\n"
+        text += "hl.config({ plugin = { hyprwalk = {\n" + "".join(f"    {k} = {lua_value(v)},\n" for k, v in plugin.items()) + "} } })\n"
     return text
 
 
@@ -338,13 +338,13 @@ def conf_config(plugin=None, load=True):
     if load:
         text += f"plugin = {SO}\n"
     if plugin:
-        text += "plugin {\n    hypr3d {\n" + "".join(
+        text += "plugin {\n    hyprwalk {\n" + "".join(
             f"        {k} = {('true' if v else 'false') if isinstance(v, bool) else v}\n" for k, v in plugin.items()) + "    }\n}\n"
     return text
 
 
 def write_config(name, text):
-    machine.succeed(f"mkdir -p {CFG} && cat > {CFG}/{name}.tmp << 'H3D_EOF'\n{text}\nH3D_EOF\nmv {CFG}/{name}.tmp {CFG}/{name} && chown -R alice:users {HOME}/.config")
+    machine.succeed(f"mkdir -p {CFG} && cat > {CFG}/{name}.tmp << 'HYPRWALK_EOF'\n{text}\nHYPRWALK_EOF\nmv {CFG}/{name}.tmp {CFG}/{name} && chown -R alice:users {HOME}/.config")
 
 
 def reload_config(name, text):
@@ -411,7 +411,7 @@ def stop_hyprland():
     so windows are closed first"""
     if not HYPR["pid"]:
         return
-    plugin = "hypr3d" in ctl("plugin", "list")
+    plugin = "hyprwalk" in ctl("plugin", "list")
     machine.execute("pkill -u alice foot || true")
     try:
         for c in json.loads(ctl("-j", "clients") or "[]"):
@@ -424,7 +424,7 @@ def stop_hyprland():
     machine.execute("systemctl stop hyprland")
     time.sleep(2)
     if plugin:
-        check("exit", f"Hyprland exits without crashing, hypr3d loaded (session {HYPR['session']})", segfaults() == n)
+        check("exit", f"Hyprland exits without crashing, hyprwalk loaded (session {HYPR['session']})", segfaults() == n)
     HYPR["pid"] = ""
 
 
@@ -434,7 +434,7 @@ def start_hyprland(name, text, terminals=True):
     machine.execute("systemctl stop hyprland; pkill -u alice foot || true")
     time.sleep(1)
     write_config(name, text)
-    machine.succeed(f"echo H3D_CONFIG={CFG}/{name} > /run/hyprland-test.env")
+    machine.succeed(f"echo HYPRWALK_CONFIG={CFG}/{name} > /run/hyprland-test.env")
     machine.succeed("systemctl start hyprland")
     HYPR["session"] += 1
     HYPR["config"] = name
@@ -450,7 +450,7 @@ def start_hyprland(name, text, terminals=True):
     if not terminals:
         return
     # by app id: the shell sets the titles
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     time.sleep(1.5)
 
@@ -462,7 +462,7 @@ def crash_reports():
 # ------------------------------------------------------------------ helpers for the plugin
 
 def ensure_plugin():
-    if "hypr3d" not in ctl("plugin", "list"):
+    if "hyprwalk" not in ctl("plugin", "list"):
         r = ctl("plugin", "load", SO)
         if r != "ok":
             raise RuntimeError(f"plugin load: {r}")
@@ -473,9 +473,9 @@ def ensure_plugin():
 def first_person_body(on):
     """first person with the avatar's body (first_person_body, on by default) or the plain 1.65 m view, which all but
     section 32 expect"""
-    r = ctl("hypr3d", "view", "body", "on" if on else "off")
+    r = ctl("hyprwalk", "view", "body", "on" if on else "off")
     if r != ("on" if on else "off"):
-        raise RuntimeError(f"hyprctl hypr3d view body: {r}")
+        raise RuntimeError(f"hyprctl hyprwalk view body: {r}")
 
 
 def lua_session():
@@ -490,17 +490,17 @@ def ensure_3d(on=True):
     if on and mode != "active":
         if mode == "exiting":
             wait_for("2D", lambda: st()["mode"] == "off", 10)
-        ctl("hypr3d", "on")
+        ctl("hyprwalk", "on")
         wait_for("3D", lambda: st()["mode"] == "active", 15)
     elif not on and mode != "off":
-        ctl("hypr3d", "off")
+        ctl("hyprwalk", "off")
         wait_for("2D", lambda: st()["mode"] == "off", 15)
 
 
 def ensure_avatar(path, timeout=90):
     a = av()
     if a.get("path") != path:
-        r = ctl("hypr3d", "avatar", path)
+        r = ctl("hyprwalk", "avatar", path)
         if r.startswith("error"):
             raise RuntimeError(f"avatar {path}: {r}")
     a = wait_for(f"avatar {path}", lambda: (lambda a: a if a.get("path") == path and not a.get("loading") and "name" in a else None)(av()), timeout, 0.25)
@@ -510,7 +510,7 @@ def ensure_avatar(path, timeout=90):
 
 def menu_closed():
     if menu().get("open"):
-        ctl("hypr3d", "menu", "close")
+        ctl("hyprwalk", "menu", "close")
 
 
 def redrawn(timeout=90):
@@ -522,15 +522,15 @@ def redrawn(timeout=90):
 
 def face_avatar(dist=2.2, pitch=-6.0, settle=1.2):
     """third person, the camera in front of the avatar looking at it"""
-    ctl("hypr3d", "view", "third", dist)
+    ctl("hyprwalk", "view", "third", dist)
     a = av()
-    ctl("hypr3d", "turn", f"{a['bodyYaw'] + 180:.1f}", pitch)
+    ctl("hyprwalk", "turn", f"{a['bodyYaw'] + 180:.1f}", pitch)
     time.sleep(settle)
 
 
 def sing(wav, shot=None, skip=0.6, n=8):
     """lip sync readings while pw-cat plays wav/NAME_long.wav into the test microphone"""
-    alice(f"setsid -f pw-cat -p --target test_mic_in -P node.name=h3d-sing {H}/wav/{wav}_long.wav > /dev/null 2>&1")
+    alice(f"setsid -f pw-cat -p --target test_mic_in -P node.name=hyprwalk-sing {H}/wav/{wav}_long.wav > /dev/null 2>&1")
     t0 = time.time()
     time.sleep(skip)
     reads = []
@@ -539,7 +539,7 @@ def sing(wav, shot=None, skip=0.6, n=8):
         time.sleep(0.12)
     if shot:
         frame(shot)
-    machine.execute("pkill -f 'node.name=h3d-[s]ing'; true")
+    machine.execute("pkill -f 'node.name=hyprwalk-[s]ing'; true")
     time.sleep(0.6)
     return reads
 
@@ -549,10 +549,10 @@ def mic_noise(on=True):
     running = as_alice("pgrep -f 'micnoise[.]f32'")[0] == 0
     if on and not running:
         alice(f"setsid -f sh -c 'while :; do cat {H}/wav/micnoise.f32; done | pw-cat -p --raw --format f32 --rate 48000 --channels 1 "
-              f"--target test_mic_in -P node.name=h3d-mic-noise -' > /dev/null 2>&1")
+              f"--target test_mic_in -P node.name=hyprwalk-mic-noise -' > /dev/null 2>&1")
         time.sleep(0.5)
     elif not on and running:
-        machine.execute("pkill -f 'micnoise[.]f32'; pkill -f 'node.name=h3d-mic-[n]oise'; true")
+        machine.execute("pkill -f 'micnoise[.]f32'; pkill -f 'node.name=hyprwalk-mic-[n]oise'; true")
         time.sleep(0.3)
 
 
@@ -567,7 +567,7 @@ def lipsync_node():
     """the plugin's PipeWire stream and the nodes linked into it, or None"""
     dump = json.loads(alice("pw-dump"))
     nodes = {o["id"]: (o.get("info") or {}).get("props") or {} for o in dump if o.get("type") == "PipeWire:Interface:Node"}
-    ours = [i for i, p in nodes.items() if p.get("node.name") == "hypr3d-lipsync"]
+    ours = [i for i, p in nodes.items() if p.get("node.name") == "hyprwalk-lipsync"]
     if not ours:
         return None
     linked = [o for o in dump if o.get("type") == "PipeWire:Interface:Link" and (o.get("info") or {}).get("input-node-id") == ours[0]]
@@ -603,12 +603,12 @@ def s_start():
     r = ctl("plugin", "load", SO)
     check("0", "hyprctl plugin load", r == "ok", r)
     time.sleep(1.5)
-    check("0", "hyprctl plugin list names it", "hypr3d" in ctl("plugin", "list"))
+    check("0", "hyprctl plugin list names it", "hyprwalk" in ctl("plugin", "list"))
     s = st()
-    check("0", "hyprctl hypr3d status: off", s["mode"] == "off", s["mode"])
+    check("0", "hyprctl hyprwalk status: off", s["mode"] == "off", s["mode"])
     check("0", "its function hooks are in (mouse motion, warps, the cursor)", all(s["hooks"].values()), s["hooks"])
     # Hyprland's stdout reaches the journal at once; its log file lags
-    logged = wait_for("the log line", lambda: "[hypr3d] loaded" in machine.execute("journalctl -t start-hyprland --no-pager -n 2000")[1], 10, 0.5)
+    logged = wait_for("the log line", lambda: "[hyprwalk] loaded" in machine.execute("journalctl -t start-hyprland --no-pager -n 2000")[1], 10, 0.5)
     check("0", "the log says it loaded", logged)
     BEFORE["loaded"] = calm_frame("desktop-plugin-loaded")
     d = BEFORE["desktop"].differs(BEFORE["loaded"])
@@ -618,14 +618,14 @@ def s_start():
 def maps_page():
     """the Action Menu's Maps page in TestRoom (the configured map); map_scale 2 tells the configured map apart from the
     others' guessed scale (1)"""
-    maps = f"{HOME}/.local/share/hypr3d/maps"
+    maps = f"{HOME}/.local/share/hyprwalk/maps"
     copy, sub = f"{maps}/Copy.glb", f"{maps}/sub/LitCourt.glb"
     alice(f"rm -rf {maps} && mkdir -p {maps}/sub {maps}/empty && cp {LIT} {copy} && cp {LIT} {sub} && echo x > {maps}/notes.txt")
     menu_closed()
-    ctl("hypr3d", "menu", "open")
+    ctl("hyprwalk", "menu", "open")
     root = {i["label"]: i for i in menu()["items"]}
     check("9m", "the Action Menu's main page has Maps, its hint the map you're on", root.get("Maps", {}).get("hint") == "TestRoom", root.get("Maps"))
-    ctl("hypr3d", "menu", "open", "maps")
+    ctl("hyprwalk", "menu", "open", "maps")
     time.sleep(0.3)
     frame("menu-maps")
     m = menu()
@@ -636,69 +636,69 @@ def maps_page():
     check("9m", "... TestRoom lit, \"here · default\"; the others their size, the courtyard \"built in\"",
           len(items) == 4 and items[2][1:] == ("here · default", True) and all(size.fullmatch(i[1]) and not i[2] for i in items[:2])
           and items[3][1:] == ("built in", False), items)
-    ctl("eval", "hl.config({ plugin = { hypr3d = { map_scale = 2 } } })")
-    wait_for("TestRoom at map_scale 2", lambda: (lambda m: m if not m["loading"] and m["world"] == "TestRoom" and m["scale"] == 2 else None)(ctlj("hypr3d", "map")), 30)
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { map_scale = 2 } } })")
+    wait_for("TestRoom at map_scale 2", lambda: (lambda m: m if not m["loading"] and m["world"] == "TestRoom" and m["scale"] == 2 else None)(ctlj("hyprwalk", "map")), 30)
     redrawn()
-    ctl("hypr3d", "menu", "open", "maps")
-    r = ctl("hypr3d", "menu", "pick", "1")
+    ctl("hyprwalk", "menu", "open", "maps")
+    r = ctl("hyprwalk", "menu", "pick", "1")
     s, m = wait_for("Hyprland to answer", st, 90, 0.5), wait_for("Hyprland to answer", menu, 90, 0.5)  # Copy may load in between
     check("9m", "picking Copy: it's loading, the menu closed", r == "loading" and s["map"] == copy and not m.get("open"), f"{r}; {s['map']}; {s['menu']}")
     s = wait_for("Copy", lambda: (lambda s: s if not s["mapLoading"] and s["world"] == "Copy" else None)(st()), 30)
     redrawn()
-    mp = ctlj("hypr3d", "map")
+    mp = ctlj("hyprwalk", "map")
     check("9m", "... loaded, at the scale guessed (1), not map_scale (2: the configured map's)", s["world"] == "Copy" and mp["scale"] == 1, mp)
-    ctl("hypr3d", "menu", "open", "maps")
+    ctl("hyprwalk", "menu", "open", "maps")
     items = [(i["label"], i["hint"], i["on"]) for i in menu().get("items", [])]
     check("9m", "... Copy lit, \"here\"; TestRoom its size and \"default\"",
           len(items) == 4 and items[0][1:] == ("here", True) and items[2][1].endswith(" · default") and not items[2][2], items)
     # sub, then Copy in one batch (a loaded map is only taken between requests): Copy stays
-    ctl("hypr3d", "menu", "close")
-    out = ctl("--batch", "hypr3d menu open maps; hypr3d menu pick 2; hypr3d menu open maps; hypr3d menu pick 1")
+    ctl("hyprwalk", "menu", "close")
+    out = ctl("--batch", "hyprwalk menu open maps; hyprwalk menu pick 2; hyprwalk menu open maps; hyprwalk menu pick 1")
     time.sleep(2.0)
     s = st()
     if out.count("loading") == 1 and out.rstrip().endswith("ok"):  # sub's pick says loading, Copy's ok
-        log = ctl("hypr3d", "log", "40")
+        log = ctl("hyprwalk", "log", "40")
         check("9m", "sub on its way, Copy picked: it stays (\"staying on Copy\"), sub isn't loaded",
               s["world"] == "Copy" and s["map"] == copy and not s["mapLoading"] and "staying on Copy" in log, f"{s['world']} {s['map']}")
     else:
         check("9m", "sub on its way, Copy picked (one hyprctl --batch): sub's pick loading, Copy's ok", False, repr(out))
-    ctl("hypr3d", "menu", "open", "maps")
-    r = ctl("hypr3d", "menu", "pick", "4")
+    ctl("hyprwalk", "menu", "open", "maps")
+    r = ctl("hyprwalk", "menu", "pick", "4")
     redrawn()
-    mp = ctlj("hypr3d", "map")
+    mp = ctlj("hyprwalk", "map")
     check("9m", "the Courtyard: back at once", r == "ok" and mp["world"] == "courtyard" and mp["map"] == "", f"{r}; {mp}")
-    ctl("hypr3d", "menu", "open", "maps")
-    r = ctl("hypr3d", "menu", "pick", "3")
-    mp = wait_for("TestRoom", lambda: (lambda m: m if not m["loading"] and m["world"] == "TestRoom" else None)(ctlj("hypr3d", "map")), 30)
+    ctl("hyprwalk", "menu", "open", "maps")
+    r = ctl("hyprwalk", "menu", "pick", "3")
+    mp = wait_for("TestRoom", lambda: (lambda m: m if not m["loading"] and m["world"] == "TestRoom" else None)(ctlj("hyprwalk", "map")), 30)
     redrawn()
     check("9m", "TestRoom, the configured map, again: at map_scale (2)", r == "loading" and mp["scale"] == 2, f"{r}; {mp}")
-    ctl("eval", "hl.config({ plugin = { hypr3d = { map_scale = 1 } } })")
-    mp = wait_for("TestRoom at map_scale 1", lambda: (lambda m: m if not m["loading"] and m["world"] == "TestRoom" and m["scale"] == 1 else None)(ctlj("hypr3d", "map")), 30)
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { map_scale = 1 } } })")
+    mp = wait_for("TestRoom at map_scale 1", lambda: (lambda m: m if not m["loading"] and m["world"] == "TestRoom" and m["scale"] == 1 else None)(ctlj("hyprwalk", "map")), 30)
     time.sleep(0.5)
     s = redrawn()
-    check("9m", "... map_scale 1 again: TestRoom reloaded at it, at its hypr3d_spawn", abs(s["feet"][2] - 4.0) < 0.3, f"scale {mp['scale']}; feet {s['feet']}")
+    check("9m", "... map_scale 1 again: TestRoom reloaded at it, at its hyprwalk_spawn", abs(s["feet"][2] - 4.0) < 0.3, f"scale {mp['scale']}; feet {s['feet']}")
     alice(f"rm -rf {maps}")
 
 
 def avatars_page():
     """the Action Menu's Avatars page, with BoothAccessories configured and avatar_height 2"""
-    avs = f"{HOME}/.local/share/hypr3d/avatars"
+    avs = f"{HOME}/.local/share/hyprwalk/avatars"
     solo = f"{avs}/Solo.vrm"
     alice(f"rm -rf {avs} && mkdir -p {avs}/Booth {avs}/pair {avs}/empty && cp {TOON} {solo} && cp {AV} {avs}/Booth/ && "
           f"cp {H}/BoothGimmicks.hands.vrma {avs}/Booth/BoothAccessories.hands.vrma && cp {TOON} {avs}/pair/ToonTest.glb && "
           f"cp {TOON} {avs}/pair/Twin.glb && echo x > {avs}/notes.txt")
-    ctl("eval", "hl.config({ plugin = { hypr3d = { avatar_height = 2 } } })")
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { avatar_height = 2 } } })")
     wait_for("BoothAccessories at avatar_height 2",
              lambda: (lambda a: a if a.get("name") == "BoothAccessories" and not a["loading"] and abs(a["height"] - 2) < 0.02 else None)(av()), 60, 0.25)
     menu_closed()
-    ctl("hypr3d", "menu", "open")
+    ctl("hyprwalk", "menu", "open")
     items = menu().get("items", [])
     check("9a", "the main page has nine: Avatars the ninth (after the eight as they were), its hint the avatar's name",
           [i["label"] for i in items] == ["Emotes", "Expressions", "Gestures", "Outfit", "Apps", "Windows", "Options", "Maps", "Avatars"]
           and items[8]["slot"] == 9 and items[8]["hint"] == "BoothAccessories" and items[8]["submenu"], [(i["slot"], i["label"], i["hint"]) for i in items])
-    r = ctl("hypr3d", "menu", "pick", "9")
-    ctl("hypr3d", "menu", "back")
-    check("9a", "hyprctl hypr3d menu pick 9 opens it", r == "main/avatars" and menu().get("path") == "main", r)
+    r = ctl("hyprwalk", "menu", "pick", "9")
+    ctl("hyprwalk", "menu", "back")
+    check("9a", "hyprctl hyprwalk menu pick 9 opens it", r == "main/avatars" and menu().get("path") == "main", r)
     press("9")
     m = menu()
     check("9a", "9 opens it", m.get("path") == "main/avatars", m.get("path"))
@@ -709,24 +709,24 @@ def avatars_page():
     size = re.compile(r"\d+(\.\d)? (KB|MB|GB)")
     check("9a", "... BoothAccessories lit, \"here · default\"; the others their size",
           len(items) == 5 and items[4][1:] == ("here · default", True) and all(size.fullmatch(i[1]) and not i[2] for i in items[:4]), items)
-    r = ctl("hypr3d", "menu", "pick", "4")
+    r = ctl("hyprwalk", "menu", "pick", "4")
     s = st()
     check("9a", "picking Solo: it's loading, the menu closed", r == "loading" and s["avatar"] == solo and not menu().get("open"), f"{r}; {s['avatar']}; menu {s['menu']!r}")
     a = wait_for("Solo", lambda: (lambda a: a if a.get("name") == "Solo" and not a["loading"] else None)(av()), 60, 0.25)
     check("9a", "... loaded, at avatar_height (2 m)", a["path"] == solo and abs(a["height"] - 2) < 0.02, f"{a['path']}; {a['height']}")
-    ctl("hypr3d", "menu", "open", "avatars")
+    ctl("hyprwalk", "menu", "open", "avatars")
     items = [(i["label"], i["hint"], i["on"]) for i in menu().get("items", [])]
     check("9a", "... Solo lit, \"here\"; BoothAccessories its size and \"default\"",
           len(items) == 5 and items[3][1:] == ("here", True) and items[4][1].endswith(" · default") and size.fullmatch(items[4][1][:-len(" · default")])
           and not items[4][2], items)
-    r = ctl("hypr3d", "menu", "pick", "4")
+    r = ctl("hyprwalk", "menu", "pick", "4")
     s = st()
     check("9a", "Solo picked again: ok, nothing loads, the menu closed", r == "ok" and s["avatar"] == solo and not s["avatarLoading"] and not menu().get("open"),
           f"{r}; {s['avatar']}, loading {s['avatarLoading']}; menu {s['menu']!r}")
     # pair/ToonTest, then Solo in one batch (a loaded avatar is only taken between requests): Solo stays
-    out = ctl("--batch", "hypr3d menu open avatars; hypr3d menu pick 2; hypr3d menu open; hypr3d menu; hypr3d menu open avatars; hypr3d menu pick 4")
+    out = ctl("--batch", "hyprwalk menu open avatars; hyprwalk menu pick 2; hyprwalk menu open; hyprwalk menu; hyprwalk menu open avatars; hyprwalk menu pick 4")
     time.sleep(2.0)
-    s, a, log = st(), av(), ctl("hypr3d", "log", "40")
+    s, a, log = st(), av(), ctl("hyprwalk", "log", "40")
     lines = [l.strip() for l in out.splitlines() if l.strip()]
     at = out.find('{"open"')
     root = json.JSONDecoder().raw_decode(out[at:])[0] if at >= 0 else {}
@@ -735,7 +735,7 @@ def avatars_page():
     check("9a", "... Solo picked: it stays (\"keeping avatar Solo\"), pair/ToonTest isn't loaded",
           "loading" in lines and lines[-1:] == ["ok"] and a.get("name") == "Solo" and s["avatar"] == solo and not s["avatarLoading"] and "keeping avatar Solo" in log,
           f"{[l for l in lines if not l.startswith('{')]}; {a.get('name')} {s['avatar']}")
-    ctl("eval", "hl.config({ plugin = { hypr3d = { avatar_height = 0 } } })")
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { avatar_height = 0 } } })")
     a = wait_for("BoothAccessories again", lambda: (lambda a: a if a.get("name") == "BoothAccessories" and not a["loading"] else None)(av()), 60, 0.25)
     check("9a", "avatar_height back to 0: the configured avatar back, at its own height", a["path"] == AV and abs(a["height"] - 2) > 0.2, f"{a['path']}; {a['height']}")
     alice(f"rm -rf {avs}")
@@ -752,9 +752,9 @@ def s_config():
     a = ensure_avatar(AV)
     check("9", "avatar: loaded", a.get("name") == "BoothAccessories", a.get("name"))
     check("9", "avatar_physics = false: physics off", a.get("physics") is False, a.get("physics"))
-    m = wait_for("the map", lambda: (lambda m: m if not m["loading"] and m["world"] == "TestRoom" else None)(ctlj("hypr3d", "map")), 30)
+    m = wait_for("the map", lambda: (lambda m: m if not m["loading"] and m["world"] == "TestRoom" else None)(ctlj("hyprwalk", "map")), 30)
     check("9", "map: TestRoom loaded", m["world"] == "TestRoom", m)
-    em = wait_for("emote files", lambda: (lambda e: e if not e["loading"] and any(x["from"] == "Hands.vrma" for x in e["emotes"]) else None)(ctlj("hypr3d", "avatar", "emote")), 30)
+    em = wait_for("emote files", lambda: (lambda e: e if not e["loading"] and any(x["from"] == "Hands.vrma" for x in e["emotes"]) else None)(ctlj("hyprwalk", "avatar", "emote")), 30)
     check("9", "avatar_emotes: the folder's Hands.vrma is an emote", any(x["from"] == "Hands.vrma" for x in em["emotes"]),
           [x["name"] for x in em["emotes"] if x["from"] == "Hands.vrma"])
     check("9", "lipsync = false: off", lipsync()["on"] is False)
@@ -762,18 +762,18 @@ def s_config():
     time.sleep(1.0)
     frame("3d-testroom")
     s = st()
-    check("9", "in 3D in the test room, at its hypr3d_spawn", s["world"] == "TestRoom" and abs(s["feet"][2] - 4.0) < 0.3, f"{s['world']} feet {s['feet']}")
+    check("9", "in 3D in the test room, at its hyprwalk_spawn", s["world"] == "TestRoom" and abs(s["feet"][2] - 4.0) < 0.3, f"{s['world']} feet {s['feet']}")
     avatars_page()
     maps_page()
     ensure_3d(False)
 
     cfg.update(avatar_physics=True, lipsync=True, map="", avatar_height=2.0, lipsync_gain="24", lipsync_source="Test microphone")
     reload_config("hyprland.lua", lua_config(cfg))
-    wait_for("the courtyard", lambda: ctlj("hypr3d", "map")["map"] == "", 20)
+    wait_for("the courtyard", lambda: ctlj("hyprwalk", "map")["map"] == "", 20)
     a = wait_for("height 2 m", lambda: (lambda a: a if abs(a.get("height", 0) - 2.0) < 0.02 and not a["loading"] else None)(av()), 60, 0.25)
     check("9", "avatar_physics = true: physics on", a["physics"] is True, a["physics"])
     check("9", "avatar_height = 2: 2 m tall", abs(a["height"] - 2.0) < 0.02, a["height"])
-    check("9", "map = \"\": back to the courtyard", ctlj("hypr3d", "map")["world"] != "TestRoom", ctlj("hypr3d", "map")["world"])
+    check("9", "map = \"\": back to the courtyard", ctlj("hyprwalk", "map")["world"] != "TestRoom", ctlj("hyprwalk", "map")["world"])
     ls = lipsync()
     check("9", "lipsync = true: on, but not listening outside 3D", ls["on"] is True and ls["listening"] is False, ls)
     check("9", "... and no PipeWire stream outside 3D", lipsync_node() is None)
@@ -795,10 +795,10 @@ def s_config():
     cfg.update(avatar=AV)
     reload_config("hyprland.lua", lua_config(cfg))
     ensure_avatar(AV)
-    r = ctl("eval", 'hl.config({ plugin = { hypr3d = { avatar_physics = false } } })')
+    r = ctl("eval", 'hl.config({ plugin = { hyprwalk = { avatar_physics = false } } })')
     ok = wait_for("physics off", lambda: av()["physics"] is False, 3, 0.2)
-    check("9", "hyprctl eval hl.config({plugin = {hypr3d = {avatar_physics = false}}}) takes effect", ok, f"eval: {r}; physics {av()['physics']}")
-    r = ctl("eval", f'hl.config({{ plugin = {{ hypr3d = {{ avatar = "{TOON}" }} }} }})')
+    check("9", "hyprctl eval hl.config({plugin = {hyprwalk = {avatar_physics = false}}}) takes effect", ok, f"eval: {r}; physics {av()['physics']}")
+    r = ctl("eval", f'hl.config({{ plugin = {{ hyprwalk = {{ avatar = "{TOON}" }} }} }})')
     ok = wait_for("the other avatar", lambda: av().get("name") == "ToonTest", 10, 0.2)
     check("9", "... and so does a new avatar", ok, f"eval: {r}; {av().get('name')}")
     reload_config("hyprland.lua", lua_config(cfg))
@@ -878,13 +878,13 @@ def s_menu():
     time.sleep(0.3)
     y1 = st()["yaw"]
     check("1", "the mouse turns the camera (menu closed)", abs(y1 - y0) > 5, f"yaw {y0} -> {y1}")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
 
 
 QCODES = {" ": "spc", "/": "slash", "-": "minus", ".": "dot"}
 
 
-def type_text(text):
+def type_text(text):  # no y in it: typing goes through Hyprland's binds, and the session binds plain Y (section 7)
     for ch in text:
         press(QCODES.get(ch, ch), hold=0.03, after=0.05)
 
@@ -904,16 +904,16 @@ def s_windows():
     n2d = calm_frame("cursor-2d").count(cursor_cyan, box)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1.0)
     n3d = frame("3d-first-person").count(cursor_cyan, box)
     check("1b", "Hyprland's cursor is hidden in 3D", n2d > 20 and n3d < 5, f"cursor pixels: 2D {n2d}, 3D {n3d}")
     pos = ctl("cursorpos")
     aimed = None
-    for _ in range(40):  # until the crosshair is on h3d-left
+    for _ in range(40):  # until the crosshair is on hyprwalk-left
         a = st()["aimed"]
-        if a and a.get("kind") == "window" and a.get("class") == "h3d-left":
+        if a and a.get("kind") == "window" and a.get("class") == "hyprwalk-left":
             aimed = a
             break
         rel(-15, 0, after=0.15)
@@ -922,14 +922,14 @@ def s_windows():
     frame("aim-left-window")
     click("left")
     active = json.loads(ctl("-j", "activewindow"))
-    check("1b", "a left click on it focuses it", active.get("class") == "h3d-left", active.get("class"))
-    machine.execute("rm -f /tmp/h3d-text")
+    check("1b", "a left click on it focuses it", active.get("class") == "hyprwalk-left", active.get("class"))
+    machine.execute("rm -f /tmp/walk-text")
     press("e")
     check("1b", "E: typing into it", st()["typing"] is True)
-    type_text("touch /tmp/h3d-text")
+    type_text("touch /tmp/walk-text")
     press("ret")
     time.sleep(0.8)
-    check("1b", "what's typed reaches the terminal (it ran touch)", machine.execute("test -e /tmp/h3d-text")[0] == 0)
+    check("1b", "what's typed reaches the terminal (it ran touch)", machine.execute("test -e /tmp/walk-text")[0] == 0)
     frame("typed")
     press("meta_l", "esc")
     check("1b", "Super+Esc: walking again", st()["typing"] is False)
@@ -940,7 +940,7 @@ def s_windows():
     rel(40, 0)
     check("1b", "... and the mouse moves it again", ctl("cursorpos") != pos, f"{pos} -> {ctl('cursorpos')}")
     ensure_3d()
-    ctl("hypr3d", "view", "third")
+    ctl("hyprwalk", "view", "third")
 
 
 @section("2", "a slider's dial and a two-axis puppet's stick, from the menu")
@@ -948,7 +948,7 @@ def s_dial():
     ensure_avatar(AV)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "avatar", "parts", "reset")
+    ctl("hyprwalk", "avatar", "parts", "reset")
     tablet(16384, 16384)  # menu closed, so the camera turns
     press("tab")
     for k in ("4", "8", "8", "1"):
@@ -973,8 +973,8 @@ def s_dial():
     press("5")
     v5 = menu()["dial"]["value"]
     check("2", "8, 1 and 5 set 100%, 0% and 57%", abs(v8 - 1) < 1e-3 and abs(v1) < 1e-3 and abs(v5 - 4 / 7) < 2e-3, f"{v8:.3f} {v1:.3f} {v5:.3f}")
-    status = ctl("hypr3d", "menu")
-    check("2", "hyprctl hypr3d menu shows the dial's value", '"dial": {"label": "ニーハイの緩さ", "value": 0.571}' in status, status[-90:])
+    status = ctl("hyprwalk", "menu")
+    check("2", "hyprctl hyprwalk menu shows the dial's value", '"dial": {"label": "ニーハイの緩さ", "value": 0.571}' in status, status[-90:])
     click("left")
     m = menu()
     check("2", "a click closes the dial, back to the page", m.get("dial") is None and m.get("path") == "main/outfit:3", m.get("path"))
@@ -992,11 +992,11 @@ def s_dial():
     press("1")
     x3, y3 = menu()["dial"]["value"]
     check("2", "1 pushes it all the way up", abs(x3) < 1e-3 and abs(y3 - 1) < 1e-3, f"[{x3:.3f}, {y3:.3f}]")
-    status = ctl("hypr3d", "menu")
-    check("2", "hyprctl hypr3d menu shows both of the stick's values", '"dial": {"label": "しっぽの向き", "value": [0.000, 1.000]}' in status, status[-90:])
+    status = ctl("hyprwalk", "menu")
+    check("2", "hyprctl hyprwalk menu shows both of the stick's values", '"dial": {"label": "しっぽの向き", "value": [0.000, 1.000]}' in status, status[-90:])
     press("backspace")
     press("esc")
-    parts = ctlj("hypr3d", "avatar", "parts")
+    parts = ctlj("hyprwalk", "avatar", "parts")
     sl = {s["name"]: s["value"] for s in parts["sliders"]}
     check("2", "what the dial and the stick set is kept", abs(sl["ニーハイの緩さ"] - 4 / 7) < 2e-3 and sl["しっぽの向き"] == [0.0, 1.0], sl)
 
@@ -1004,13 +1004,13 @@ def s_dial():
 @section("3", "sliders from hyprctl")
 def s_sliders():
     ensure_avatar(AV)
-    r = ctl("hypr3d", "avatar", "slider", "ニーハイの緩さ", "50%")
+    r = ctl("hyprwalk", "avatar", "slider", "ニーハイの緩さ", "50%")
     check("3", "avatar slider ニーハイの緩さ 50%", r == "ニーハイの緩さ: 50%", r)
-    r = ctl("hypr3d", "avatar", "slider", "しっぽの向き", "0.5", "-0.25")
+    r = ctl("hyprwalk", "avatar", "slider", "しっぽの向き", "0.5", "-0.25")
     check("3", "avatar slider しっぽの向き 0.5 -0.25", r == "しっぽの向き: +50% -25%", r)
-    sl = {s["name"]: s["value"] for s in ctlj("hypr3d", "avatar", "parts")["sliders"]}
+    sl = {s["name"]: s["value"] for s in ctlj("hyprwalk", "avatar", "parts")["sliders"]}
     check("3", "avatar parts has them", sl["ニーハイの緩さ"] == 0.5 and sl["しっぽの向き"] == [0.5, -0.25], sl)
-    r = ctl("hypr3d", "avatar", "slider", "しっぽの向き", "reset")
+    r = ctl("hyprwalk", "avatar", "slider", "しっぽの向き", "reset")
     check("3", "avatar slider NAME reset", r.startswith("しっぽの向き"), r)
 
 
@@ -1023,38 +1023,38 @@ def s_variant():
     ensure_avatar(AV)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "avatar", "parts", "reset")
-    ctl("hypr3d", "avatar", "physics", "off")
+    ctl("hyprwalk", "avatar", "parts", "reset")
+    ctl("hyprwalk", "avatar", "physics", "off")
     face_avatar(2.0, -4)
     off = calm_frame("variant-off")
-    r = ctl("hypr3d", "avatar", "toggle", "紺の制服", "on")
+    r = ctl("hyprwalk", "avatar", "toggle", "紺の制服", "on")
     check("4", "avatar toggle 紺の制服 on", r == "紺の制服: on", r)
     time.sleep(0.8)
     on = calm_frame("variant-on")
     box = (on.w * 3 // 10, on.h * 62 // 100, on.w * 55 // 100, on.h * 80 // 100)  # her top, and the skirt's (navy) waist
     n0, n1 = off.count(blue, box, 2), on.count(blue, box, 2)
     check("4", "the uniform's white top turns blue in the frame", n1 > n0 + 300, f"blue pixels (every 2nd) {n0} -> {n1}")
-    v = {x["name"]: x["on"] for x in ctlj("hypr3d", "avatar", "parts")["variants"]}
+    v = {x["name"]: x["on"] for x in ctlj("hyprwalk", "avatar", "parts")["variants"]}
     check("4", "avatar parts: the variant is on", v.get("紺の制服") is True, v)
-    ctl("hypr3d", "avatar", "toggle", "紺の制服", "off")
+    ctl("hyprwalk", "avatar", "toggle", "紺の制服", "off")
     time.sleep(0.8)
     back = calm_frame("variant-off-again")
     n2 = back.count(blue, box, 2)
     check("4", "... and white again", n2 < n0 + 150, f"blue pixels {n2}")
-    ctl("hypr3d", "avatar", "physics", "on")
+    ctl("hyprwalk", "avatar", "physics", "on")
 
 
 @section("5", "an emote with \"speed\": 2 in the settings file")
 def s_emote_speed():
     ensure_avatar(AV)
     ensure_3d()
-    em = {e["name"]: e for e in ctlj("hypr3d", "avatar", "emote")["emotes"]}
+    em = {e["name"]: e for e in ctlj("hyprwalk", "avatar", "emote")["emotes"]}
     fast, slow = em.get("Hands Fast"), em.get("Hands Slow")
     check("5", "avatar emote lists it, speed 2", fast and abs(fast["speed"] - 2) < 1e-3 and slow and abs(slow["speed"] - 1) < 1e-3,
           f"{fast} / {slow}")
 
     def play(name):
-        r = ctl("hypr3d", "avatar", "emote", name, "once")
+        r = ctl("hyprwalk", "avatar", "emote", name, "once")
         t0 = time.time()
         f0 = st()["frames"]
         wait_for(f"{name} to start", lambda: av()["emote"] == name, 5, 0.05)
@@ -1100,48 +1100,48 @@ def s_gestures():
 def s_shortcuts():
     ensure_3d()
     menu_closed()
-    machine.execute("rm -f /tmp/h3d-*")
+    machine.execute("rm -f /tmp/hyprwalk-*")
     press("meta_l", "y")
     press("ctrl", "alt", "y")
     press("y")
     time.sleep(0.8)
-    have = machine.execute("ls /tmp/h3d-* 2>/dev/null || true")[1].split()
-    check("7", "Super+Y ran its bind", "/tmp/h3d-super-y" in have, have)
-    check("7", "Ctrl+Alt+Y ran its bind", "/tmp/h3d-ctrl-alt-y" in have, have)
-    check("7", "plain Y went to the plugin, not to its bind", "/tmp/h3d-plain-y" not in have, have)
+    have = machine.execute("ls /tmp/hyprwalk-* 2>/dev/null || true")[1].split()
+    check("7", "Super+Y ran its bind", "/tmp/hyprwalk-super-y" in have, have)
+    check("7", "Ctrl+Alt+Y ran its bind", "/tmp/hyprwalk-ctrl-alt-y" in have, have)
+    check("7", "plain Y went to the plugin, not to its bind", "/tmp/hyprwalk-plain-y" not in have, have)
     check("7", "... and 3D is still on", st()["mode"] == "active")
-    ctl("hypr3d", "tile", "follow", "on")  # plain Y made tiling's ring stay; undo it
+    ctl("hyprwalk", "tile", "follow", "on")  # plain Y made tiling's ring stay; undo it
     ensure_3d(False)
     press("y")
     time.sleep(0.8)
-    check("7", "out of 3D, Y runs its bind (so the bind works)", machine.execute("test -e /tmp/h3d-plain-y")[0] == 0)
+    check("7", "out of 3D, Y runs its bind (so the bind works)", machine.execute("test -e /tmp/hyprwalk-plain-y")[0] == 0)
 
 
 @section("8", "the Lua functions and a Lua keybind")
 def s_lua():
     ensure_avatar(AV)
     ensure_3d(False)
-    r = ctl("eval", "hl.plugin.hypr3d.enter()")
+    r = ctl("eval", "hl.plugin.hyprwalk.enter()")
     ok = wait_for("3D", lambda: st()["mode"] == "active", 10)
-    check("8", "hl.plugin.hypr3d.enter()", r == "ok" and ok, r)
-    r = ctl("eval", 'local p = hl.plugin.hypr3d.menu("emotes"); if p ~= "main/emotes" then error("gave " .. tostring(p)) end')
-    check("8", 'hl.plugin.hypr3d.menu("emotes") opens that page and says so', r == "ok" and menu().get("path") == "main/emotes", r)
-    r = ctl("eval", 'hl.plugin.hypr3d.menu("pick 2")')
+    check("8", "hl.plugin.hyprwalk.enter()", r == "ok" and ok, r)
+    r = ctl("eval", 'local p = hl.plugin.hyprwalk.menu("emotes"); if p ~= "main/emotes" then error("gave " .. tostring(p)) end')
+    check("8", 'hl.plugin.hyprwalk.menu("emotes") opens that page and says so', r == "ok" and menu().get("path") == "main/emotes", r)
+    r = ctl("eval", 'hl.plugin.hyprwalk.menu("pick 2")')
     time.sleep(0.5)
-    check("8", 'hl.plugin.hypr3d.menu("pick 2") plays the second emote', r == "ok" and av()["emote"] != "", f"{r}; emote {av()['emote']!r}")
-    ctl("hypr3d", "avatar", "emote", "stop")
-    r = ctl("eval", "hl.plugin.hypr3d.menu()")
-    check("8", "hl.plugin.hypr3d.menu() toggles it closed", r == "ok" and menu().get("open") is False, r)
-    r = ctl("eval", "hl.plugin.hypr3d.type()")
-    check("8", "hl.plugin.hypr3d.type(): typing", r == "ok" and st()["typing"] is True, r)
+    check("8", 'hl.plugin.hyprwalk.menu("pick 2") plays the second emote', r == "ok" and av()["emote"] != "", f"{r}; emote {av()['emote']!r}")
+    ctl("hyprwalk", "avatar", "emote", "stop")
+    r = ctl("eval", "hl.plugin.hyprwalk.menu()")
+    check("8", "hl.plugin.hyprwalk.menu() toggles it closed", r == "ok" and menu().get("open") is False, r)
+    r = ctl("eval", "hl.plugin.hyprwalk.type()")
+    check("8", "hl.plugin.hyprwalk.type(): typing", r == "ok" and st()["typing"] is True, r)
     press("meta_l", "esc")
     check("8", "Super+Esc: walking again", st()["typing"] is False)
-    r = ctl("eval", "hl.plugin.hypr3d.exit()")
+    r = ctl("eval", "hl.plugin.hyprwalk.exit()")
     ok = wait_for("2D", lambda: st()["mode"] == "off", 10)
-    check("8", "hl.plugin.hypr3d.exit()", r == "ok" and ok, r)
-    r = ctl("eval", "hl.plugin.hypr3d.toggle()")
+    check("8", "hl.plugin.hyprwalk.exit()", r == "ok" and ok, r)
+    r = ctl("eval", "hl.plugin.hyprwalk.toggle()")
     ok = wait_for("3D", lambda: st()["mode"] == "active", 10)
-    check("8", "hl.plugin.hypr3d.toggle() in", r == "ok" and ok, r)
+    check("8", "hl.plugin.hyprwalk.toggle() in", r == "ok" and ok, r)
     press("meta_l", "m")
     check("8", "Super+M (a Lua bind calling menu()) opens the menu", menu().get("open") is True)
     press("meta_l", "m")
@@ -1178,11 +1178,11 @@ def s_toon():
     check("10", "the eyes show through the fringe in front of them (stencil)", ne > 150, f"{ne} cyan pixels")
     check("10", "the fringe is drawn around them", nf > 1500, f"{nf} magenta pixels")
     check("10", "the body has its green outline", no > 150, f"{no} green pixels")
-    ctl("hypr3d", "view", "first")
+    ctl("hyprwalk", "view", "first")
     time.sleep(0.8)
     fp = calm_frame("toon-first-person")
     check("10", "first person: not drawn (no eyes, no outline)", fp.count(eyes, box) < 20 and fp.count(outline, box) < 20)
-    ctl("hypr3d", "view", "third")
+    ctl("hyprwalk", "view", "third")
     ensure_avatar(AV)
 
 
@@ -1194,12 +1194,12 @@ def s_mic():
     mic_noise()
     src = alice("wpctl inspect @DEFAULT_AUDIO_SOURCE@")
     check("mic", "the default source is the test microphone", 'node.name = "test_mic"' in src, re.findall(r'node.name = "[^"]*"', src))
-    check("mic", "no hypr3d stream before lip sync is on", lipsync_node() is None)
-    ls = json.loads(ctl("hypr3d", "avatar", "lipsync", "on"))
+    check("mic", "no hyprwalk stream before lip sync is on", lipsync_node() is None)
+    ls = json.loads(ctl("hyprwalk", "avatar", "lipsync", "on"))
     check("mic", "avatar lipsync on: on, listening, a microphone", ls["on"] and ls["listening"] and ls["microphone"], ls)
     node = wait_for("the stream's link", lambda: (lambda n: n if n and n["fed_by"] else None)(lipsync_node()), 10)
-    check("mic", "pw-dump: the \"hypr3d lip sync\" stream, fed by the test microphone",
-          node["props"].get("node.description") == "hypr3d lip sync" and "test_mic" in node["fed_by"], f"{node['props'].get('media.class')} from {node['fed_by']}")
+    check("mic", "pw-dump: the \"hyprwalk lip sync\" stream, fed by the test microphone",
+          node["props"].get("node.description") == "hyprwalk lip sync" and "test_mic" in node["fed_by"], f"{node['props'].get('media.class')} from {node['fed_by']}")
     keys = ("text", "problem", "stream", "linked", "source", "peak", "rms", "silentFor", "sinceData", "buffers", "emptyBuffers", "gain", "room")
     # peak and RMS need a full second
     ls = wait_for("its report", lambda: (lambda l: l if l["problem"] == "none" and l["rms"] is not None else None)(lipsync()), 10)
@@ -1248,13 +1248,13 @@ def s_mic():
           20 <= ls["gain"] <= 40 and min(q - o for q, o in zip(quiet, own)) > -0.1, f"gain {ls['gain']:+.1f} dB, the voice at {ls['reference']:.0f} dBFS, the room at {ls['room']} dBFS; "
           f"opened {[round(q, 2) for q in quiet]} vs {[round(o, 2) for o in own]}")
     # a fixed gain: at 0 dB the quiet vowels barely open, 30 dB makes up for them
-    r = ctlj("hypr3d", "avatar", "lipsync", "gain", "0")
+    r = ctlj("hyprwalk", "avatar", "lipsync", "gain", "0")
     reads = sing("q30_man_a")
     at0 = sorted(x["visemes"]["aa"] for x in reads)[len(reads) // 2]
-    ctl("hypr3d", "avatar", "lipsync", "gain", "30")
+    ctl("hyprwalk", "avatar", "lipsync", "gain", "30")
     reads = sing("q30_man_a")
     at30 = sorted(x["visemes"]["aa"] for x in reads)[len(reads) // 2]
-    back = ctlj("hypr3d", "avatar", "lipsync", "gain", "auto")
+    back = ctlj("hyprwalk", "avatar", "lipsync", "gain", "auto")
     check("mic", "avatar lipsync gain 0 / 30 / auto: the quiet a barely opens at 0 dB, wide at 30, and back to automatic",
           r["gainSetting"] == 0 and at0 < 0.4 and at30 > 0.5 and back["gainSetting"] == "auto", f"aa {at0:.2f} at 0 dB, {at30:.2f} at 30 dB; {back['gainSetting']}")
     # Options > Mic gain: a dial, its first step automatic, up to 60 dB
@@ -1274,14 +1274,14 @@ def s_mic():
 
     def fresh():
         """restarts lip sync: it notifies once per start, so its next notification is this one"""
-        ctl("hypr3d", "avatar", "lipsync", "off")
-        ctl("hypr3d", "avatar", "lipsync", "on")
+        ctl("hyprwalk", "avatar", "lipsync", "off")
+        ctl("hyprwalk", "avatar", "lipsync", "on")
         ctl("dismissnotify")
         return wait_for("listening again", lambda: (lambda l: l if l["linked"] and l["problem"] == "none" else None)(lipsync()), 10)
 
     def told(text):
         """the plugin's log has it (notifications included)"""
-        return text in ctl("hypr3d", "log")
+        return text in ctl("hyprwalk", "log")
 
     mic = node_id("test_mic")
     fresh()
@@ -1305,7 +1305,7 @@ def s_mic():
     ls = wait_for("its hiss again", lambda: (lambda l: l if l["problem"] == "none" else None)(lipsync()), 6)
     check("mic", "... its hiss back: listening", ls["text"] == "lip sync: listening (Test microphone)", ls["text"])
     # WirePlumber suspends an unused source after 5 s; lip sync on must resume it
-    ctl("hypr3d", "avatar", "lipsync", "off")
+    ctl("hyprwalk", "avatar", "lipsync", "off")
     mic_noise(False)  # its stream keeps the source running
 
     def state_of(name):
@@ -1315,7 +1315,7 @@ def s_mic():
         suspended = wait_for("suspended", lambda: state_of("test_mic") == "suspended", 15, 0.5)
     except TimeoutError:
         suspended = False
-    ctl("hypr3d", "avatar", "lipsync", "on")
+    ctl("hyprwalk", "avatar", "lipsync", "on")
     seen = []
     for _ in range(10):
         l = lipsync()
@@ -1328,19 +1328,19 @@ def s_mic():
     aa = sorted(x["visemes"]["aa"] for x in reads)[len(reads) // 2]
     check("mic", "... it runs again for lip sync: samples at once, its hiss, and a vowel opens the mouth",
           suspended and seen[2][1] == "running" and seen[2][3] > 0 and aa > 0.5, f"aa {aa:.2f}; {reads[-1]['text']}")
-    alice("setsid -f pw-loopback -n h3d-mic2 --capture-props='media.class=Audio/Sink node.name=test_mic2_in node.description=\"Test microphone 2 in\" audio.position=[MONO]' "
+    alice("setsid -f pw-loopback -n hyprwalk-mic2 --capture-props='media.class=Audio/Sink node.name=test_mic2_in node.description=\"Test microphone 2 in\" audio.position=[MONO]' "
           "--playback-props='media.class=Audio/Source node.name=test_mic2 node.description=\"Test microphone 2\" audio.position=[MONO]' > /dev/null 2>&1")
     mic2 = wait_for("the second microphone", lambda: node_id("test_mic2"), 10)
     alice(f"wpctl set-default {mic2}")
     fresh_ok = True
     try:
-        ctl("hypr3d", "avatar", "lipsync", "off")
-        ctl("hypr3d", "avatar", "lipsync", "on")
+        ctl("hyprwalk", "avatar", "lipsync", "off")
+        ctl("hyprwalk", "avatar", "lipsync", "on")
         ls = wait_for("linked to the second", lambda: (lambda l: l if l["linked"] and l["source"]["name"] == "test_mic2" else None)(lipsync()), 10)
     except TimeoutError as e:
         fresh_ok, ls = False, {"error": str(e)}
     check("mic", "a second microphone made the default: lip sync listens to it", fresh_ok, ls.get("text", ls))
-    machine.execute("pkill -f 'pw-loopback -n h3d-[m]ic2'; true")
+    machine.execute("pkill -f 'pw-loopback -n hyprwalk-[m]ic2'; true")
     time.sleep(3)
     ls, node = lipsync(), lipsync_node()
     note("mic", "... unplugged (pw-loopback gone): what lip sync says, and pw-dump", f"{ {k: ls[k] for k in keys} }; fed by {node and node['fed_by']}")
@@ -1350,23 +1350,23 @@ def s_mic():
     ls = fresh()
     check("mic", "... the test microphone the default again: listening to it", ls["source"]["name"] == "test_mic", ls["text"])
     # WirePlumber links a stream whose target is missing to the default source
-    ctl("hypr3d", "avatar", "lipsync", "source", "no_such_mic")
+    ctl("hyprwalk", "avatar", "lipsync", "source", "no_such_mic")
     ls = wait_for("the one missing", lambda: (lambda l: l if l["problem"] == "missing" else None)(lipsync()), 8)
     check("mic", "avatar lipsync source no_such_mic: \"no no_such_mic (listening to Test microphone)\", the default in its place",
           ls["text"] == "lip sync: no no_such_mic (listening to Test microphone)" and ls["linked"] and ls["target"] == "no_such_mic",
           {k: ls[k] for k in keys + ("error", "target", "coreError")})
     check("mic", "... and a notification: which there are", told("no microphone no_such_mic (lipsync_source), so Test microphone instead"))
-    ctl("hypr3d", "avatar", "lipsync", "source", "Test microphone")  # a description, as wpctl status lists it
+    ctl("hyprwalk", "avatar", "lipsync", "source", "Test microphone")  # a description, as wpctl status lists it
     ls = wait_for("linked by its description", lambda: (lambda l: l if l["linked"] else None)(lipsync()), 10)
     check("mic", "avatar lipsync source \"Test microphone\" (its description): found, and listened to",
           ls["target"] == "test_mic" and ls["source"]["name"] == "test_mic" and ls["problem"] in ("none", "starting"), f"{ls['target']}: {ls['text']}")
-    ctl("hypr3d", "avatar", "lipsync", "source", "default")
+    ctl("hyprwalk", "avatar", "lipsync", "source", "default")
     ls = wait_for("the default again", lambda: (lambda l: l if l["linked"] and l["target"] == "" else None)(lipsync()), 10)
     check("mic", "avatar lipsync source default: the default microphone again", ls["source"]["name"] == "test_mic", ls["text"])
     # no WirePlumber, no link: whatever PipeWire gives the stream, it must say "no microphone linked"
     alice("systemctl --user stop wireplumber")
-    ctl("hypr3d", "avatar", "lipsync", "off")
-    ctl("hypr3d", "avatar", "lipsync", "on")
+    ctl("hyprwalk", "avatar", "lipsync", "off")
+    ctl("hyprwalk", "avatar", "lipsync", "on")
     ls = wait_for("unlinked", lambda: (lambda l: l if l["problem"] == "unlinked" else None)(lipsync()), 8)
     b0, t0 = ls["buffers"], time.time()
     time.sleep(1.0)
@@ -1387,7 +1387,7 @@ def s_mic():
     ensure_3d()
     ls = wait_for("listening", lambda: (lambda l: l if l["listening"] else None)(lipsync()), 10)
     check("mic", "entering 3D opens it again", ls["listening"] and lipsync_node() is not None, ls)
-    ls = json.loads(ctl("hypr3d", "avatar", "lipsync", "off"))
+    ls = json.loads(ctl("hyprwalk", "avatar", "lipsync", "off"))
     time.sleep(0.5)
     check("mic", "avatar lipsync off: closed, no stream", not ls["on"] and not ls["listening"] and lipsync_node() is None, ls)
     img = calm_frame("lipsync-off")
@@ -1448,7 +1448,7 @@ def s_badge():
     menu_closed()
     mic_noise()  # else a silent-mic notification covers the corner
     face_avatar(2.0, -4)
-    ctl("hypr3d", "avatar", "lipsync", "on")
+    ctl("hyprwalk", "avatar", "lipsync", "on")
     wait_for("listening", lambda: lipsync()["listening"], 10)
     ctl("dismissnotify")  # lip sync's "on"
     time.sleep(1.2)
@@ -1457,7 +1457,7 @@ def s_badge():
     check("13", "alone, the badge sits in the top right corner, 12 px in", b[1] == 12 and b[0] + b[2] == img.w - 12, b)
     n = img.count(red, box_of(b))
     check("13", "... where the frame has it (its red dot)", n > 20, f"{n} red pixels in {b}")
-    ctl("notify", "1", "15000", "rgb(ff8800)", "hypr3d: a notification in the badge's corner")
+    ctl("notify", "1", "15000", "rgb(ff8800)", "hyprwalk: a notification in the badge's corner")
     time.sleep(1.2)  # slides in for 0.6 s
     b1 = lipsync()["badge"]
     img = frame("badge-under-a-notification")
@@ -1467,7 +1467,7 @@ def s_badge():
           f"badge {b1}, notification {notes}")
     n = img.count(red, box_of(b1))
     check("13", "... where the frame has it", n > 20, f"{n} red pixels in {b1}")
-    ctl("notify", "1", "15000", "rgb(ff8800)", "hypr3d: and a second one")
+    ctl("notify", "1", "15000", "rgb(ff8800)", "hyprwalk: and a second one")
     time.sleep(1.2)
     b2 = lipsync()["badge"]
     img = frame("badge-under-two-notifications")
@@ -1480,7 +1480,7 @@ def s_badge():
     time.sleep(1.2)
     b3 = lipsync()["badge"]
     check("13", "dismissed: the badge goes back up to the corner", b3 and b3[1] == 12, b3)
-    ctl("hypr3d", "avatar", "lipsync", "off")
+    ctl("hyprwalk", "avatar", "lipsync", "off")
     check("13", "lip sync off: no badge", lipsync()["badge"] is None)
 
 
@@ -1606,9 +1606,9 @@ def touchpad(*steps):
 WHEEL_SEQ = [("a notch down", lambda: wheel(1)), ("half notches: down, down, down, up", lambda: wheel_hires(60, 60, 60, -60)),
              ("half notches of the horizontal wheel, right", lambda: wheel_hires("h60", "h60"))]
 # wheel.py's device and a window rule for wev; Hyprland's scroll factor is the rule's, else the device's, else input's
-WHEEL_DEV = 'hl.device({{ name = "hypr3d-test-wheel", scroll_factor = {} }})'
-WEV_RULE = 'hl.window_rule({ name = "h3d-wev-scroll", match = { class = "wev" }, scroll_mouse = 3, scroll_touchpad = 2 })'
-WEV_RULE_OFF = 'hl.window_rule({ name = "h3d-wev-scroll", enabled = false })'
+WHEEL_DEV = 'hl.device({{ name = "hyprwalk-test-wheel", scroll_factor = {} }})'
+WEV_RULE = 'hl.window_rule({ name = "hyprwalk-wev-scroll", match = { class = "wev" }, scroll_mouse = 3, scroll_touchpad = 2 })'
+WEV_RULE_OFF = 'hl.window_rule({ name = "hyprwalk-wev-scroll", enabled = false })'
 EMULATE = 'hl.config({{ input = {{ emulate_discrete_scroll = {} }} }})'
 # (case, Lua, [(action, how, Hyprland's 2D frames as (axis, value, value120, discrete), or None)]), each case on top of
 # the ones before; "the other mouse" is QEMU's
@@ -1677,8 +1677,8 @@ def s_wev():
           f"{len(both)} frames with both")
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1.5)
     wev_mark("3d aimed")
     a = st()["aimed"]
@@ -1723,7 +1723,7 @@ def s_wev():
     frame("wev-3d")
     ensure_3d(False)
     machine.execute("pkill -x wev; true")
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     time.sleep(1.5)
 
@@ -1731,7 +1731,7 @@ def s_wev():
 # ------------------------------------------------------------------ carrying windows
 
 def windows3d():
-    return ctlj("hypr3d", "windows")
+    return ctlj("hyprwalk", "windows")
 
 
 AIM = {}  # the last aim_at's tries
@@ -1752,7 +1752,7 @@ def aim_at(cls, step=-15, tries=40):
 
 
 def walked_off(timeout=20):
-    """after hyprctl hypr3d walk: till the feet stop (slow frames stretch the walk)"""
+    """after hyprctl hyprwalk walk: till the feet stop (slow frames stretch the walk)"""
     time.sleep(0.5)
     last = [None]
 
@@ -1773,15 +1773,15 @@ def s_grab():
     ensure_avatar(AV)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "reset-windows")
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "reset-windows")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
-    a = aim_at("h3d-left")
+    a = aim_at("hyprwalk-left")
     check("15", "the crosshair on the left terminal", a, a or f"yaw:aimed:panels {AIM.get('last')}; {ctl('-j', 'clients')[:300]}")
     press("g")
     w = windows3d()
-    check("15", "G picks it up: holding it", st()["holding"] is True and len(w["placed"]) == 1 and w["placed"][0]["held"] and w["placed"][0]["class"] == "h3d-left", w)
+    check("15", "G picks it up: holding it", st()["holding"] is True and len(w["placed"]) == 1 and w["placed"][0]["held"] and w["placed"][0]["class"] == "hyprwalk-left", w)
     frame("holding")
     d0, s0 = w["hold"]["dist"], w["hold"]["size"]
     wheel(2)
@@ -1819,7 +1819,7 @@ def s_grab():
     press("g")
     click("left")
     time.sleep(0.5)
-    check("15", "picked up again (it's under the crosshair), a left click puts it down", a and a["class"] == "h3d-left" and st()["holding"] is False, a)
+    check("15", "picked up again (it's under the crosshair), a left click puts it down", a and a["class"] == "hyprwalk-left" and st()["holding"] is False, a)
     here = settled()["placed"][0]["center"]
     press("g")
     rel(300, 0)
@@ -1842,10 +1842,10 @@ def s_grab():
     a = st()["aimed"]
     press("x")
     w = wait_for("it back on the wall", lambda: (lambda w: w if not w["placed"] else None)(windows3d()), 8, 0.3)
-    check("15", "X sends the window under the crosshair back to the wall", a and a["class"] == "h3d-left" and w is not None, f"aimed {a and a['class']}; {windows3d()}")
-    ctl("hypr3d", "spawn")
+    check("15", "X sends the window under the crosshair back to the wall", a and a["class"] == "hyprwalk-left" and w is not None, f"aimed {a and a['class']}; {windows3d()}")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
-    aim_at("h3d-right", step=15)
+    aim_at("hyprwalk-right", step=15)
     press("g")
     rel(-200, 0)
     time.sleep(0.8)
@@ -1853,20 +1853,20 @@ def s_grab():
     w = wait_for("back on the wall", lambda: (lambda w: w if not w["placed"] else None)(windows3d()), 8, 0.3)
     check("15", "a window from the wall, picked up and let go with a right click: back on the wall", w is not None, windows3d())
     # hyprctl
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
-    aim_at("h3d-left")
-    r1 = ctl("hypr3d", "grab")
-    r2 = ctl("hypr3d", "hold", "1.5", "0.5")
+    aim_at("hyprwalk-left")
+    r1 = ctl("hyprwalk", "grab")
+    r2 = ctl("hyprwalk", "hold", "1.5", "0.5")
     w = windows3d()
-    check("15", "hyprctl hypr3d grab, hold 1.5 0.5: holding it 1.5 m out at half size", r1 == "holding" and r2 == "ok" and w["hold"]["dist"] == 1.5 and w["hold"]["size"] == 0.5,
+    check("15", "hyprctl hyprwalk grab, hold 1.5 0.5: holding it 1.5 m out at half size", r1 == "holding" and r2 == "ok" and w["hold"]["dist"] == 1.5 and w["hold"]["size"] == 0.5,
           f"{r1}, {r2}; {w['hold']}")
-    r3 = ctl("hypr3d", "place")
+    r3 = ctl("hyprwalk", "place")
     s = st()
-    check("15", "hyprctl hypr3d place: the status says placed 1, holding false", r3 == "placed" and s["placed"] == 1 and s["holding"] is False, f"{r3}; {s['placed']} {s['holding']}")
-    r4 = ctl("hypr3d", "grab")
-    r5 = ctl("hypr3d", "grab")
-    check("15", "hyprctl hypr3d grab twice: picked up, then put down (like G)", r4 == "holding" and r5 == "placed", f"{r4}, {r5}")
+    check("15", "hyprctl hyprwalk place: the status says placed 1, holding false", r3 == "placed" and s["placed"] == 1 and s["holding"] is False, f"{r3}; {s['placed']} {s['holding']}")
+    r4 = ctl("hyprwalk", "grab")
+    r5 = ctl("hyprwalk", "grab")
+    check("15", "hyprctl hyprwalk grab twice: picked up, then put down (like G)", r4 == "holding" and r5 == "placed", f"{r4}, {r5}")
     machine.succeed("printf 'i=0\\nwhile sleep 0.2; do i=$((i+1)); echo tick $i; done\\n' > /tmp/tick.sh && chmod 644 /tmp/tick.sh")
     press("e")
     type_text("sh /tmp/tick.sh")
@@ -1884,9 +1884,9 @@ def s_grab():
           f"workspace {ws}, {d:.2%} of the middle changed in 1.2 s")
     ctl("dispatch", 'hl.dsp.focus({ workspace = "1" })')
     time.sleep(0.5)
-    r = ctl("hypr3d", "reset-windows", "forget")  # forget: also their classes' spots
+    r = ctl("hyprwalk", "reset-windows", "forget")  # forget: also their classes' spots
     w = wait_for("everything back on the wall", lambda: (lambda w: w if not w["placed"] else None)(windows3d()), 8, 0.3)
-    check("15", "hyprctl hypr3d reset-windows: all back on the wall", r == "ok" and w is not None and windows3d()["spots"] == 0, windows3d())
+    check("15", "hyprctl hyprwalk reset-windows: all back on the wall", r == "ok" and w is not None and windows3d()["spots"] == 0, windows3d())
     machine.execute("pkill -f tick.sh; true")
 
 
@@ -1895,9 +1895,9 @@ def s_grab_third():
     ensure_avatar(AV)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "reset-windows", "forget")
-    ctl("hypr3d", "view", "third", "2.6", "0.4")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "reset-windows", "forget")
+    ctl("hyprwalk", "view", "third", "2.6", "0.4")
+    ctl("hyprwalk", "spawn")
     time.sleep(1.2)
 
     def past(g, s):
@@ -1908,15 +1908,15 @@ def s_grab_third():
         settled()
         return st(), placed(cls)
 
-    a = aim_at("h3d-left")
+    a = aim_at("hyprwalk-left")
     press("g")
-    s, g = drawn("h3d-left")
+    s, g = drawn("hyprwalk-left")
     h = windows3d()["hold"]
     check("15t", "G in third person picks it up where it is: its distance counts from the avatar",
           a and g and g["held"] and h and abs(past(g, s) - h["dist"]) < 0.15 and past(g, s) > 0.7, f"aimed {a}; {g}; {past(g, s) if g else 0:.2f} m past the avatar; hold {h}")
     s0 = h["size"]
     wheel(-3)
-    s1, g1 = drawn("h3d-left")
+    s1, g1 = drawn("hyprwalk-left")
     h1 = windows3d()["hold"]
     # with something in the way it's drawn nearer and smaller, looking as big
     check("15t", "the wheel, three notches up: bigger (1/0.95 a notch), looks it, as far out",
@@ -1928,7 +1928,7 @@ def s_grab_third():
     wheel(25)
     qmp([key_event("ctrl", False)])
     time.sleep(0.5)
-    s2, g2 = drawn("h3d-left")
+    s2, g2 = drawn("hyprwalk-left")
     h2 = windows3d()["hold"]
     check("15t", "Ctrl+wheel, 25 notches down: as near as it comes, still out past the avatar (not between the camera and it)",
           abs(h2["dist"] - 0.6) < 0.01 and past(g2, s2) > 0.35 and relative(g2, s2)[0] > av()["distance"] + 0.3, f"hold {h2}; {past(g2, s2):.2f} m past the avatar, boom {av()['distance']:.2f} m")
@@ -1936,84 +1936,84 @@ def s_grab_third():
     press("g")
 
     # placed 0.8 m ahead in first person, the avatar 1.6 m on: it's between the camera and the avatar
-    ctl("hypr3d", "reset-windows", "forget")
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "reset-windows", "forget")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1.0)
-    aim_at("h3d-left")
-    ctl("hypr3d", "turn", f"{st()['yaw']:.2f}", "0")
-    ctl("hypr3d", "grab")
-    ctl("hypr3d", "hold", "0.8")
+    aim_at("hyprwalk-left")
+    ctl("hyprwalk", "turn", f"{st()['yaw']:.2f}", "0")
+    ctl("hyprwalk", "grab")
+    ctl("hyprwalk", "hold", "0.8")
     settled()
-    ctl("hypr3d", "place")
+    ctl("hyprwalk", "place")
     s = st()
     yaw = math.radians(s["yaw"])
     f = s["feet"]
-    ctl("hypr3d", "tp", f"{f[0] + 1.6 * math.sin(yaw):.3f}", f"{f[1]:.3f}", f"{f[2] - 1.6 * math.cos(yaw):.3f}")
-    ctl("hypr3d", "view", "third", "2.6", "0.4")
+    ctl("hyprwalk", "tp", f"{f[0] + 1.6 * math.sin(yaw):.3f}", f"{f[1]:.3f}", f"{f[2] - 1.6 * math.cos(yaw):.3f}")
+    ctl("hyprwalk", "view", "third", "2.6", "0.4")
     time.sleep(1.5)
-    s3, g3 = st(), placed("h3d-left")
+    s3, g3 = st(), placed("hyprwalk-left")
     a = st()["aimed"]
     press("g")
-    s4, g4 = drawn("h3d-left")
+    s4, g4 = drawn("hyprwalk-left")
     check("15t", "a window between the camera and the avatar, picked up: out past the avatar",
-          g3 and past(g3, s3) < -0.3 and a and a["class"] == "h3d-left" and g4 and g4["held"] and past(g4, s4) > 0.6,
+          g3 and past(g3, s3) < -0.3 and a and a["class"] == "hyprwalk-left" and g4 and g4["held"] and past(g4, s4) > 0.6,
           f"{past(g3, s3) if g3 else 0:.2f} m past the avatar, aimed {a}; picked up: {past(g4, s4) if g4 else 0:.2f} m past the avatar, hold {windows3d()['hold']}")
     press("g")
 
     # the courtyard's south gate: the doors' face is at z 21.88
-    ctl("hypr3d", "reset-windows", "forget")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "reset-windows", "forget")
+    ctl("hyprwalk", "spawn")
     time.sleep(1.0)
-    aim_at("h3d-left")
+    aim_at("hyprwalk-left")
     press("g")
     wheel(-4)
     size = windows3d()["hold"]["size"]
-    ctl("hypr3d", "tp", "0", "0", "20.88")
-    ctl("hypr3d", "turn", "180", "0")
+    ctl("hyprwalk", "tp", "0", "0", "20.88")
+    ctl("hyprwalk", "turn", "180", "0")
     time.sleep(1.2)
-    s5, g5 = drawn("h3d-left")
+    s5, g5 = drawn("hyprwalk-left")
     check("15t", "made bigger and carried to the gate, the doors 1 m past the avatar: flat on them, as big",
           g5 and g5["held"] and 21.8 < g5["center"][2] < 21.88 and abs(g5["size"] - size) < 0.02 and 0.8 < past(g5, s5) < 1.1,
           f"{g5 and g5['center']}, size {g5 and g5['size']} (made {size:.3f}), {past(g5, s5) if g5 else 0:.2f} m past the avatar")
     frame("third-on-the-doors")
     press("g")
     time.sleep(0.5)
-    g6 = placed("h3d-left")
+    g6 = placed("hyprwalk-left")
     check("15t", "... G puts it down there, as big", g6 and not g6["held"] and abs(g6["size"] - size) < 0.02 and g5 and math.dist(g6["center"], g5["center"]) < 0.02,
           f"{g6}")
 
     # opening in third person, it's sized for the camera (THIRD_FIT of the view), not for the avatar's eye
-    ctl("hypr3d", "reset-windows", "forget")
-    ctl("hypr3d", "spawn")
-    ctl("hypr3d", "turn", f"{st()['yaw']:.2f}", "0")
+    ctl("hyprwalk", "reset-windows", "forget")
+    ctl("hyprwalk", "spawn")
+    ctl("hyprwalk", "turn", f"{st()['yaw']:.2f}", "0")
     time.sleep(1.5)
-    alice("setsid -f foot --app-id h3d-third > /dev/null 2>&1")
-    g7 = wait_for("it in front of you", lambda: placed("h3d-third"), 20, 0.3)
+    alice("setsid -f foot --app-id hyprwalk-third > /dev/null 2>&1")
+    g7 = wait_for("it in front of you", lambda: placed("hyprwalk-third"), 20, 0.3)
     time.sleep(0.5)
-    s7, g7 = drawn("h3d-third")
-    (w, h), (mw, mh) = client("h3d-third")["size"], logical_size()
+    s7, g7 = drawn("hyprwalk-third")
+    (w, h), (mw, mh) = client("hyprwalk-third")["size"], logical_size()
     ahead = relative({"center": s7["feet"]}, s7)[0] + 1.5
     view_h = 2 * ahead * math.tan(HALF_FOV)
     reach = THIRD_FIT * view_h / 2
     band = s7["eye"][1] + reach - max(s7["eye"][1] - reach, s7["feet"][1] + 0.05)
     want = min(view_h / mh, THIRD_FIT * view_h / h, THIRD_FIT * view_h * mw / mh / w, band / h) / (view_h / mh)
-    before = on_screen("h3d-third") * 1.5 / ahead  # its first-person size, seen from the camera
+    before = on_screen("hyprwalk-third") * 1.5 / ahead  # its first-person size, seen from the camera
     bottom = g7["center"][1] - g7["height"] / 2 if g7 else 0
     check("15t", "a terminal opening in 3D in third person: 1.5 m past the avatar, as big as fits the view from the camera above the ground, standing on it",
           g7 and abs(past(g7, s7) - 1.5) < 0.1 and abs(g7["apparent"] - want) < 0.03 and bottom > s7["feet"][1] + 0.03 and want > 2 * before,
           f"{g7 and g7['center']}, {past(g7, s7):.2f} m past the avatar; looks {g7 and g7['apparent']:.3f} (want {want:.3f}; from the eye it looked {before:.3f}); bottom {bottom:.2f} m, feet {s7['feet'][1]:.2f}")
     frame("third-opened")
-    machine.execute("pkill -f 'app-id h3d-third'; true")
+    machine.execute("pkill -f 'app-id hyprwalk-third'; true")
     # as tall as the screen: THIRD_FIT round the middle would reach 0.8 m into the ground, so it's fit above it
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "reset-windows", "forget")
     ctl("dispatch", 'hl.dsp.focus({ workspace = "3" })')
     time.sleep(1.0)
-    alice("setsid -f foot --app-id h3d-tall > /dev/null 2>&1")
-    wait_for("it in front of you", lambda: placed("h3d-tall"), 20, 0.3)
+    alice("setsid -f foot --app-id hyprwalk-tall > /dev/null 2>&1")
+    wait_for("it in front of you", lambda: placed("hyprwalk-tall"), 20, 0.3)
     time.sleep(0.5)
-    s8, g8 = drawn("h3d-tall")
-    (w, h), (mw, mh) = client("h3d-tall")["size"], logical_size()
+    s8, g8 = drawn("hyprwalk-tall")
+    (w, h), (mw, mh) = client("hyprwalk-tall")["size"], logical_size()
     band = s8["eye"][1] + reach - max(s8["eye"][1] - reach, s8["feet"][1] + 0.05)
     want = min(view_h / mh, THIRD_FIT * view_h / h, THIRD_FIT * view_h * mw / mh / w, band / h) / (view_h / mh)
     bottom = g8["center"][1] - g8["height"] / 2 if g8 else 0
@@ -2021,11 +2021,11 @@ def s_grab_third():
           g8 and abs(g8["apparent"] - want) < 0.03 and band / h < THIRD_FIT * view_h / h and abs(bottom - s8["feet"][1] - 0.05) < 0.05 and abs(past(g8, s8) - 1.5) < 0.1,
           f"{w}x{h} px; looks {g8 and g8['apparent']:.3f} (want {want:.3f}); bottom {bottom:.2f} m, feet {s8['feet'][1]:.2f}; {past(g8, s8):.2f} m past the avatar")
     frame("third-opened-tall")
-    machine.execute("pkill -f 'app-id h3d-tall'; true")
+    machine.execute("pkill -f 'app-id hyprwalk-tall'; true")
     ctl("dispatch", 'hl.dsp.focus({ workspace = "1" })')
     time.sleep(0.5)
-    ctl("hypr3d", "reset-windows", "forget")
-    ctl("hypr3d", "view", "first")
+    ctl("hyprwalk", "reset-windows", "forget")
+    ctl("hyprwalk", "view", "first")
 
 
 @section("16", "a second monitor: 3D on one while the other stays 2D, then on the other; the pointer, focus, notifications")
@@ -2035,27 +2035,27 @@ def s_monitors():
     # Hyprland's headless output (QEMU shows a second virtio-gpu output only in a window); Virtual-1 pinned at 0x0, as
     # "auto" would put the new one first
     ctl("eval", 'hl.monitor({ output = "Virtual-1", mode = "preferred", position = "0x0", scale = 1 })')
-    r = ctl("output", "create", "headless", "H3D-2")
-    wait_for("H3D-2", lambda: "H3D-2" in monitors(), 10)
-    ctl("eval", 'hl.monitor({ output = "H3D-2", mode = "1280x800@60", position = "1280x0", scale = 1 })')
-    m = wait_for("H3D-2 at 1280x0", lambda: (lambda m: m if m.get("H3D-2", {}).get("x") == 1280 and m["H3D-2"]["width"] == 1280 and m["Virtual-1"]["x"] == 0 else None)(monitors()), 10)
+    r = ctl("output", "create", "headless", "HYPRWALK-2")
+    wait_for("HYPRWALK-2", lambda: "HYPRWALK-2" in monitors(), 10)
+    ctl("eval", 'hl.monitor({ output = "HYPRWALK-2", mode = "1280x800@60", position = "1280x0", scale = 1 })')
+    m = wait_for("HYPRWALK-2 at 1280x0", lambda: (lambda m: m if m.get("HYPRWALK-2", {}).get("x") == 1280 and m["HYPRWALK-2"]["width"] == 1280 and m["Virtual-1"]["x"] == 0 else None)(monitors()), 10)
     check("16", "hyprctl output create headless: a second monitor, right of the first", r == "ok" and m, {n: (v["x"], v["width"], v["height"]) for n, v in m.items()})
-    ctl("dispatch", 'hl.dsp.focus({ monitor = "H3D-2" })')
-    alice("setsid -f foot --app-id h3d-second > /dev/null 2>&1")
-    c = wait_for("its terminal", lambda: next((c for c in json.loads(ctl("-j", "clients")) if c["class"] == "h3d-second"), None), 20)
+    ctl("dispatch", 'hl.dsp.focus({ monitor = "HYPRWALK-2" })')
+    alice("setsid -f foot --app-id hyprwalk-second > /dev/null 2>&1")
+    c = wait_for("its terminal", lambda: next((c for c in json.loads(ctl("-j", "clients")) if c["class"] == "hyprwalk-second"), None), 20)
     time.sleep(1)
-    check("16", "a terminal on it", c and c["monitor"] == monitors()["H3D-2"]["id"], c and c["monitor"])
+    check("16", "a terminal on it", c and c["monitor"] == monitors()["HYPRWALK-2"]["id"], c and c["monitor"])
     ctl("dispatch", 'hl.dsp.focus({ monitor = "Virtual-1" })')
     ctl("dismissnotify")
     time.sleep(1.2)
-    two2d = frame("second-2d", "H3D-2")
+    two2d = frame("second-2d", "HYPRWALK-2")
     one2d = frame("first-2d", "Virtual-1")
     ensure_3d()
     time.sleep(1)
     s = st()
-    check("16", "hypr3d on: 3D on the focused monitor", s["monitor"] == "Virtual-1", s["monitor"])
+    check("16", "hyprwalk on: 3D on the focused monitor", s["monitor"] == "Virtual-1", s["monitor"])
     one = frame("first-3d", "Virtual-1")
-    two = frame("second-while-first-3d", "H3D-2")
+    two = frame("second-while-first-3d", "HYPRWALK-2")
     d1, d2 = one2d.differs(one), two2d.differs(two)
     check("16", "grim -o: the first shows 3D, the second its desktop as it was", d1 > 0.3 and d2 < 0.003, f"{d1:.1%} and {d2:.2%} of pixels changed")
     pos = ctl("cursorpos")
@@ -2064,9 +2064,9 @@ def s_monitors():
     time.sleep(0.5)
     check("16", "in 3D the mouse turns the camera and stays off the other monitor", ctl("cursorpos") == pos and abs(st()["yaw"] - y0) > 20 and focused_monitor() == "Virtual-1",
           f"cursor {pos} -> {ctl('cursorpos')}, yaw {y0} -> {st()['yaw']}, focused {focused_monitor()}")
-    ctl("notify", "1", "8000", "rgb(ff8800)", "hypr3d: on the focused monitor, over its 3D view")
+    ctl("notify", "1", "8000", "rgb(ff8800)", "hyprwalk: on the focused monitor, over its 3D view")
     time.sleep(1.2)
-    one, two = frame("notification-first-3d", "Virtual-1"), frame("notification-second", "H3D-2")
+    one, two = frame("notification-first-3d", "Virtual-1"), frame("notification-second", "HYPRWALK-2")
     n1, n2 = len(notification_boxes(one)), len(notification_boxes(two))
     check("16", "a notification shows on the focused monitor, over 3D, and not on the other", n1 == 1 and n2 == 0, f"{n1} and {n2}")
     ctl("dismissnotify")
@@ -2074,25 +2074,25 @@ def s_monitors():
     rel(700, 0)
     rel(700, 0)
     x = float(ctl("cursorpos").split(",")[0])
-    check("16", "out of 3D, the mouse crosses to the second monitor, which takes the focus", x > 1280 and focused_monitor() == "H3D-2", f"x {x}, focused {focused_monitor()}")
+    check("16", "out of 3D, the mouse crosses to the second monitor, which takes the focus", x > 1280 and focused_monitor() == "HYPRWALK-2", f"x {x}, focused {focused_monitor()}")
     ensure_3d()
     time.sleep(1)
     s = st()
-    check("16", "hypr3d on again: 3D on the second monitor now", s["monitor"] == "H3D-2", s["monitor"])
-    one, two = frame("first-while-second-3d", "Virtual-1"), frame("second-3d", "H3D-2")
+    check("16", "hyprwalk on again: 3D on the second monitor now", s["monitor"] == "HYPRWALK-2", s["monitor"])
+    one, two = frame("first-while-second-3d", "Virtual-1"), frame("second-3d", "HYPRWALK-2")
     d1, d2 = one2d.differs(one), two2d.differs(two)
     # the first's window lost focus: its border changed
     check("16", "... its frame is 3D, the first's its desktop", d2 > 0.3 and d1 < 0.02, f"{d2:.1%} and {d1:.2%} of pixels changed")
-    ctl("notify", "1", "8000", "rgb(ff8800)", "hypr3d: over the second monitor's 3D view")
+    ctl("notify", "1", "8000", "rgb(ff8800)", "hyprwalk: over the second monitor's 3D view")
     time.sleep(1.2)
-    two = frame("notification-second-3d", "H3D-2")
+    two = frame("notification-second-3d", "HYPRWALK-2")
     check("16", "... notifications show over it", len(notification_boxes(two)) == 1, notification_boxes(two))
     ctl("dismissnotify")
     # aquamarine < 0.12.1 (0.55.2 has 0.11.0) can run a headless output's queued idle event after the output is freed
     # (CBackend::dispatchIdle; fixed upstream in 1699271, 6ecde03); the plugin holds the output till it ran
     # (holdOutput() in main.cpp)
     dumps = coredumps()
-    r = ctl("output", "remove", "H3D-2")
+    r = ctl("output", "remove", "HYPRWALK-2")
     time.sleep(1)
     if not alive():
         try:
@@ -2105,26 +2105,26 @@ def s_monitors():
         restart_after_crash()
         return
     ok = wait_for("2D", lambda: st()["mode"] == "off", 10)
-    check("16", "the second monitor removed while in 3D on it: back to 2D, Hyprland fine", r == "ok" and ok and alive() and "H3D-2" not in monitors(), f"{r}; {st()['mode']}")
-    held = machine.execute("journalctl -t start-hyprland --no-pager -n 3000 | grep 'hypr3d.*H3D-2.*held' || true")[1].strip()
-    check("16", "... its output held until aquamarine's idle events queued before it had run", held, held.split("[hypr3d] ")[-1])
+    check("16", "the second monitor removed while in 3D on it: back to 2D, Hyprland fine", r == "ok" and ok and alive() and "HYPRWALK-2" not in monitors(), f"{r}; {st()['mode']}")
+    held = machine.execute("journalctl -t start-hyprland --no-pager -n 3000 | grep 'hyprwalk.*HYPRWALK-2.*held' || true")[1].strip()
+    check("16", "... its output held until aquamarine's idle events queued before it had run", held, held.split("[hyprwalk] ")[-1])
     time.sleep(1)
     img = calm_frame("first-after-second-gone")
     d = one2d.differs(img)
     check("16", "... the first monitor's desktop as it was", d < 0.01, f"{d:.2%} of pixels differ")
-    machine.execute("pkill -f 'foot --app-id h3d-second'; true")
+    machine.execute("pkill -f 'foot --app-id hyprwalk-second'; true")
     ensure_3d()
     check("16", "3D again on the first", st()["monitor"] == "Virtual-1", st()["monitor"])
     ensure_3d(False)
 
 
 def second_monitor():
-    """headless H3D-2 right of Virtual-1, as section 16 makes it: hyprctl's answer, the monitors"""
+    """headless HYPRWALK-2 right of Virtual-1, as section 16 makes it: hyprctl's answer, the monitors"""
     ctl("eval", 'hl.monitor({ output = "Virtual-1", mode = "preferred", position = "0x0", scale = 1 })')
-    r = ctl("output", "create", "headless", "H3D-2")
-    wait_for("H3D-2", lambda: "H3D-2" in monitors(), 10)
-    ctl("eval", 'hl.monitor({ output = "H3D-2", mode = "1280x800@60", position = "1280x0", scale = 1 })')
-    m = wait_for("H3D-2 at 1280x0", lambda: (lambda m: m if m.get("H3D-2", {}).get("x") == 1280 and m["H3D-2"]["width"] == 1280 and m["Virtual-1"]["x"] == 0 else None)(monitors()), 10)
+    r = ctl("output", "create", "headless", "HYPRWALK-2")
+    wait_for("HYPRWALK-2", lambda: "HYPRWALK-2" in monitors(), 10)
+    ctl("eval", 'hl.monitor({ output = "HYPRWALK-2", mode = "1280x800@60", position = "1280x0", scale = 1 })')
+    m = wait_for("HYPRWALK-2 at 1280x0", lambda: (lambda m: m if m.get("HYPRWALK-2", {}).get("x") == 1280 and m["HYPRWALK-2"]["width"] == 1280 and m["Virtual-1"]["x"] == 0 else None)(monitors()), 10)
     return r, m
 
 
@@ -2139,7 +2139,7 @@ def cursor_pixels(img, at):
     return img.count(cursor_cyan, (x - 20, y - 20, x + 50, y + 50))
 
 
-@section("16b", "3D on the monitor plugin:hypr3d:monitor names, the other one the desktop meanwhile: the mouse and keyboard there and back (Super+Esc, a keybind's focus, the mouse)")
+@section("16b", "3D on the monitor plugin:hyprwalk:monitor names, the other one the desktop meanwhile: the mouse and keyboard there and back (Super+Esc, a keybind's focus, the mouse)")
 def s_away():
     ensure_avatar(AV)
     ensure_3d(False)
@@ -2152,21 +2152,21 @@ def s_away():
     rel(20, 10)
     ctl("eval", 'hl.bind("SUPER + Left", hl.dsp.focus({ direction = "left" }))')
     ctl("eval", 'hl.bind("SUPER + Right", hl.dsp.focus({ direction = "right" }))')
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { monitor = "H3D-2" } } })')
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { monitor = "HYPRWALK-2" } } })')
     home = cursor()
     ctl("dismissnotify")
     time.sleep(1.2)
-    one2d, two2d = frame("away-first-2d", "Virtual-1"), frame("away-second-2d", "H3D-2")
+    one2d, two2d = frame("away-first-2d", "Virtual-1"), frame("away-second-2d", "HYPRWALK-2")
     n2d = cursor_pixels(one2d, home)
 
     ensure_3d()  # the first monitor focused
     s = st()
-    check("16b", "plugin:hypr3d:monitor = H3D-2: 3D goes there, though the first has the focus", s["monitor"] == "H3D-2" and s["away"] is False,
+    check("16b", "plugin:hyprwalk:monitor = HYPRWALK-2: 3D goes there, though the first has the focus", s["monitor"] == "HYPRWALK-2" and s["away"] is False,
           f"{s['monitor']}, away {s['away']}")
     c = cursor()
-    check("16b", "... the cursor goes to it (and the focus)", c[0] >= 1280 and focused_monitor() == "H3D-2", f"cursor {home} -> {c}, focused {focused_monitor()}")
+    check("16b", "... the cursor goes to it (and the focus)", c[0] >= 1280 and focused_monitor() == "HYPRWALK-2", f"cursor {home} -> {c}, focused {focused_monitor()}")
     time.sleep(1)
-    one, two = frame("away-first-while-3d", "Virtual-1"), frame("away-second-3d", "H3D-2")
+    one, two = frame("away-first-while-3d", "Virtual-1"), frame("away-second-3d", "HYPRWALK-2")
     d1, d2, n3d = one2d.differs(one), two2d.differs(two), cursor_pixels(one, home)
     # wev lost focus: its border changed
     check("16b", "grim -o: the second shows 3D, the first its desktop as it was, the cursor gone from it", d2 > 0.3 and d1 < 0.02 and n2d > 20 and n3d < 5,
@@ -2181,8 +2181,8 @@ def s_away():
     check("16b", "Super+Esc: away to the first monitor, the cursor where it was and the focus there; 3D stays up",
           s["away"] is True and s["mode"] == "active" and abs(c2[0] - home[0]) < 2 and abs(c2[1] - home[1]) < 2 and focused_monitor() == "Virtual-1",
           f"away {s['away']}, {s['mode']}, cursor {c2} (was {home}), focused {focused_monitor()}")
-    told = ctl("hypr3d", "log", "30")
-    check("16b", "... a notification says how to come back", "move it back onto H3D-2" in told, told.strip().splitlines()[-3:])
+    told = ctl("hyprwalk", "log", "30")
+    check("16b", "... a notification says how to come back", "move it back onto HYPRWALK-2" in told, told.strip().splitlines()[-3:])
     wev_mark("away")
     f0, y1 = s["frames"], s["yaw"]
     rel(30, 20)
@@ -2198,28 +2198,28 @@ def s_away():
     check("16b", "... wev on the first gets the pointer, a click, keys (Esc too) and the wheel",
           pointer and wev_buttons(evs) == [(272, 1), (272, 0)] and (38, 1) in keys and (38, 0) in keys and (9, 1) in keys and (9, 0) in keys and wev_scrolls(evs),
           f"pointer {pointer[-3:]}, buttons {wev_buttons(evs)}, keys {keys}, wheel {wev_scrolls(evs)}")
-    check("16b", "... 3D stays up on the second and goes on drawing (Esc was wev's)", s["mode"] == "active" and s["monitor"] == "H3D-2" and s["frames"] > f0 and s["aimed"] is None,
+    check("16b", "... 3D stays up on the second and goes on drawing (Esc was wev's)", s["mode"] == "active" and s["monitor"] == "HYPRWALK-2" and s["frames"] > f0 and s["aimed"] is None,
           f"{s['mode']} on {s['monitor']}, frames {f0} -> {s['frames']}, aimed {s['aimed']}")
     n = cursor_pixels(frame("away-first", "Virtual-1"), c3)
     check("16b", "... Hyprland's cursor shows on the first", n > 20, f"{n} cursor pixels")
     ctl("dismissnotify")
-    ctl("notify", "1", "8000", "rgb(ff8800)", "hypr3d: on the first monitor, which has the focus")
+    ctl("notify", "1", "8000", "rgb(ff8800)", "hyprwalk: on the first monitor, which has the focus")
     time.sleep(1.2)
-    n1, n2 = len(notification_boxes(frame("away-notification-first", "Virtual-1"))), len(notification_boxes(frame("away-notification-second", "H3D-2")))
+    n1, n2 = len(notification_boxes(frame("away-notification-first", "Virtual-1"))), len(notification_boxes(frame("away-notification-second", "HYPRWALK-2")))
     check("16b", "... a notification shows on the first, not over the 3D view", n1 == 1 and n2 == 0, f"{n1} and {n2}")
     ctl("dismissnotify")
 
     rel(1500, 0)
     time.sleep(0.5)
     s, c4 = st(), cursor()
-    check("16b", "the mouse moved onto the second monitor: back in 3D, the focus there", s["away"] is False and c4[0] >= 1280 and focused_monitor() == "H3D-2",
+    check("16b", "the mouse moved onto the second monitor: back in 3D, the focus there", s["away"] is False and c4[0] >= 1280 and focused_monitor() == "HYPRWALK-2",
           f"away {s['away']}, cursor {c4}, focused {focused_monitor()}")
     active = json.loads(ctl("-j", "activewindow") or "{}")
     check("16b", "... wev on the first has lost the keyboard focus (a Super shortcut in 3D can't close it unseen)", not active.get("class"), active.get("class"))
     y2 = s["yaw"]
     rel(200, 0)
     check("16b", "... the mouse turns the camera again, the cursor staying", abs(st()["yaw"] - y2) > 3 and cursor() == c4, f"yaw {y2} -> {st()['yaw']}, cursor {c4} -> {cursor()}")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.5)
     wev_mark("back")
     feet = st()["feet"]
@@ -2239,60 +2239,60 @@ def s_away():
     press("meta_l", "right")
     time.sleep(0.6)
     s = st()
-    check("16b", "Super+Right (the focus to the second, which has no window): back in 3D", s["away"] is False and cursor()[0] >= 1280 and focused_monitor() == "H3D-2",
+    check("16b", "Super+Right (the focus to the second, which has no window): back in 3D", s["away"] is False and cursor()[0] >= 1280 and focused_monitor() == "HYPRWALK-2",
           f"away {s['away']}, cursor {cursor()}, focused {focused_monitor()}")
 
-    r1, s1, c5 = ctl("hypr3d", "away", "on"), st(), cursor()
-    r2, s2 = ctl("hypr3d", "away", "off"), st()
-    check("16b", "hyprctl hypr3d away on, then off", r1 == "away" and s1["away"] and c5[0] < 1280 and r2 == "in 3D" and not s2["away"] and cursor()[0] >= 1280,
+    r1, s1, c5 = ctl("hyprwalk", "away", "on"), st(), cursor()
+    r2, s2 = ctl("hyprwalk", "away", "off"), st()
+    check("16b", "hyprctl hyprwalk away on, then off", r1 == "away" and s1["away"] and c5[0] < 1280 and r2 == "in 3D" and not s2["away"] and cursor()[0] >= 1280,
           f"{r1}, away {s1['away']}, cursor {c5}; {r2}, away {s2['away']}, cursor {cursor()}")
-    ctl("hypr3d", "away", "on")
+    ctl("hyprwalk", "away", "on")
     press("meta_l", "esc")
     s = st()
-    check("16b", "away, Super+Esc comes back into 3D", s["away"] is False and focused_monitor() == "H3D-2", f"away {s['away']}, focused {focused_monitor()}")
-    ctl("hypr3d", "away", "on")
+    check("16b", "away, Super+Esc comes back into 3D", s["away"] is False and focused_monitor() == "HYPRWALK-2", f"away {s['away']}, focused {focused_monitor()}")
+    ctl("hyprwalk", "away", "on")
     press("meta_l", "m")
     s, mn = st(), menu()
     check("16b", "away, the Action Menu's keybind (Super+M) comes back into 3D and opens it", s["away"] is False and mn.get("open"), f"away {s['away']}, menu open {mn.get('open')}")
     menu_closed()
 
-    ctl("hypr3d", "away", "on")
+    ctl("hyprwalk", "away", "on")
     c6 = cursor()
-    ctl("hypr3d", "off")
+    ctl("hyprwalk", "off")
     rel(-40, 0, after=0.1)
     moving, mode = cursor() != c6, st()["mode"]
     wait_for("2D", lambda: st()["mode"] == "off", 15)
     check("16b", "leaving 3D while away: the mouse moves the cursor on the first meanwhile", moving and mode in ("exiting", "off"), f"{c6} -> {cursor()} ({mode})")
 
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { monitor = "" } } })')
-    r = ctl("hypr3d", "on", "NOPE-9")
-    check("16b", "hyprctl hypr3d on NOPE-9: an error, no 3D", r.startswith("error") and st()["mode"] == "off", r)
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { monitor = "" } } })')
+    r = ctl("hyprwalk", "on", "NOPE-9")
+    check("16b", "hyprctl hyprwalk on NOPE-9: an error, no 3D", r.startswith("error") and st()["mode"] == "off", r)
     ctl("dispatch", 'hl.dsp.focus({ monitor = "Virtual-1" })')
-    r = ctl("hypr3d", "on", "H3D-2")
+    r = ctl("hyprwalk", "on", "HYPRWALK-2")
     ok = wait_for("3D", lambda: st()["mode"] == "active", 15)
-    check("16b", "hyprctl hypr3d on H3D-2, from the first: 3D there", r == "ok" and ok and st()["monitor"] == "H3D-2", f"{r}; {st()['monitor']}")
+    check("16b", "hyprctl hyprwalk on HYPRWALK-2, from the first: 3D there", r == "ok" and ok and st()["monitor"] == "HYPRWALK-2", f"{r}; {st()['monitor']}")
     ensure_3d(False)
-    desc = monitors()["H3D-2"].get("description", "")
+    desc = monitors()["HYPRWALK-2"].get("description", "")
     if desc:
-        ctl("eval", f'hl.config({{ plugin = {{ hypr3d = {{ monitor = {lua_value("desc:" + desc)} }} }} }})')
+        ctl("eval", f'hl.config({{ plugin = {{ hyprwalk = {{ monitor = {lua_value("desc:" + desc)} }} }} }})')
         ctl("dispatch", 'hl.dsp.focus({ monitor = "Virtual-1" })')
         ensure_3d()
-        check("16b", "plugin:hypr3d:monitor = desc: and its description", st()["monitor"] == "H3D-2", f"desc:{desc} -> {st()['monitor']}")
+        check("16b", "plugin:hyprwalk:monitor = desc: and its description", st()["monitor"] == "HYPRWALK-2", f"desc:{desc} -> {st()['monitor']}")
         ensure_3d(False)
     else:
-        note("16b", "H3D-2 has no description to go by")
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { monitor = "NOPE-9" } } })')
+        note("16b", "HYPRWALK-2 has no description to go by")
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { monitor = "NOPE-9" } } })')
     ctl("dispatch", 'hl.dsp.focus({ monitor = "Virtual-1" })')
     ensure_3d()
-    told = ctl("hypr3d", "log", "30")
-    check("16b", "plugin:hypr3d:monitor = NOPE-9 (none such): 3D on the focused one, and a notification says so", st()["monitor"] == "Virtual-1" and "no monitor NOPE-9" in told,
+    told = ctl("hyprwalk", "log", "30")
+    check("16b", "plugin:hyprwalk:monitor = NOPE-9 (none such): 3D on the focused one, and a notification says so", st()["monitor"] == "Virtual-1" and "no monitor NOPE-9" in told,
           f"{st()['monitor']}; {told.strip().splitlines()[-2:]}")
     ensure_3d(False)
 
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { monitor = "H3D-2" } } })')
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { monitor = "HYPRWALK-2" } } })')
     ensure_3d()
-    ctl("hypr3d", "away", "on")
-    r = ctl("output", "remove", "H3D-2")
+    ctl("hyprwalk", "away", "on")
+    r = ctl("output", "remove", "HYPRWALK-2")
     time.sleep(1)
     if not alive():
         check("16b", "the second monitor removed while away from 3D on it: back to 2D, Hyprland fine", False, f"{r}; Hyprland crashed")
@@ -2302,13 +2302,13 @@ def s_away():
     c7 = cursor()
     rel(-30, 0)
     check("16b", "the second monitor removed while away from 3D on it: 2D, Hyprland fine, the mouse moving on the first",
-          r == "ok" and ok and "H3D-2" not in monitors() and cursor() != c7, f"{r}; {st()['mode']}; cursor {c7} -> {cursor()}")
+          r == "ok" and ok and "HYPRWALK-2" not in monitors() and cursor() != c7, f"{r}; {st()['mode']}; cursor {c7} -> {cursor()}")
 
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { monitor = "" } } })')
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { monitor = "" } } })')
     ctl("eval", 'hl.unbind("SUPER + Left")')
     ctl("eval", 'hl.unbind("SUPER + Right")')
     machine.execute("pkill -x wev; true")
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     time.sleep(1.5)
 
@@ -2338,21 +2338,21 @@ def s_litmap():
     # the checks follow litmap.py's header (a correct render from the spawn), with margins for llvmpipe
     ensure_avatar(AV)
     ensure_3d(False)
-    r = ctl("eval", f'hl.config({{ plugin = {{ hypr3d = {{ map = "{LIT}" }} }} }})')
-    m = wait_for("LitCourt", lambda: (lambda m: m if not m["loading"] and m["world"] == "LitCourt" else None)(ctlj("hypr3d", "map")), 30)
-    check("17", "plugin:hypr3d:map (through hyprctl eval): LitCourt loads", m and m["world"] == "LitCourt", f"{r}; {m}")
-    journal = machine.execute("journalctl -t start-hyprland --no-pager -n 3000 | grep 'hypr3d.*LitCourt\\|hypr3d.*lighting\\|hypr3d.*backdrop'")[1]
+    r = ctl("eval", f'hl.config({{ plugin = {{ hyprwalk = {{ map = "{LIT}" }} }} }})')
+    m = wait_for("LitCourt", lambda: (lambda m: m if not m["loading"] and m["world"] == "LitCourt" else None)(ctlj("hyprwalk", "map")), 30)
+    check("17", "plugin:hyprwalk:map (through hyprctl eval): LitCourt loads", m and m["world"] == "LitCourt", f"{r}; {m}")
+    journal = machine.execute("journalctl -t start-hyprland --no-pager -n 3000 | grep 'hyprwalk.*LitCourt\\|hyprwalk.*lighting\\|hyprwalk.*backdrop'")[1]
     check("17", "its lighting: 2 lightmap sets, 3 probe volumes, fog, an exposure range; and a backdrop",
-          "2 lightmap set(s), 3 light probe volumes, fog, exposure 0.35-0.7" in journal and "backdrop (hypr3d_backdrop)" in journal,
-          "; ".join(l.split("[hypr3d] ")[-1] for l in journal.splitlines())[-400:])
+          "2 lightmap set(s), 3 light probe volumes, fog, exposure 0.35-0.7" in journal and "backdrop (hyprwalk_backdrop)" in journal,
+          "; ".join(l.split("[hyprwalk] ")[-1] for l in journal.splitlines())[-400:])
     # llvmpipe compiles the map's shaders on the first frames and draws slowly; hyprctl answers between frames
     slow = lambda *a: json.loads(ctl(*a, timeout=240))
-    ctl("hypr3d", "on", timeout=240)
-    wait_for("3D in the map", lambda: slow("hypr3d", "status")["mode"] == "active", 400, 2)
-    ctl("hypr3d", "view", "first", timeout=240)
-    ctl("hypr3d", "spawn", timeout=240)
+    ctl("hyprwalk", "on", timeout=240)
+    wait_for("3D in the map", lambda: slow("hyprwalk", "status")["mode"] == "active", 400, 2)
+    ctl("hyprwalk", "view", "first", timeout=240)
+    ctl("hyprwalk", "spawn", timeout=240)
     time.sleep(3)
-    s = slow("hypr3d", "status")
+    s = slow("hyprwalk", "status")
     check("17", "in 3D at its spawn, the exposure held to the map's range (0.35, the metering wants less)", s["world"] == "LitCourt" and abs(s["exposure"] - 0.35) < 0.02,
           f"{s['world']}, exposure {s['exposure']}")
     img = frame("litcourt-spawn", timeout=240)
@@ -2376,17 +2376,17 @@ def s_litmap():
     glass = mean(img, (.29, .45, .35, .58))
     check("17", "the glass pane isn't washed out (a light tint over the wall behind it)", max(glass) < 185, glass)
     # the sun glints off the pane seen from below: white, not scaled by the pane's 0.2 opacity
-    ctl("hypr3d", "tp", "-3.961", "0", "-5.4845", timeout=240)
-    ctl("hypr3d", "turn", "35", "50", timeout=240)
+    ctl("hyprwalk", "tp", "-3.961", "0", "-5.4845", timeout=240)
+    ctl("hyprwalk", "turn", "35", "50", timeout=240)
     time.sleep(3)
     img = frame("litcourt-glint", timeout=240)
     n = img.count(lambda r, g, b: min(r, g, b) > 245, frac(img, (.42, .40, .58, .60)))
     check("17", "the sun glints off the glass: white where it's reflected", n > 100, f"{n} white pixels")
     # a sun without a baked shadow channel: CS2 shadows it with the realtime shadow alone, so the floor is sunlit and
     # the baked band is gone
-    r = ctl("eval", f'hl.config({{ plugin = {{ hypr3d = {{ map = "{LIT_RS}" }} }} }})')
-    ok = wait_for("LitCourtRuntimeSun", lambda: slow("hypr3d", "status")["world"] == "LitCourtRuntimeSun", 240, 2)
-    ctl("hypr3d", "spawn", timeout=240)
+    r = ctl("eval", f'hl.config({{ plugin = {{ hyprwalk = {{ map = "{LIT_RS}" }} }} }})')
+    ok = wait_for("LitCourtRuntimeSun", lambda: slow("hyprwalk", "status")["world"] == "LitCourtRuntimeSun", 240, 2)
+    ctl("hyprwalk", "spawn", timeout=240)
     time.sleep(3)
     img2 = frame("litcourt-runtime-sun", timeout=240)
     orange2, band2 = mean(img2, (.15, .80, .40, .88)), mean(img2, (.10, .735, .42, .775))
@@ -2394,11 +2394,11 @@ def s_litmap():
           ok and all(abs(a - b) <= 12 for a, b in zip(orange, orange2)), f"{r}; {orange2}, LitCourt's {orange}")
     check("17", "... and only the realtime shadow: the baked shadow's band gone", sum(band2) > 0.95 * sum(orange2) and sum(band) < 0.9 * sum(orange),
           f"band {band2} over {orange2} (LitCourt's {band} over {orange})")
-    note("17", "frames a second in the map", slow("hypr3d", "status")["fps"])
-    ctl("hypr3d", "off", timeout=240)
-    wait_for("2D", lambda: slow("hypr3d", "status")["mode"] == "off", 120, 1)
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { map = "" } } })')
-    ok = wait_for("the courtyard", lambda: ctlj("hypr3d", "map")["world"] == "courtyard", 20)
+    note("17", "frames a second in the map", slow("hyprwalk", "status")["fps"])
+    ctl("hyprwalk", "off", timeout=240)
+    wait_for("2D", lambda: slow("hyprwalk", "status")["mode"] == "off", 120, 1)
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { map = "" } } })')
+    ok = wait_for("the courtyard", lambda: ctlj("hyprwalk", "map")["world"] == "courtyard", 20)
     check("17", "map = \"\": back to the courtyard", ok)
     time.sleep(0.5)
     ctl("dismissnotify")  # keeps "back to the courtyard" out of later frames
@@ -2418,7 +2418,7 @@ def s_after():
     time.sleep(1.0)
     plain = frame("menu-over-toon")
     # Hyprland draws its notifications after the plugin's pass, in the same frame
-    ctl("notify", "1", "8000", "rgb(ff8800)", "hypr3d: a notification over the 3D view")
+    ctl("notify", "1", "8000", "rgb(ff8800)", "hyprwalk: a notification over the 3D view")
     time.sleep(0.8)
     noted = frame("notification-over-3d")
     corner = (noted.w // 2, 0, noted.w, 160)
@@ -2445,7 +2445,7 @@ def s_unload():
     ensure_3d(False)
     before = calm_frame("desktop-before-unload")
     ensure_3d()
-    ctl("hypr3d", "avatar", "lipsync", "on")
+    ctl("hyprwalk", "avatar", "lipsync", "on")
     press("tab")
     wait_for("the stream", lipsync_node, 10)
     frame("before-unload-in-3d")
@@ -2455,9 +2455,9 @@ def s_unload():
     check("12", "hyprctl plugin unload, in 3D with the menu open and the microphone on", r == "ok", r)
     time.sleep(1.5)
     check("12", "Hyprland lives on", alive())
-    check("12", "the plugin's gone from the list", "hypr3d" not in ctl("plugin", "list"))
-    r = ctl("hypr3d", "status")
-    check("12", "hyprctl hypr3d is gone", not r.startswith("{"), r[:80])
+    check("12", "the plugin's gone from the list", "hyprwalk" not in ctl("plugin", "list"))
+    r = ctl("hyprwalk", "status")
+    check("12", "hyprctl hyprwalk is gone", not r.startswith("{"), r[:80])
     check("12", "its PipeWire stream is gone", lipsync_node() is None)
     img = calm_frame("desktop-after-unload")
     errs = ctl("configerrors")
@@ -2491,7 +2491,7 @@ def s_lua_load():
     start_hyprland("hyprland.lua", lua_config(cfg, load=True))
     errs = ctl("configerrors")
     check("8b", "no config errors", config_ok(errs), errs[:300])
-    check("8b", "loaded with the config", "hypr3d" in ctl("plugin", "list"))
+    check("8b", "loaded with the config", "hyprwalk" in ctl("plugin", "list"))
     a = ensure_avatar(AV)
     check("8b", "its values apply: the avatar, physics off", a.get("name") == "BoothAccessories" and a.get("physics") is False, f"{a.get('name')} physics {a.get('physics')}")
     press("meta_l", "grave_accent")
@@ -2499,58 +2499,58 @@ def s_lua_load():
     check("8b", "Super+` enters 3D", ok)
     time.sleep(0.8)
     frame("3d-lua-load")
-    f = ctlj("hypr3d", "tile")["follow"]
-    ctl("hypr3d", "tile", "on")
-    told = ctl("hypr3d", "log", "6")
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "tile", "follow", "on")
+    f = ctlj("hyprwalk", "tile")["follow"]
+    ctl("hyprwalk", "tile", "on")
+    told = ctl("hyprwalk", "log", "6")
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "tile", "follow", "on")
     check("8b", "tiling_follow = false: tiling mode's row stays where you turn it on, T says so", f is False and "round you, staying here" in told, f"{f}; {told.strip()[-200:]}")
     ensure_3d(False)
 
 
-@section("8c", "a classic hyprland.conf: plugin =, plugin { hypr3d { } }, the hypr3d:toggle and hypr3d:menu dispatchers")
+@section("8c", "a classic hyprland.conf: plugin =, plugin { hyprwalk { } }, the hyprwalk:toggle and hyprwalk:menu dispatchers")
 def s_conf():
     cfg = {"avatar": AV, "avatar_physics": False, "lipsync": False}
     start_hyprland("hyprland.conf", conf_config(cfg))
     errs = ctl("configerrors")
     check("8c", "no config errors", config_ok(errs), errs[:300])
-    check("8c", "plugin = loads it", "hypr3d" in ctl("plugin", "list"))
+    check("8c", "plugin = loads it", "hyprwalk" in ctl("plugin", "list"))
     a = ensure_avatar(AV)
-    check("8c", "plugin { hypr3d { avatar, avatar_physics } } apply", a.get("name") == "BoothAccessories" and a.get("physics") is False, f"{a.get('name')} physics {a.get('physics')}")
+    check("8c", "plugin { hyprwalk { avatar, avatar_physics } } apply", a.get("name") == "BoothAccessories" and a.get("physics") is False, f"{a.get('name')} physics {a.get('physics')}")
     before = calm_frame("desktop-conf")
-    r = ctl("dispatch", "hypr3d:toggle")
+    r = ctl("dispatch", "hyprwalk:toggle")
     ok = wait_for("3D", lambda: st()["mode"] == "active", 10)
-    check("8c", "hyprctl dispatch hypr3d:toggle", r == "ok" and ok, r)
-    r = ctl("dispatch", "hypr3d:menu", "emotes")
-    check("8c", "hyprctl dispatch hypr3d:menu emotes", r == "ok" and menu().get("path") == "main/emotes", f"{r}; {menu().get('path')}")
-    r = ctl("dispatch", "hypr3d:menu", "pick", "1")
+    check("8c", "hyprctl dispatch hyprwalk:toggle", r == "ok" and ok, r)
+    r = ctl("dispatch", "hyprwalk:menu", "emotes")
+    check("8c", "hyprctl dispatch hyprwalk:menu emotes", r == "ok" and menu().get("path") == "main/emotes", f"{r}; {menu().get('path')}")
+    r = ctl("dispatch", "hyprwalk:menu", "pick", "1")
     time.sleep(0.5)
-    check("8c", "hyprctl dispatch hypr3d:menu pick 1: an emote", r == "ok" and av()["emote"] != "", f"{r}; {av()['emote']!r}")
-    ctl("hypr3d", "avatar", "emote", "stop")
-    r = ctl("dispatch", "hypr3d:menu")
-    check("8c", "hyprctl dispatch hypr3d:menu toggles it closed", r == "ok" and menu().get("open") is False, r)
-    r = ctl("dispatch", "hypr3d:menu", "nosuchpage")
+    check("8c", "hyprctl dispatch hyprwalk:menu pick 1: an emote", r == "ok" and av()["emote"] != "", f"{r}; {av()['emote']!r}")
+    ctl("hyprwalk", "avatar", "emote", "stop")
+    r = ctl("dispatch", "hyprwalk:menu")
+    check("8c", "hyprctl dispatch hyprwalk:menu toggles it closed", r == "ok" and menu().get("open") is False, r)
+    r = ctl("dispatch", "hyprwalk:menu", "nosuchpage")
     check("8c", "a page that isn't there: the dispatcher fails, saying why", r != "ok" and "no such page" in r, r)
-    r1 = ctl("dispatch", "hypr3d:tile")
+    r1 = ctl("dispatch", "hyprwalk:tile")
     on = st()["tiling"]
-    r2 = ctl("dispatch", "hypr3d:tile")
-    check("8c", "hyprctl dispatch hypr3d:tile: tiling mode on, and again off", r1 == "ok" and r2 == "ok" and on is True and st()["tiling"] is False, f"{r1} {on}, {r2} {st()['tiling']}")
-    r1 = ctl("dispatch", "hypr3d:tile", "follow")
-    f1 = ctlj("hypr3d", "tile")["follow"]
-    r2 = ctl("dispatch", "hypr3d:tile", "follow")
-    f2 = ctlj("hypr3d", "tile")["follow"]
-    check("8c", "hyprctl dispatch hypr3d:tile follow: tiling mode's row staying where it is (Y), and again going with you", r1 == "ok" and r2 == "ok" and f1 is False and f2 is True,
+    r2 = ctl("dispatch", "hyprwalk:tile")
+    check("8c", "hyprctl dispatch hyprwalk:tile: tiling mode on, and again off", r1 == "ok" and r2 == "ok" and on is True and st()["tiling"] is False, f"{r1} {on}, {r2} {st()['tiling']}")
+    r1 = ctl("dispatch", "hyprwalk:tile", "follow")
+    f1 = ctlj("hyprwalk", "tile")["follow"]
+    r2 = ctl("dispatch", "hyprwalk:tile", "follow")
+    f2 = ctlj("hyprwalk", "tile")["follow"]
+    check("8c", "hyprctl dispatch hyprwalk:tile follow: tiling mode's row staying where it is (Y), and again going with you", r1 == "ok" and r2 == "ok" and f1 is False and f2 is True,
           f"{r1} {f1}, {r2} {f2}")
     press("meta_l", "o")
-    check("8c", "bind = SUPER, O, hypr3d:menu, options (pressed)", menu().get("path") == "main/options", menu().get("path"))
+    check("8c", "bind = SUPER, O, hyprwalk:menu, options (pressed)", menu().get("path") == "main/options", menu().get("path"))
     press("meta_l", "m")
-    check("8c", "bind = SUPER, M, hypr3d:menu (pressed): closed", menu().get("open") is False)
+    check("8c", "bind = SUPER, M, hyprwalk:menu (pressed): closed", menu().get("open") is False)
     press("meta_l", "grave_accent")
     ok = wait_for("2D", lambda: st()["mode"] == "off", 10)
-    check("8c", "bind = SUPER, grave, hypr3d:toggle (pressed): out of 3D", ok)
-    r = ctl("keyword", "plugin:hypr3d:avatar_physics", "true")
+    check("8c", "bind = SUPER, grave, hyprwalk:toggle (pressed): out of 3D", ok)
+    r = ctl("keyword", "plugin:hyprwalk:avatar_physics", "true")
     ok = wait_for("physics on", lambda: av()["physics"] is True, 3, 0.2)
-    check("8c", "hyprctl keyword plugin:hypr3d:avatar_physics true takes effect", ok, f"keyword: {r}; physics {av()['physics']}")
+    check("8c", "hyprctl keyword plugin:hyprwalk:avatar_physics true takes effect", ok, f"keyword: {r}; physics {av()['physics']}")
     cfg["avatar_physics"] = True
     reload_config("hyprland.conf", conf_config(cfg))
     check("8c", "... and after hyprctl reload", av()["physics"] is True, av()["physics"])
@@ -2568,15 +2568,15 @@ def s_conf():
 GAME_LOG = "/tmp/game.log"
 
 
-def game_start(args="", env="", cls="h3dgame", alone=True):
-    """h3dgame as alice, logging what SDL gives it to GAME_LOG; alone: the terminals go first"""
-    machine.execute("pkill -x h3dgame; true")
+def game_start(args="", env="", cls="hyprwalkgame", alone=True):
+    """hyprwalkgame as alice, logging what SDL gives it to GAME_LOG; alone: the terminals go first"""
+    machine.execute("pkill -x hyprwalkgame; true")
     if alone:
         machine.execute("pkill -u alice foot; true")
     time.sleep(0.8)
     # SDL takes the class from the app id hint on Wayland, WM_CLASS on X11
     alice(f"rm -f {GAME_LOG}; SDL_APP_ID={cls} SDL_VIDEO_WAYLAND_WMCLASS={cls} SDL_VIDEO_X11_WMCLASS={cls} {env} "
-          f"setsid -f stdbuf -oL h3dgame --title {cls} {args} >> {GAME_LOG} 2>&1")
+          f"setsid -f stdbuf -oL hyprwalkgame --title {cls} {args} >> {GAME_LOG} 2>&1")
     c = wait_for(f"{cls}'s window", lambda: next((c for c in json.loads(ctl("-j", "clients")) if c["class"] == cls), None), 30)
     time.sleep(1.5)
     return c
@@ -2616,18 +2616,18 @@ def game_frames(lines):
 
 
 def game_blue(r, g, b):
-    """h3dgame's background: blue 90, red and green 40..240"""
+    """hyprwalkgame's background: blue 90, red and green 40..240"""
     return abs(b - 90) <= 3 and 35 <= r <= 245 and 35 <= g <= 245 and max(r, g) > 30
 
 
 def aim_find(cls, step=15, reach=40):
-    """turns (hyprctl hypr3d turn) at a few pitches till the crosshair is on that window"""
+    """turns (hyprctl hyprwalk turn) at a few pitches till the crosshair is on that window"""
     s = st()
     y0, seen = s["yaw"], []
     for pitch in (s["pitch"], 0, -6, 6, -12, 12, -18):
         for dy in range(0, 64, 3):
             for sign in ((1,) if dy == 0 else (1, -1)):
-                ctl("hypr3d", "turn", f"{y0 + sign * dy:.1f}", f"{pitch:.1f}")
+                ctl("hyprwalk", "turn", f"{y0 + sign * dy:.1f}", f"{pitch:.1f}")
                 time.sleep(0.2)
                 a = st()["aimed"]
                 if a and a.get("kind") == "window" and a.get("class") == cls:
@@ -2650,13 +2650,13 @@ def aim_local(cls, x, y, tries=12):
         if abs(ex) <= 3 and abs(ey) <= 3:
             return a
         if gain is None:
-            ctl("hypr3d", "look", "15", "15")
+            ctl("hyprwalk", "look", "15", "15")
             time.sleep(0.4)
             b = st()["aimed"] or a
             gx, gy = (b["local"][0] - lx) / 15, (b["local"][1] - ly) / 15
             gain = (gx if abs(gx) > 0.05 else 1, gy if abs(gy) > 0.05 else 1)
             continue
-        ctl("hypr3d", "look", f"{ex / gain[0]:.0f}", f"{ey / gain[1]:.0f}")
+        ctl("hyprwalk", "look", f"{ex / gain[0]:.0f}", f"{ey / gain[1]:.0f}")
         time.sleep(0.4)
     return st()["aimed"]
 
@@ -2668,12 +2668,12 @@ def play_settled(s):
 
 
 def play_on(view=None):
-    """hyprctl hypr3d play on in that view (here, fill; None: play_view's), till it settled"""
-    r = ctl("hypr3d", "play", "on", *([view] if view else []))
+    """hyprctl hyprwalk play on in that view (here, fill; None: play_view's), till it settled"""
+    r = ctl("hyprwalk", "play", "on", *([view] if view else []))
     if r != "playing":
         s = st()
         frame("play-on-failed")
-        raise RuntimeError(f"hyprctl hypr3d play on: {r}; aimed {s['aimed']}, yaw {s['yaw']}, pitch {s['pitch']}, eye {s['eye']}, view {s['view']}; "
+        raise RuntimeError(f"hyprctl hyprwalk play on: {r}; aimed {s['aimed']}, yaw {s['yaw']}, pitch {s['pitch']}, eye {s['eye']}, view {s['view']}; "
                            f"placed {[(p['class'], p['center'], p['settled']) for p in windows3d()['placed']]}; "
                            f"panels {[(p['kind'], p['class'], p['box'], p['placed']) for p in panels()]}")
     s = wait_for("play mode" + (", the camera facing the window" if view == "fill" else ""), lambda: play_settled(st()), 10, 0.2)
@@ -2681,21 +2681,21 @@ def play_on(view=None):
     return r, s
 
 
-APPS_KILLED = "h3dgame wev xterm swayidle mako obs chromium firefox electron supertux2 chocolate-doom hyprland-share-picker"
+APPS_KILLED = "hyprwalkgame wev xterm swayidle mako obs chromium firefox electron supertux2 chocolate-doom hyprland-share-picker"
 
 
 def clean_windows():
     """kills every window but the terminals (by PID, then known apps by name)"""
     try:
         for c in json.loads(ctl("-j", "clients") or "[]"):
-            if not c["class"].startswith("h3d-") and c.get("pid", 0) > 1:
+            if not c["class"].startswith("hyprwalk-") and c.get("pid", 0) > 1:
                 machine.execute(f"kill {c['pid']} 2>/dev/null; true")
     except ValueError:
         pass
     machine.execute(" ; ".join(f"pkill -x {a}" for a in APPS_KILLED.split()) + " ; pkill -f tkapp[.]py; pkill -f weston-; pkill -f chromium; pkill -f firefox; "
                     "pkill -f electron; pkill -f supertux; pkill -f obs-studio; pkill -f '[.]obs-wrapped'; pkill -f 'bin/[.]?mako'; pkill -x fcitx5; true")
     try:
-        wait_for("the other windows gone", lambda: all(c["class"].startswith("h3d-") for c in json.loads(ctl("-j", "clients"))), 20, 0.5)
+        wait_for("the other windows gone", lambda: all(c["class"].startswith("hyprwalk-") for c in json.loads(ctl("-j", "clients"))), 20, 0.5)
     except TimeoutError:
         pass
 
@@ -2723,11 +2723,11 @@ def s_play():
     ensure_3d(False)
     clean_windows()
     c = game_start("--relative")
-    check("18", "h3dgame (SDL, Wayland) runs, its pointer locked (relative mode)", c and "relative on" in game_lines(), game_lines()[:6])
+    check("18", "hyprwalkgame (SDL, Wayland) runs, its pointer locked (relative mode)", c and "relative on" in game_lines(), game_lines()[:6])
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
     game_mark("walking")
     y0 = st()["yaw"]
@@ -2736,7 +2736,7 @@ def s_play():
     dx, dy, _ = game_motion(game_lines("walking"))
     check("18", "walking: the mouse turns the camera, and the game gets none of it", abs(s["yaw"] - y0) > 3 and dx == 0, f"yaw {y0:.1f} -> {s['yaw']:.1f}, game dx {dx}")
     rel(-60, 0)
-    a = aim_find("h3dgame")
+    a = aim_find("hyprwalkgame")
     check("18", "the crosshair on the game", a, a or AIM.get("last"))
     feet, yaw = st()["feet"], st()["yaw"]
     game_mark("P")
@@ -2744,8 +2744,8 @@ def s_play():
     s = wait_for("play mode", lambda: (lambda s: s if s["playing"] and s["playing"]["view"] >= 1 else None)(st()), 10, 0.2)
     time.sleep(0.5)
     p = s["playing"]
-    check("18", "Shift+P: playing it, filling the view, its pointer lock active (the keyboard focus on it)", p and p["class"] == "h3dgame" and p["locked"] and
-          p.get("fill") is True and json.loads(ctl("-j", "activewindow")).get("class") == "h3dgame", p)
+    check("18", "Shift+P: playing it, filling the view, its pointer lock active (the keyboard focus on it)", p and p["class"] == "hyprwalkgame" and p["locked"] and
+          p.get("fill") is True and json.loads(ctl("-j", "activewindow")).get("class") == "hyprwalkgame", p)
     img = frame("play-relative")
     fill = img.count(game_blue, step=4) / ((img.w // 4) * (img.h // 4))
     check("18", "the camera faces it: the game fills most of the view", fill > 0.6, f"{fill:.0%} of the frame is the game's background")
@@ -2823,7 +2823,7 @@ def s_play():
     check("18", "... and the mouse turns the camera again", abs(st()["yaw"] - yaw) > 3)
     rel(-60, 0)
     # SDL reads the controller from /dev/input itself, while the game has the keyboard
-    aim_find("h3dgame")
+    aim_find("hyprwalkgame")
     play_on()
     game_mark("pad-playing")
     machine.succeed(f"python3 {H}/gamepad.py a b start dx=1 lx=30000", timeout=60)
@@ -2831,37 +2831,37 @@ def s_play():
     got = [l for l in game_lines("pad-playing") if l.startswith(("controller", "cbutton down", "caxis"))]
     check("18", "a game controller in play mode (uinput, an Xbox 360 pad): the game reads it", "cbutton down a" in got and "cbutton down b" in got and "cbutton down start" in got and
           "cbutton down dpright" in got and any(l.startswith("caxis leftx 3") for l in got), got)
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
     time.sleep(0.5)
     game_mark("pad-walking")
     machine.succeed(f"python3 {H}/gamepad.py a", timeout=60)
     got = [l for l in game_lines("pad-walking") if l.startswith("cbutton down")]
     check("18", "... and walking, while the game still has the keyboard focus", got == ["cbutton down a"], got)
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1")
-    wait_for("a terminal", lambda: any(c["class"] == "h3d-left" for c in json.loads(ctl("-j", "clients"))), 20)
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1")
+    wait_for("a terminal", lambda: any(c["class"] == "hyprwalk-left" for c in json.loads(ctl("-j", "clients"))), 20)
     check("18", "a new window doesn't take the keyboard from a game with its pointer locked (Hyprland's rule, in 2D too)",
-          json.loads(ctl("-j", "activewindow")).get("class") == "h3dgame", json.loads(ctl("-j", "activewindow")).get("class"))
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3d-left" })')
-    wait_for("the terminal focused", lambda: json.loads(ctl("-j", "activewindow")).get("class") == "h3d-left", 10)
+          json.loads(ctl("-j", "activewindow")).get("class") == "hyprwalkgame", json.loads(ctl("-j", "activewindow")).get("class"))
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalk-left" })')
+    wait_for("the terminal focused", lambda: json.loads(ctl("-j", "activewindow")).get("class") == "hyprwalk-left", 10)
     time.sleep(0.5)
     game_mark("pad-unfocused")
     machine.succeed(f"python3 {H}/gamepad.py a", timeout=60)
     got = [l for l in game_lines("pad-unfocused") if l.startswith("cbutton down")]
     check("18", "... but not once another window has the keyboard (SDL drops a controller's events then)", got == [], got)
     # the new terminal opened in front of the game: to the wall
-    ctl("hypr3d", "window", "h3d-left", "wall")
-    wait_for("the terminal on the wall", lambda: not placed("h3d-left"), 10, 0.3)
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "window", "hyprwalk-left", "wall")
+    wait_for("the terminal on the wall", lambda: not placed("hyprwalk-left"), 10, 0.3)
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
-    aim_find("h3dgame")
+    aim_find("hyprwalkgame")
     play_on()
     ensure_3d(False)
     ensure_3d()
     check("18", "leaving 3D ends play mode", st()["playing"] is None)
     # a screen lock (swaylock, ext-session-lock-v1)
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
-    aim_find("h3dgame")
+    aim_find("hyprwalkgame")
     play_on()
     alice("setsid -f swaylock -c 203040 > /tmp/swaylock.log 2>&1")
     try:
@@ -2872,7 +2872,7 @@ def s_play():
     s = st()
     frame("locked")
     check("18", "a screen lock (swaylock) ends play mode and 3D", s["mode"] == "off" and s["playing"] is None, f"mode {s['mode']}, playing {s['playing']}")
-    type_text("h3d")
+    type_text("hyprwalk")
     press("ret")
     try:
         unlocked = wait_for("swaylock to go", lambda: machine.execute("pgrep -f 'bin/[.]?swaylock'")[0] != 0, 15, 0.5)
@@ -2889,11 +2889,11 @@ def s_play():
     time.sleep(3)
     f2d = game_frames(game_lines())[-2:]
     ensure_3d()
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(3)
     f3d = game_frames(game_lines())[-2:]
     fps3d = st()["fps"]
-    aim_find("h3dgame")
+    aim_find("hyprwalkgame")
     play_on()
     time.sleep(3)
     fplay = game_frames(game_lines())[-2:]
@@ -2901,8 +2901,8 @@ def s_play():
     note("18", "the game's frames a second (vsync, FIFO): 2D, walking in 3D, played", f"{f2d}, {f3d} (3D at {fps3d:.1f} fps), {fplay} (3D at {fpsplay:.1f} fps)")
     check("18", "in 3D the game keeps drawing, paced by the 3D view's frames", f3d and fplay and min(f3d + fplay) > 0 and abs(fplay[-1] - fpsplay) < max(3, 0.3 * fpsplay),
           f"{f3d}, {fplay}; 3D {fps3d:.1f}, {fpsplay:.1f} fps")
-    ctl("hypr3d", "play", "off")
-    machine.execute("pkill -x h3dgame; true")
+    ctl("hyprwalk", "play", "off")
+    machine.execute("pkill -x hyprwalkgame; true")
 
 
 @section("18b", "what a game needs from the compositor in 3D: activated, wl_output enter, presentation feedback, idle inhibit off its workspace")
@@ -2915,14 +2915,14 @@ def s_play_compositor():
     wev_start()
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1")
-    wait_for("a terminal", lambda: json.loads(ctl("-j", "activewindow")).get("class") == "h3d-left", 20)
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1")
+    wait_for("a terminal", lambda: json.loads(ctl("-j", "activewindow")).get("class") == "hyprwalk-left", 20)
     # it opened in front, hiding wev: to the wall
-    ctl("hypr3d", "window", "h3d-left", "wall")
-    wait_for("the terminal on the wall", lambda: not any(p["class"] == "h3d-left" for p in windows3d()["placed"]), 10, 0.3)
+    ctl("hyprwalk", "window", "hyprwalk-left", "wall")
+    wait_for("the terminal on the wall", lambda: not any(p["class"] == "hyprwalk-left" for p in windows3d()["placed"]), 10, 0.3)
     time.sleep(1)
     wev_mark("play wev")
     aim_find("wev")
@@ -2930,9 +2930,9 @@ def s_play_compositor():
     time.sleep(0.5)
     confs = wev_states("play wev")
     check("18b", "P on wev: its xdg_toplevel is configured activated", r == "playing" and confs and "activated" in confs[-1], confs[-3:])
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
     wev_mark("unplay wev")
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3d-left" })')
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalk-left" })')
     time.sleep(1)
     confs = wev_states("unplay wev")
     check("18b", "... and not activated once another window has the keyboard", confs and "activated" not in confs[-1], confs[-3:])
@@ -2941,7 +2941,7 @@ def s_play_compositor():
     alice("rm -f /tmp/pres.log /tmp/pres-debug.log; WAYLAND_DEBUG=client setsid -f stdbuf -oL weston-presentation-shm -f > /tmp/pres.log 2> /tmp/pres-debug.log")
     wait_for("weston-presentation-shm", lambda: json.loads(ctl("-j", "clients")), 20)
     time.sleep(1)
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(3)
     machine.execute("pkill -INT -f weston-presentation-shm; true")
     time.sleep(1)
@@ -2963,34 +2963,34 @@ def s_play_compositor():
           f"enter {enters[:2]}, preferred scale {scale[:2]}, presented/discarded {fb}")
     machine.execute("pkill -x weston-presentation-shm; true")
     # SDL inhibits idle by default
-    alice("rm -f /tmp/h3d-idle; setsid -f swayidle -w timeout 3 'touch /tmp/h3d-idle' resume 'rm -f /tmp/h3d-idle' > /tmp/swayidle.log 2>&1")
+    alice("rm -f /tmp/hyprwalk-idle; setsid -f swayidle -w timeout 3 'touch /tmp/hyprwalk-idle' resume 'rm -f /tmp/hyprwalk-idle' > /tmp/swayidle.log 2>&1")
     time.sleep(5)
-    check("18b", "(swayidle works: 5 s with no input, it went idle)", machine.execute("test -e /tmp/h3d-idle")[0] == 0)
+    check("18b", "(swayidle works: 5 s with no input, it went idle)", machine.execute("test -e /tmp/hyprwalk-idle")[0] == 0)
     rel(5, 0)
     time.sleep(0.5)
     game_start()
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
-    aim_find("h3dgame")
-    ctl("hypr3d", "grab")
-    ctl("hypr3d", "place")
+    aim_find("hyprwalkgame")
+    ctl("hyprwalk", "grab")
+    ctl("hyprwalk", "place")
     ctl("dispatch", 'hl.dsp.focus({ workspace = "2" })')
     time.sleep(1)
-    machine.execute("rm -f /tmp/h3d-idle")
+    machine.execute("rm -f /tmp/hyprwalk-idle")
     time.sleep(6)
     placed = windows3d()["placed"]
-    idle = machine.execute("test -e /tmp/h3d-idle")[0] == 0
+    idle = machine.execute("test -e /tmp/hyprwalk-idle")[0] == 0
     frames = game_frames(game_lines())[-2:]
     check("18b", "a game placed in the world, its workspace hidden: still drawing, and the screen doesn't go idle (its idle inhibitor counts)",
           placed and not idle and frames and min(frames) > 0, f"placed {[p['class'] for p in placed]}, idle {idle}, frames {frames}")
-    machine.execute("pkill -x h3dgame; true")
+    machine.execute("pkill -x hyprwalkgame; true")
     time.sleep(6)
-    check("18b", "... and once it's closed, it does", machine.execute("test -e /tmp/h3d-idle")[0] == 0)
+    check("18b", "... and once it's closed, it does", machine.execute("test -e /tmp/hyprwalk-idle")[0] == 0)
     machine.execute("pkill -x swayidle; true")
     ctl("dispatch", 'hl.dsp.focus({ workspace = "1" })')
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "reset-windows", "forget")
     ensure_3d(False)
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     time.sleep(1)
 
@@ -3009,7 +3009,7 @@ def x_display():
 def tk_start():
     machine.execute("pkill -f tkapp[.]py; true")
     alice(f"rm -f {TK_LOG}; DISPLAY={x_display()} setsid -f python3 -u {H}/tkapp.py >> {TK_LOG} 2>&1")
-    return wait_for("the Tk window", lambda: next((c for c in json.loads(ctl("-j", "clients")) if "h3dtk" in c["class"].lower() and c["xwayland"]), None), 30)
+    return wait_for("the Tk window", lambda: next((c for c in json.loads(ctl("-j", "clients")) if "hyprwalktk" in c["class"].lower() and c["xwayland"]), None), 30)
 
 
 def tk_mark(name):
@@ -3030,7 +3030,7 @@ def tk_lines(name):
 
 
 def panels():
-    return ctlj("hypr3d", "panels")
+    return ctlj("hyprwalk", "panels")
 
 
 def pointer_to(x, y):
@@ -3058,8 +3058,8 @@ def x11_checks(item, scale=1):
     time.sleep(1.5)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
     a = aim_find(c["class"])
     check(item, "the crosshair on the X11 window", a, a or AIM.get("last"))
@@ -3117,15 +3117,15 @@ def x11_checks(item, scale=1):
     wheel(3)
     got = tk_lines("wheel")
     check(item, "the wheel over its list: X11's buttons 5, the list scrolls", got.count("wheel down") >= 3 and any(l.startswith("scroll ") and float(l.split()[1]) > 0 for l in got), got)
-    ctl("hypr3d", "play", "off")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "play", "off")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     aim_find(c["class"])
-    ctl("hypr3d", "grab")
-    ctl("hypr3d", "hold", "2.2", "0.8")
+    ctl("hyprwalk", "grab")
+    ctl("hyprwalk", "hold", "2.2", "0.8")
     rel(-120, 0)
     time.sleep(0.5)
-    ctl("hypr3d", "place")
+    ctl("hyprwalk", "place")
     settled()
     aim_find(c["class"])
     r, s = play_on()
@@ -3148,13 +3148,13 @@ def x11_checks(item, scale=1):
         click("left")
         time.sleep(0.5)
         check(item, "... and its middle item picks Copy", "menu Copy" in tk_lines("context"), tk_lines("context"))
-    ctl("hypr3d", "play", "off")
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "play", "off")
+    ctl("hyprwalk", "reset-windows", "forget")
     # SDL's x11 driver in relative mode, as most Steam and Proton games run: played in 3D it must get what it gets in 2D
     machine.execute("pkill -f tkapp[.]py; true")
     ensure_3d(False)
-    g = game_start("--relative", env=f"DISPLAY={x_display()} SDL_VIDEODRIVER=x11", cls="h3dgame-x11")
-    check(item, "h3dgame through XWayland (SDL's x11 driver), relative mode", g and g["xwayland"] and "driver x11" in game_lines(), game_lines()[:4])
+    g = game_start("--relative", env=f"DISPLAY={x_display()} SDL_VIDEODRIVER=x11", cls="hyprwalkgame-x11")
+    check(item, "hyprwalkgame through XWayland (SDL's x11 driver), relative mode", g and g["xwayland"] and "driver x11" in game_lines(), game_lines()[:4])
 
     def moves(mark):
         game_mark(mark)
@@ -3166,9 +3166,9 @@ def x11_checks(item, scale=1):
         return game_lines(mark)
     d2 = moves("x11 2d")
     ensure_3d()
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
-    aim_find("h3dgame-x11")
+    aim_find("hyprwalkgame-x11")
     r, s = play_on()
     d3 = moves("x11 3d")
     note(item, "what SDL's x11 driver got, 2D then 3D", f"{d2[:8]} | {d3[:8]}")
@@ -3176,14 +3176,14 @@ def x11_checks(item, scale=1):
     check(item, "... played in 3D it gets what it gets on the 2D desktop: the same relative motion (100 right, 40 down, then a sweep of 1500), W and a click",
           abs(m3[0] - m2[0]) <= 3 and abs(m3[1] - m2[1]) <= 3 and "key down W" in d3 and any(l.startswith("button down 1") for l in d3),
           f"2D {m2}, 3D {m3}; {[l for l in d3 if not l.startswith(('motion', 'frames'))][:6]}")
-    ctl("hypr3d", "play", "off")
-    machine.execute("pkill -x h3dgame; true")
-    alice(f"DISPLAY={x_display()} setsid -f xterm -class h3dxterm > /dev/null 2>&1")
-    wait_for("xterm", lambda: any(c["class"] == "h3dxterm" for c in json.loads(ctl("-j", "clients"))), 20)
+    ctl("hyprwalk", "play", "off")
+    machine.execute("pkill -x hyprwalkgame; true")
+    alice(f"DISPLAY={x_display()} setsid -f xterm -class hyprwalkxterm > /dev/null 2>&1")
+    wait_for("xterm", lambda: any(c["class"] == "hyprwalkxterm" for c in json.loads(ctl("-j", "clients"))), 20)
     time.sleep(1)
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
-    aim_find("h3dxterm")
+    aim_find("hyprwalkxterm")
     time.sleep(0.5)
     s = st()
     frame(f"{item}-xterm-cursor")
@@ -3191,7 +3191,7 @@ def x11_checks(item, scale=1):
     machine.execute("pkill -x xterm; true")
     ctl("eval", 'hl.config({ input = { accel_profile = "" } })')
     ensure_3d(False)
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     time.sleep(1)
 
@@ -3205,12 +3205,12 @@ def s_x11():
 # ------------------------------------------------------------------ apps and windows in the world
 
 APPS_DIR = f"{HOME}/.local/share/applications"
-FAKE_STEAM = "/tmp/h3d-steam"
-SPOTS = f"{HOME}/.local/state/hypr3d/windows/courtyard.conf"
+FAKE_STEAM = "/tmp/hyprwalk-steam"
+SPOTS = f"{HOME}/.local/state/hyprwalk/windows/courtyard.conf"
 
 
 def desktop_entry(name, text):
-    machine.succeed(f"mkdir -p {APPS_DIR} && cat > {APPS_DIR}/{name}.desktop << 'H3D_EOF'\n[Desktop Entry]\nType=Application\n{text}\nH3D_EOF\n"
+    machine.succeed(f"mkdir -p {APPS_DIR} && cat > {APPS_DIR}/{name}.desktop << 'HYPRWALK_EOF'\n[Desktop Entry]\nType=Application\n{text}\nHYPRWALK_EOF\n"
                     f"chown -R alice:users {HOME}/.local")
 
 
@@ -3276,31 +3276,31 @@ def s_apps():
     ensure_3d(False)
     clean_windows()
     ensure_3d()
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "reset-windows", "forget")
     ensure_3d(False)
     machine.execute("pkill -u alice foot; true")
     # desktop entries (foot's icon, an SVG in hicolor) and favourites
-    desktop_entry("h3d-test-game", f"Name=Test Game\nComment=Game\nExec=h3dgame --title h3dgame --log {GAME_LOG} %U\nIcon=foot\nStartupWMClass=h3dgame")
-    desktop_entry("h3d-chat", "Name=Chat\nExec=foot --app-id discord\nIcon=foot")
-    desktop_entry("h3d-hidden", "Name=Hidden\nExec=true\nNoDisplay=true")
+    desktop_entry("hyprwalk-test-game", f"Name=Test Game\nComment=Game\nExec=hyprwalkgame --title hyprwalkgame --log {GAME_LOG} %U\nIcon=foot\nStartupWMClass=hyprwalkgame")
+    desktop_entry("hyprwalk-chat", "Name=Chat\nExec=foot --app-id discord\nIcon=foot")
+    desktop_entry("hyprwalk-hidden", "Name=Hidden\nExec=true\nNoDisplay=true")
     # a Steam shortcut ("steam steam://rungameid/ID"); the stand-in steam has systemd start the game with SteamAppId, as
     # Steam does
     alice(f"printf '%s\\n' '#!/bin/sh' 'id=${{1##*/}}' 'exec systemd-run --user --quiet --setenv=SteamAppId=$id --setenv=SteamGameId=$id "
-          f"--setenv=SDL_APP_ID=steam_app_$id h3dgame --title steamentry' > {FAKE_STEAM} && chmod +x {FAKE_STEAM}")
-    desktop_entry("h3d-steam-game", f"Name=Steam Test Game\nComment=Play this game on Steam\nExec={FAKE_STEAM} steam://rungameid/43\nIcon=foot\nTerminal=false\nCategories=Game;")
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { apps = "h3d-test-game, Chat, foot --app-id h3d-fav" } } })')
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1")
+          f"--setenv=SDL_APP_ID=steam_app_$id hyprwalkgame --title steamentry' > {FAKE_STEAM} && chmod +x {FAKE_STEAM}")
+    desktop_entry("hyprwalk-steam-game", f"Name=Steam Test Game\nComment=Play this game on Steam\nExec={FAKE_STEAM} steam://rungameid/43\nIcon=foot\nTerminal=false\nCategories=Game;")
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { apps = "hyprwalk-test-game, Chat, foot --app-id hyprwalk-fav" } } })')
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1")
     wait_for("a terminal", lambda: json.loads(ctl("-j", "clients")), 20)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
-    apps = ctlj("hypr3d", "apps")
+    apps = ctlj("hyprwalk", "apps")
     ids = {a["id"]: a for a in apps}
-    check("20", "hyprctl hypr3d apps: the desktop entries, not NoDisplay ones; the game's icon (foot's SVG) found",
-          "h3d-test-game" in ids and "h3d-chat" in ids and "h3d-hidden" not in ids and ids["h3d-test-game"]["icon"] and ids["h3d-test-game"]["exec"] == f"h3dgame --title h3dgame --log {GAME_LOG}",
-          {k: ids.get(k) for k in ("h3d-test-game", "h3d-chat")})
+    check("20", "hyprctl hyprwalk apps: the desktop entries, not NoDisplay ones; the game's icon (foot's SVG) found",
+          "hyprwalk-test-game" in ids and "hyprwalk-chat" in ids and "hyprwalk-hidden" not in ids and ids["hyprwalk-test-game"]["icon"] and ids["hyprwalk-test-game"]["exec"] == f"hyprwalkgame --title hyprwalkgame --log {GAME_LOG}",
+          {k: ids.get(k) for k in ("hyprwalk-test-game", "hyprwalk-chat")})
     press("q")
     time.sleep(1.5)  # icons load a few a frame
     m = menu()
@@ -3311,79 +3311,79 @@ def s_apps():
     frame("apps-page")
     s = st()
     press("1")
-    g = wait_for("the game in the world", lambda: placed("h3dgame"), 30, 0.5)
+    g = wait_for("the game in the world", lambda: placed("hyprwalkgame"), 30, 0.5)
     ahead, right, up = relative(g, s)
-    want, seen = on_screen("h3dgame"), looks(g, s, "h3dgame")
+    want, seen = on_screen("hyprwalkgame"), looks(g, s, "hyprwalkgame")
     check("20", "picked: it starts, and its window opens in front of you, not on the wall: 2 m ahead (a game), as big as on the screen (as fits the view)",
           g and abs(ahead - 2.0) < 0.1 and abs(right) < 0.1 and abs(g["apparent"] - want) < 0.02 and abs(seen - want) < 0.02 and not menu().get("open"),
-          f"ahead {ahead:.2f}, right {right:.2f}, up {up:.2f}, {g['height']:.2f} m tall; looks {g['apparent']:.3f} ({seen:.3f} worked out here), {want:.3f} wanted; {client('h3dgame')['size']}")
+          f"ahead {ahead:.2f}, right {right:.2f}, up {up:.2f}, {g['height']:.2f} m tall; looks {g['apparent']:.3f} ({seen:.3f} worked out here), {want:.3f} wanted; {client('hyprwalkgame')['size']}")
     frame("launched-game")
     # chat apps go left, nearer the middle if too wide to show whole there
-    r = ctl("hypr3d", "launch", "Chat")
+    r = ctl("hyprwalk", "launch", "Chat")
     c = wait_for("the chat app in the world", lambda: placed("discord"), 30, 0.5)
     s = st()
     ahead, right, up = relative(c, s)
     want, side = on_screen("discord"), side_shown(c, "discord", 1.3, -1.0)
-    check("20", "hyprctl hypr3d launch Chat: a chat app (class discord) opens at your left, 1.3 m out, as big as on the screen",
+    check("20", "hyprctl hyprwalk launch Chat: a chat app (class discord) opens at your left, 1.3 m out, as big as on the screen",
           r.startswith("launched") and c and abs(ahead - 1.3) < 0.1 and right < -0.1 and abs(right - side) < 0.05 and abs(c["apparent"] - want) < 0.02,
           f"{r}; ahead {ahead:.2f}, right {right:.2f} ({side:.2f} wanted), {c['height']:.2f} m tall, looks {c['apparent']:.3f}, {want:.3f} wanted; {client('discord')['size']}")
     # a game Steam starts isn't the launched process's: it's known by its class steam_app_ID
-    r = ctl("hypr3d", "launch", "systemd-run --user --setenv=SDL_APP_ID=steam_app_42 h3dgame --title steamfake # steam://rungameid/42")
+    r = ctl("hyprwalk", "launch", "systemd-run --user --setenv=SDL_APP_ID=steam_app_42 hyprwalkgame --title steamfake # steam://rungameid/42")
     g = wait_for("the 'Steam' game in the world", lambda: placed("steam_app_42"), 30, 0.5)
-    ahead, first = relative(g, st())[0], relative(placed("h3dgame"), st())[0]
+    ahead, first = relative(g, st())[0], relative(placed("hyprwalkgame"), st())[0]
     check("20", "launched as a Steam game (steam://rungameid/42) but started by another process: known by its class steam_app_42, in front of you as a game is (10 cm in front of the first game, where it would go)",
           g and abs(first - 2.0) < 0.05 and abs(ahead - 1.9) < 0.02 and abs(g["apparent"] - on_screen("steam_app_42")) < 0.02,
           f"{r}; ahead {ahead:.2f} (the first game {first:.2f}); {g}; {client('steam_app_42')['size']}")
-    ctl("hypr3d", "window", "steam_app_42", "close")
+    ctl("hyprwalk", "window", "steam_app_42", "close")
     # a Steam shortcut by name: the URL is in its command, and the window is tied to the launch by SteamAppId, not by
     # just opening on the 3D monitor
     wait_for("the 'Steam' game gone", lambda: not placed("steam_app_42"), 10, 0.2)
-    r = ctl("hypr3d", "launch", "Steam Test Game")
+    r = ctl("hyprwalk", "launch", "Steam Test Game")
     g = wait_for("the Steam shortcut's game in the world", lambda: placed("steam_app_43"), 30, 0.5)
     ahead = relative(g, st())[0] if g else 0
-    said = [l for l in ctl("hypr3d", "log", "40").splitlines() if "opened a window (steam_app_43)" in l]
+    said = [l for l in ctl("hyprwalk", "log", "40").splitlines() if "opened a window (steam_app_43)" in l]
     check("20", "a Steam shortcut (a desktop entry running \"steam steam://rungameid/43\") launched by name: its game, started by Steam's own process, is the launch's window, in front of you as a game is",
           r.startswith("launched") and g and any("Steam Test Game opened a window" in l for l in said) and abs(ahead - 1.9) < 0.02,
           f"{r}; said {said}; ahead {ahead:.2f}; {g}")
-    ctl("hypr3d", "window", "steam_app_43", "close")
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { app_rules = "h3d-raw: 1.0 0.5 right, h3d-auto: 1.2 auto left" } } })')
+    ctl("hyprwalk", "window", "steam_app_43", "close")
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { app_rules = "hyprwalk-raw: 1.0 0.5 right, hyprwalk-auto: 1.2 auto left" } } })')
     time.sleep(1.5)
-    r = ctl("hypr3d", "launch", "foot --app-id h3d-raw")
-    f = wait_for("the command's window", lambda: placed("h3d-raw"), 30, 0.5)
+    r = ctl("hyprwalk", "launch", "foot --app-id hyprwalk-raw")
+    f = wait_for("the command's window", lambda: placed("hyprwalk-raw"), 30, 0.5)
     ahead, right, up = relative(f, st())
-    check("20", "launch a command, with app_rules \"h3d-raw: 1.0 0.5 right\": 1 m out, 0.5 m tall, to the right",
+    check("20", "launch a command, with app_rules \"hyprwalk-raw: 1.0 0.5 right\": 1 m out, 0.5 m tall, to the right",
           f and right > 0.8 and abs(f["height"] - 0.5) < 0.05, f"{r}; ahead {ahead:.2f}, right {right:.2f}, {f['height']:.2f} m")
-    r = ctl("hypr3d", "launch", "foot --app-id h3d-auto")
-    f = wait_for("the other command's window", lambda: placed("h3d-auto"), 30, 0.5)
+    r = ctl("hyprwalk", "launch", "foot --app-id hyprwalk-auto")
+    f = wait_for("the other command's window", lambda: placed("hyprwalk-auto"), 30, 0.5)
     ahead, right, up = relative(f, st())
-    want, side = on_screen("h3d-auto"), side_shown(f, "h3d-auto", 1.2, -1.0)
-    check("20", "... and with \"h3d-auto: 1.2 auto left\": 1.2 m out, to the left, as big as on the screen",
+    want, side = on_screen("hyprwalk-auto"), side_shown(f, "hyprwalk-auto", 1.2, -1.0)
+    check("20", "... and with \"hyprwalk-auto: 1.2 auto left\": 1.2 m out, to the left, as big as on the screen",
           f and abs(ahead - 1.2) < 0.1 and right < -0.1 and abs(right - side) < 0.05 and abs(f["apparent"] - want) < 0.02,
-          f"{r}; ahead {ahead:.2f}, right {right:.2f} ({side:.2f} wanted), looks {f['apparent']:.3f}, {want:.3f} wanted; {client('h3d-auto')['size']}")
-    ctl("hypr3d", "window", "h3d-auto", "close")
-    wait_for("it closed", lambda: not placed("h3d-auto"), 10, 0.3)
-    ctl("hypr3d", "turn", "-40", "0")
+          f"{r}; ahead {ahead:.2f}, right {right:.2f} ({side:.2f} wanted), looks {f['apparent']:.3f}, {want:.3f} wanted; {client('hyprwalk-auto')['size']}")
+    ctl("hyprwalk", "window", "hyprwalk-auto", "close")
+    wait_for("it closed", lambda: not placed("hyprwalk-auto"), 10, 0.3)
+    ctl("hyprwalk", "turn", "-40", "0")
     time.sleep(0.5)
     s = st()
-    alice("setsid -f foot --app-id h3d-other > /dev/null 2>&1")
-    o = wait_for("the terminal in the world", lambda: placed("h3d-other"), 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-other > /dev/null 2>&1")
+    o = wait_for("the terminal in the world", lambda: placed("hyprwalk-other"), 20, 0.5)
     ahead, right, up = relative(o, s)
-    want = on_screen("h3d-other")
+    want = on_screen("hyprwalk-other")
     check("20", "a terminal opening in 3D, not launched from it (as from a keybind): in front of you, 1.5 m out, as big as on the screen",
-          o and abs(ahead - 1.5) < 0.1 and abs(right) < 0.1 and abs(o["apparent"] - want) < 0.02, f"ahead {ahead:.2f}, right {right:.2f}, looks {o['apparent']:.3f}, {want:.3f} wanted; {client('h3d-other')['size']}")
+          o and abs(ahead - 1.5) < 0.1 and abs(right) < 0.1 and abs(o["apparent"] - want) < 0.02, f"ahead {ahead:.2f}, right {right:.2f}, looks {o['apparent']:.3f}, {want:.3f} wanted; {client('hyprwalk-other')['size']}")
     frame("opened-in-3d")
-    alice("setsid -f foot --app-id h3d-other2 > /dev/null 2>&1")
-    o2 = wait_for("the second terminal in the world", lambda: placed("h3d-other2"), 20, 0.5)
-    o = placed("h3d-other")
+    alice("setsid -f foot --app-id hyprwalk-other2 > /dev/null 2>&1")
+    o2 = wait_for("the second terminal in the world", lambda: placed("hyprwalk-other2"), 20, 0.5)
+    o = placed("hyprwalk-other")
     ahead2, right2, up2 = relative(o2, s)
-    want = on_screen("h3d-other2")
+    want = on_screen("hyprwalk-other2")
     check("20", "... and another right after it: in front of it, 10 cm nearer, as big as on the screen",
           o2 and abs(ahead2 - (relative(o, s)[0] - 0.1)) < 0.02 and abs(right2) < 0.1 and abs(o2["apparent"] - want) < 0.02,
           f"ahead {ahead2:.2f} (the other {relative(o, s)[0]:.2f}), right {right2:.2f}, looks {o2['apparent']:.3f}, {want:.3f} wanted")
-    for cls in ("h3d-other", "h3d-other2"):
-        ctl("hypr3d", "window", cls, "close")
+    for cls in ("hyprwalk-other", "hyprwalk-other2"):
+        ctl("hyprwalk", "window", cls, "close")
         wait_for("it closed", lambda: not placed(cls), 10, 0.3)
-    ctl("hypr3d", "turn", "0", "0")
+    ctl("hyprwalk", "turn", "0", "0")
     time.sleep(0.5)
     a = aim_find("discord")
     press("g")
@@ -3394,29 +3394,29 @@ def s_apps():
     spot = placed("discord")["center"]
     saved = machine.execute(f"cat {SPOTS}")[1]
     check("20", "G, moved, G: the chat app's place is kept, by class, in the courtyard's file", a and "discord" in saved, saved.strip()[-160:])
-    ctl("hypr3d", "window", "discord", "close")
+    ctl("hyprwalk", "window", "discord", "close")
     wait_for("it closed", lambda: not placed("discord"), 10, 0.3)
-    ctl("hypr3d", "launch", "Chat")
+    ctl("hyprwalk", "launch", "Chat")
     c = wait_for("the chat app again", lambda: placed("discord"), 30, 0.5)
     check("20", "launched again, it opens where it was put", math.dist(c["center"], spot) < 0.05, f"{spot} -> {c['center']}")
     # a remembered place behind you is skipped: out there it would look like it never opened
-    ctl("hypr3d", "window", "discord", "close")
+    ctl("hyprwalk", "window", "discord", "close")
     wait_for("it closed", lambda: not placed("discord"), 10, 0.3)
     yaw0 = st()["yaw"]
-    ctl("hypr3d", "turn", f"{yaw0 + 180:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{yaw0 + 180:.1f}", "0")
     time.sleep(0.5)
     s = st()
-    ctl("hypr3d", "launch", "Chat")
+    ctl("hyprwalk", "launch", "Chat")
     c = wait_for("the chat app again", lambda: placed("discord"), 30, 0.5)
     ahead, right, up = relative(c, s)
-    told = ctl("hypr3d", "log", "20")
+    told = ctl("hyprwalk", "log", "20")
     check("20", "launched with its place behind you: in front of you (at the left), not there; its place kept",
           0.3 < ahead < 1.4 and right < 0 and math.dist(c["center"], spot) > 1 and "discord" in machine.execute(f"cat {SPOTS}")[1]
           and "discord: not to its place (out of sight)" in told, f"ahead {ahead:.2f}, right {right:.2f}; {spot} -> {c['center']}; {told.strip()[-200:]}")
-    ctl("hypr3d", "turn", f"{yaw0:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{yaw0:.1f}", "0")
     time.sleep(0.5)
     ensure_3d(False)
-    ctl("hypr3d", "window", "discord", "close")
+    ctl("hyprwalk", "window", "discord", "close")
     time.sleep(1)
     alice("setsid -f foot --app-id discord > /dev/null 2>&1")
     wait_for("it on the desktop", lambda: any(c["class"] == "discord" for c in json.loads(ctl("-j", "clients"))), 20)
@@ -3424,22 +3424,22 @@ def s_apps():
     ensure_3d()
     c = wait_for("it back in its place", lambda: placed("discord"), 10, 0.3)
     check("20", "opened on the 2D desktop, entering 3D takes it to its place", c and math.dist(c["center"], spot) < 0.05, c)
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     aim_find("discord")
     press("x")
     time.sleep(1)
     check("20", "X sends it back to the wall and forgets its place", "discord" not in machine.execute(f"cat {SPOTS}")[1] and not placed("discord"),
           machine.execute(f"cat {SPOTS}")[1].strip()[-120:])
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     press("b")
     time.sleep(0.8)
     m = menu()
     labels = [i["label"] for i in m.get("items", [])]
-    check("20", "B opens the Windows page: the windows, where they are", m.get("path", "").endswith("windows") and "h3dgame" in labels and len(labels) >= 3,
+    check("20", "B opens the Windows page: the windows, where they are", m.get("path", "").endswith("windows") and "hyprwalkgame" in labels and len(labels) >= 3,
           f"{m.get('path')}: {[(i['label'], i['hint']) for i in m.get('items', [])]}")
-    slot = next((i["slot"] for i in m.get("items", []) if i["label"] == "h3dgame"), None)
+    slot = next((i["slot"] for i in m.get("items", []) if i["label"] == "hyprwalkgame"), None)
     press(str(slot or 1))
     m = menu()
     check("20", "... a window's page: focus, bring here, to the wall, pin, bigger, smaller, play, close (asking first)",
@@ -3447,9 +3447,9 @@ def s_apps():
     press("4")
     time.sleep(0.8)
     s = st()
-    g = placed("h3dgame")
+    g = placed("hyprwalkgame")
     ahead, right, up = relative(g, s)
-    pan = next((p for p in panels() if p["kind"] == "window" and p["class"] == "h3dgame"), {})
+    pan = next((p for p in panels() if p["kind"] == "window" and p["class"] == "hyprwalkgame"), {})
     check("20", "Pin to view: it's in the view's top right corner, over the world", g["pinned"] and right > 0.2 and up > 0.05 and ahead > 0.5 and pan.get("front"),
           f"ahead {ahead:.2f}, right {right:.2f}, up {up:.2f}, front {pan.get('front')}")
     menu_closed()
@@ -3457,27 +3457,27 @@ def s_apps():
     rel(300, -80)
     time.sleep(0.6)
     s2 = st()
-    g2 = placed("h3dgame")
+    g2 = placed("hyprwalkgame")
     a2 = relative(g2, s2)
     check("20", "... and stays there as you look around", abs(a2[1] - right) < 0.05 and a2[2] > 0.05, f"right {right:.2f} -> {a2[1]:.2f}, up {a2[2]:.2f} (pitch {s2['pitch']:.0f})")
     frame("pinned-turned")
-    r = ctl("hypr3d", "window", "h3dgame", "unpin")
+    r = ctl("hyprwalk", "window", "hyprwalkgame", "unpin")
     time.sleep(0.5)
     rel(-300, 80)
     time.sleep(0.6)
-    g3 = placed("h3dgame")
+    g3 = placed("hyprwalkgame")
     check("20", "unpinned: it stays where it was in the world", r == "unpinned" and not g3["pinned"] and math.dist(g3["center"], g2["center"]) < 0.02, f"{g2['center']} -> {g3['center']}")
     game_mark("bigger")
-    size0 = next(c["size"] for c in json.loads(ctl("-j", "clients")) if c["class"] == "h3dgame")
-    r = ctl("hypr3d", "window", "h3dgame", "bigger")
+    size0 = next(c["size"] for c in json.loads(ctl("-j", "clients")) if c["class"] == "hyprwalkgame")
+    r = ctl("hyprwalk", "window", "hyprwalkgame", "bigger")
     time.sleep(1.2)
-    cl = next(c for c in json.loads(ctl("-j", "clients")) if c["class"] == "h3dgame")
+    cl = next(c for c in json.loads(ctl("-j", "clients")) if c["class"] == "hyprwalkgame")
     got = [l for l in game_lines("bigger") if l.startswith("size ")]
     check("20", "bigger: its real size, a quarter more (floating now), and the game draws itself at it",
           cl["floating"] and abs(cl["size"][0] - size0[0] * 1.25) <= 2 and got and got[-1] == f"size {cl['size'][0]} {cl['size'][1]}", f"{r}; {size0} -> {cl['size']}; {got}")
-    ctl("hypr3d", "window", "h3dgame", "bring")
+    ctl("hyprwalk", "window", "hyprwalkgame", "bring")
     time.sleep(0.8)
-    aim_find("h3dgame")
+    aim_find("hyprwalkgame")
     press("g")
     size1 = cl["size"]
     qmp([key_event("shift", True)])
@@ -3486,50 +3486,50 @@ def s_apps():
     qmp([key_event("shift", False)])
     time.sleep(1)
     press("g")
-    cl = next(c for c in json.loads(ctl("-j", "clients")) if c["class"] == "h3dgame")
+    cl = next(c for c in json.loads(ctl("-j", "clients")) if c["class"] == "hyprwalkgame")
     check("20", "carrying it, Shift+wheel two notches down: its real size, 0.95 of it a notch", abs(cl["size"][0] - size1[0] * WHEEL_SIZE**2) <= 3, f"{size1} -> {cl['size']}")
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { play_view = "fill" } } })')
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { play_view = "fill" } } })')
     try:
-        aim_find("h3dgame")
+        aim_find("hyprwalkgame")
         press("e")
         press("f")
         s = wait_for("played, fullscreen", lambda: (lambda s: s if s["playing"] else None)(st()), 10, 0.3)
         time.sleep(0.8)
         img = frame("fullscreen-played")
         fill = img.count(game_blue, step=4) / ((img.w // 4) * (img.h // 4))
-        check("20", "the app goes fullscreen (F in it): it's played, filling the view (play_view = fill)", s["playing"]["class"] == "h3dgame" and fill > 0.6, f"{s['playing']}, {fill:.0%}")
+        check("20", "the app goes fullscreen (F in it): it's played, filling the view (play_view = fill)", s["playing"]["class"] == "hyprwalkgame" and fill > 0.6, f"{s['playing']}, {fill:.0%}")
         press("f")
         try:
-            out = wait_for("out of fullscreen", lambda: (lambda c: c if c and c["fullscreen"] == 0 else None)(client("h3dgame")), 10, 0.3)
+            out = wait_for("out of fullscreen", lambda: (lambda c: c if c and c["fullscreen"] == 0 else None)(client("hyprwalkgame")), 10, 0.3)
         except TimeoutError:
             out = None
         time.sleep(0.8)
         s = st()
-        check("20", "... and out of fullscreen (F again): still played, the keys the app's (as on the 2D desktop)", out and (s["playing"] or {}).get("class") == "h3dgame" and s["typing"],
-              f"fullscreen {(client('h3dgame') or {}).get('fullscreen')}; playing {s['playing']}, typing {s['typing']}")
+        check("20", "... and out of fullscreen (F again): still played, the keys the app's (as on the 2D desktop)", out and (s["playing"] or {}).get("class") == "hyprwalkgame" and s["typing"],
+              f"fullscreen {(client('hyprwalkgame') or {}).get('fullscreen')}; playing {s['playing']}, typing {s['typing']}")
         press("meta_l", "esc")
         s = wait_for("walking", lambda: (lambda s: s if s["playing"] is None else None)(st()), 10, 0.3)
         check("20", "... Super+Esc: walking again", s["playing"] is None and s["typing"] is False, s["typing"])
     finally:  # later sections expect the default play_view
-        ctl("eval", 'hl.config({ plugin = { hypr3d = { play_view = "here" } } })')
+        ctl("eval", 'hl.config({ plugin = { hyprwalk = { play_view = "here" } } })')
     time.sleep(0.5)
-    size0 = next(c["size"] for c in json.loads(ctl("-j", "clients")) if c["class"] == "h3dgame")
-    aim_find("h3dgame")
+    size0 = next(c["size"] for c in json.loads(ctl("-j", "clients")) if c["class"] == "hyprwalkgame")
+    aim_find("hyprwalkgame")
     press("e")
     press("m")
     time.sleep(1.5)
-    cl = next(c for c in json.loads(ctl("-j", "clients")) if c["class"] == "h3dgame")
+    cl = next(c for c in json.loads(ctl("-j", "clients")) if c["class"] == "hyprwalkgame")
     s = st()
     check("20", "a maximize request (M in it): bigger, and not played (maximized is one of Hyprland's fullscreen modes too)",
           cl["fullscreen"] == 1 and s["playing"] is None and cl["size"][0] > size0[0], f"fullscreen {cl['fullscreen']}, {size0} -> {cl['size']}; playing {s['playing']}")
     press("m")
     time.sleep(0.8)
-    ctl("hypr3d", "type", "off")
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "type", "off")
+    ctl("hyprwalk", "reset-windows", "forget")
     clean_windows()
     machine.execute("pkill -u alice foot; true")
     ensure_3d(False)
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     time.sleep(1)
 
@@ -3543,8 +3543,8 @@ PAGE_NOT = set()  # windows open before the page's app started
 
 
 def page_window():
-    """the page.html window: its title starts "h3d[H]: ", H the page's height"""
-    return next((c for c in json.loads(ctl("-j", "clients")) if c["title"].startswith("h3d[") and c["address"] not in PAGE_NOT), None)
+    """the page.html window: its title starts "hyprwalk[H]: ", H the page's height"""
+    return next((c for c in json.loads(ctl("-j", "clients")) if c["title"].startswith("hyprwalk[") and c["address"] not in PAGE_NOT), None)
 
 
 def page_title():
@@ -3595,7 +3595,7 @@ def page_dnd_2d(cls):
     ensure_3d(False)
     time.sleep(1.5)
     c = next(x for x in json.loads(ctl("-j", "clients")) if x["class"] == cls)
-    ui = max(0, c["size"][1] - int((re.search(r"^h3d\[(\d+)", c["title"]) or re.search("(0)", "0")).group(1)))
+    ui = max(0, c["size"][1] - int((re.search(r"^hyprwalk\[(\d+)", c["title"]) or re.search("(0)", "0")).group(1)))
     m = next(x for x in json.loads(ctl("-j", "monitors")) if x["focused"])
     w, h = m["width"] / m["scale"], m["height"] / m["scale"]
     to = lambda x, y: tablet((c["at"][0] - m["x"] + x) * 32767 / w, (c["at"][1] - m["y"] + y) * 32767 / h, after=0.05)
@@ -3628,13 +3628,13 @@ def page_checks(item, launch, name, pinch=True, dialog=True, log=None, dnd2d=Fal
     """page.html in `launch` (a browser or Electron), launched from 3D and played"""
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     ctl("eval", 'hl.config({ input = { accel_profile = "flat" } })')
     time.sleep(0.8)
     PAGE_NOT.clear()
     PAGE_NOT.update(x["address"] for x in json.loads(ctl("-j", "clients")))
-    r = ctl("hypr3d", "launch", launch)
+    r = ctl("hyprwalk", "launch", launch)
     try:
         c = wait_for(f"{name} with the page", lambda: (lambda c: c if c and "loading" not in c["title"] else None)(page_window()), 120, 1)
     except TimeoutError:
@@ -3643,13 +3643,13 @@ def page_checks(item, launch, name, pinch=True, dialog=True, log=None, dnd2d=Fal
     time.sleep(2)
     c = page_window()
     cls = c["class"]
-    inner = int((re.search(r"^h3d\[(\d+)", c["title"]) or re.search("(0)", "0")).group(1))
+    inner = int((re.search(r"^hyprwalk\[(\d+)", c["title"]) or re.search("(0)", "0")).group(1))
     ui = max(0, c["size"][1] - inner)  # below the browser's bars
 
     def top():
         """where the page starts now, under the bars (an info bar comes and goes)"""
         c = page_window()
-        m = re.search(r"^h3d\[(\d+)", c["title"]) if c else None
+        m = re.search(r"^hyprwalk\[(\d+)", c["title"]) if c else None
         return max(0, c["size"][1] - int(m.group(1))) if m else ui
 
     def page_to(x, y):
@@ -3725,16 +3725,16 @@ def page_checks(item, launch, name, pinch=True, dialog=True, log=None, dnd2d=Fal
         # which the drag must enter
         page_to(22, 36)
         drag_by(120, 0)
-        ctl("hypr3d", "play", "off")
+        ctl("hyprwalk", "play", "off")
         time.sleep(1)
         a = aim_local(cls, 60, top() + 36)
         wev_mark("dnd")
         qmp([{"type": "btn", "data": {"down": True, "button": "left"}}])
         time.sleep(0.3)
-        ctl("hypr3d", "look", "40", "0")  # moving with the button down starts the drag
+        ctl("hyprwalk", "look", "40", "0")  # moving with the button down starts the drag
         time.sleep(0.6)
         wev_x = next((q["box"][0] for q in panels() if q["kind"] == "window" and q["class"] == "wev"), 0)
-        ctl("hypr3d", "walk", "0.85", "left" if wev_x < logical_size()[0] / 2 else "right")  # towards wev, about 1.3 m
+        ctl("hyprwalk", "walk", "0.85", "left" if wev_x < logical_size()[0] / 2 else "right")  # towards wev, about 1.3 m
         walked_off()
         w = aim_find("wev")
         time.sleep(1.2)
@@ -3746,7 +3746,7 @@ def page_checks(item, launch, name, pinch=True, dialog=True, log=None, dnd2d=Fal
         offers = [r for i, e, r in evs if i == "wl_data_offer" and e == "offer"]
         check(item, "drag and drop between windows, walking: selected text dragged out of the page, the crosshair onto another window (wev), which the drag enters offering it",
               entered and any("text/plain" in o for o in offers), f"from {a and a.get('local')} to {w and w.get('class')}; {[(i, e) for i, e, _ in evs if 'data' in i][:6]}; offers {offers[:3]}")
-        ctl("hypr3d", "spawn")
+        ctl("hyprwalk", "spawn")
         time.sleep(0.8)
         aim_find(cls)
         play_on()
@@ -3755,7 +3755,7 @@ def page_checks(item, launch, name, pinch=True, dialog=True, log=None, dnd2d=Fal
     t = page_said("scrolled")
     check(item, "two fingers on a touchpad scroll it", "scrolled" in t and not t.endswith("scrolled 0"), t)
     # switched to fill while playing (played here it would stay where it is)
-    ctl("hypr3d", "play", "fill")
+    ctl("hyprwalk", "play", "fill")
     wait_for("the camera facing it", lambda: (lambda s: s if s["playing"] and s["playing"]["view"] >= 1 else None)(st()), 10, 0.2)
     page_to(140, 250)
     click("left")
@@ -3768,7 +3768,7 @@ def page_checks(item, launch, name, pinch=True, dialog=True, log=None, dnd2d=Fal
     press("esc")
     t = page_said("fullscreen off")
     check(item, "... Esc: out of fullscreen", "fullscreen off" in t, t)
-    ctl("hypr3d", "play", "here")
+    ctl("hyprwalk", "play", "here")
     if dialog:
         before = {x["address"] for x in json.loads(ctl("-j", "clients"))}
         page_to(420, 150)
@@ -3792,7 +3792,7 @@ def page_checks(item, launch, name, pinch=True, dialog=True, log=None, dnd2d=Fal
             shut = False
         check(item, "... Esc: it closes, and the window is still played", shut and st()["playing"], f"{st()['playing']}")
         if not st()["playing"]:
-            ctl("hypr3d", "window", d["address"], "close")
+            ctl("hyprwalk", "window", d["address"], "close")
             time.sleep(1)
             aim_find(cls)
             play_on()
@@ -3802,13 +3802,13 @@ def page_checks(item, launch, name, pinch=True, dialog=True, log=None, dnd2d=Fal
         touchpad("z1200")
         t = page_said("zoom")
         check(item, "a pinch on the touchpad zooms it (zwp_pointer_gestures_v1)", "zoom" in t and "zoom 1.00" not in t, t)
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
     if log:
         note(item, f"{name}'s log", machine.execute(f"tail -n 5 {log}")[1].strip()[-400:])
-    ctl("hypr3d", "window", cls, "close")
+    ctl("hyprwalk", "window", cls, "close")
     time.sleep(2)
     ctl("eval", 'hl.config({ input = { accel_profile = "" } })')
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "reset-windows", "forget")
 
 
 @section("21", "a browser (Chromium, then Firefox) in 3D: popups, tooltips, the context menu, the clipboard, typing, drag and drop, touchpad scroll and zoom, fullscreen, a file dialog")
@@ -3820,23 +3820,23 @@ def s_browsers():
     machine.execute("pkill -u alice foot; pkill -f chromium; pkill -f firefox; true")
     wev_start()  # on the wall: the cross-window drag's target
     try:
-        page_checks("21", f"chromium --no-first-run --no-default-browser-check --password-store=basic --user-data-dir=/tmp/h3d-chromium file://{PAGE} "
+        page_checks("21", f"chromium --no-first-run --no-default-browser-check --password-store=basic --user-data-dir=/tmp/hyprwalk-chromium file://{PAGE} "
                     "> /tmp/chromium.log 2>&1", "Chromium", log="/tmp/chromium.log", cross=True)
     except Exception as e:  # noqa: BLE001 (Firefox still gets its turn)
         check("21", f"(Chromium: stopped)", False, f"{type(e).__name__}: {e}"[:500])
     machine.execute("pkill -f chromium; true")
     gone("chrom")
     # Firefox: the portal's file chooser, no first-run pages
-    alice("mkdir -p /tmp/h3d-firefox && printf '%s\\n' 'user_pref(\"widget.use-xdg-desktop-portal.file-picker\", 1);' "
+    alice("mkdir -p /tmp/hyprwalk-firefox && printf '%s\\n' 'user_pref(\"widget.use-xdg-desktop-portal.file-picker\", 1);' "
           "'user_pref(\"browser.shell.checkDefaultBrowser\", false);' 'user_pref(\"browser.aboutwelcome.enabled\", false);' "
           "'user_pref(\"datareporting.policy.dataSubmissionPolicyBypassNotification\", true);' "
           "'user_pref(\"browser.startup.homepage_override.mstone\", \"ignore\");' 'user_pref(\"toolkit.telemetry.reportingpolicy.firstRun\", false);' "
-          "> /tmp/h3d-firefox/user.js")
-    page_checks("21", f"firefox --new-instance --profile /tmp/h3d-firefox file://{PAGE} > /tmp/firefox.log 2>&1", "Firefox", log="/tmp/firefox.log")
+          "> /tmp/hyprwalk-firefox/user.js")
+    page_checks("21", f"firefox --new-instance --profile /tmp/hyprwalk-firefox file://{PAGE} > /tmp/firefox.log 2>&1", "Firefox", log="/tmp/firefox.log")
     machine.execute("pkill -f firefox; true")
     gone("firefox")
     ensure_3d(False)
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     time.sleep(1)
 
@@ -3857,7 +3857,7 @@ def s_electron():
         item = "21e"
         machine.execute("rm -f /tmp/electron.log")
         try:
-            page_checks(item, f"H3D_PAGE={PAGE} DISPLAY={x_display()} electron {H}/electron --ozone-platform={ozone} > /tmp/electron.log 2>&1",
+            page_checks(item, f"HYPRWALK_PAGE={PAGE} DISPLAY={x_display()} electron {H}/electron --ozone-platform={ozone} > /tmp/electron.log 2>&1",
                         f"Electron ({ozone})", pinch=False, dialog=False, log="/tmp/electron.log", dnd2d=ozone == "x11")
         except Exception as e:  # noqa: BLE001
             check(item, f"(Electron ({ozone}): stopped)", False, f"{type(e).__name__}: {e}"[:500])
@@ -3867,7 +3867,7 @@ def s_electron():
         gone("electron")
     machine.execute("pkill -f 'bin/[.]?mako'; true")  # .mako-wrapped: -x mako misses it
     ensure_3d(False)
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     time.sleep(1)
 
@@ -3879,8 +3879,8 @@ def s_ime():
     ensure_3d(False)
     clean_windows()
     machine.execute("pkill -u alice foot; pkill -x fcitx5; true")
-    alice("setsid -f foot --app-id h3d-ime > /dev/null 2>&1")
-    wait_for("a terminal", lambda: any(c["class"] == "h3d-ime" for c in json.loads(ctl("-j", "clients"))), 20)
+    alice("setsid -f foot --app-id hyprwalk-ime > /dev/null 2>&1")
+    wait_for("a terminal", lambda: any(c["class"] == "hyprwalk-ime" for c in json.loads(ctl("-j", "clients"))), 20)
     # fcitx5 (zwp_input_method_v2): Ctrl+; lists clipboard entries as candidates in its popup
     # (zwp_input_popup_surface_v2)
     alice("setsid -f fcitx5 -d -r > /tmp/fcitx5.log 2>&1")
@@ -3890,39 +3890,39 @@ def s_ime():
         check("21i", "fcitx5 runs", False, machine.execute("tail -n 20 /tmp/fcitx5.log")[1][-600:])
         return
     time.sleep(1)
-    alice("wl-copy 'h3d clipboard entry'")
+    alice("wl-copy 'hyprwalk clipboard entry'")
     time.sleep(1)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
-    aim_find("h3d-ime")
-    ctl("hypr3d", "type", "on")
+    aim_find("hyprwalk-ime")
+    ctl("hyprwalk", "type", "on")
     time.sleep(0.8)
     press("ctrl", "semicolon")
     try:
-        pops = wait_for("the input method's popup", lambda: popups_of("h3d-ime"), 10, 0.3)
+        pops = wait_for("the input method's popup", lambda: popups_of("hyprwalk-ime"), 10, 0.3)
     except TimeoutError:
         pops = []
     frame("ime-popup")
-    win = next((q for q in panels() if q["kind"] == "window" and q["class"] == "h3d-ime"), None)
+    win = next((q for q in panels() if q["kind"] == "window" and q["class"] == "hyprwalk-ime"), None)
     inside = pops and win and all(win["box"][0] <= q["box"][0] < win["box"][0] + win["box"][2] and win["box"][1] <= q["box"][1] < win["box"][1] + win["box"][3] for q in pops)
     check("21i", "Ctrl+; typing into a terminal: fcitx5's list, its input popup, is drawn over the window in 3D, by the text", inside,
           f"{[q['box'] for q in pops]} over {win and win['box']}; fcitx5-remote {as_alice('fcitx5-remote')[1].strip()}")
     press("esc")
     try:
-        wait_for("the popup to go", lambda: not popups_of("h3d-ime"), 5, 0.3)
+        wait_for("the popup to go", lambda: not popups_of("hyprwalk-ime"), 5, 0.3)
         gone = True
     except TimeoutError:
         gone = False
     check("21i", "... Esc: it goes", gone)
-    ctl("hypr3d", "type", "off")
+    ctl("hyprwalk", "type", "off")
     machine.execute("pkill -x fcitx5; true")
     time.sleep(1)
     ensure_3d(False)
     machine.execute("pkill -u alice foot; true")
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     time.sleep(1)
 
@@ -3986,15 +3986,15 @@ def s_obs():
     machine.succeed(f"mkdir -p {OBS_CFG}/plugin_config/obs-websocket && printf '[General]\\nFirstRun=true\\n' > {OBS_CFG}/user.ini && "
                     f"cp {OBS_CFG}/user.ini {OBS_CFG}/global.ini && echo '{{\"server_enabled\": true, \"server_port\": 4455, \"auth_required\": false, "
                     f"\"alerts_enabled\": false, \"first_load\": false}}' > {OBS_CFG}/plugin_config/obs-websocket/config.json && chown -R alice:users {HOME}/.config")
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1")
     wait_for("a terminal", lambda: json.loads(ctl("-j", "clients")), 20)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     ctl("eval", 'hl.config({ input = { accel_profile = "flat" } })')
     time.sleep(0.8)
-    r = ctl("hypr3d", "launch", "obs --verbose --disable-shutdown-check --disable-missing-files-check --multi > /tmp/obs.log 2>&1")
+    r = ctl("hyprwalk", "launch", "obs --verbose --disable-shutdown-check --disable-missing-files-check --multi > /tmp/obs.log 2>&1")
     v = wait_for("obs-websocket", lambda: obs("GetVersion"), 120, 2)
     c = wait_for("OBS's window", lambda: next((c for c in json.loads(ctl("-j", "clients")) if "obs" in c["class"].lower()), None), 60, 1)
     time.sleep(3)
@@ -4010,25 +4010,25 @@ def s_obs():
     frame("obs-menu")
     check("22", "its File menu opens, a popup of its window in 3D", pops, [p["box"] for p in pops])
     press("esc")
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
     scene = obs("GetCurrentProgramScene")["currentProgramSceneName"]
-    obs("CreateInput", {"sceneName": scene, "inputName": "h3d colour", "inputKind": "color_source_v3", "inputSettings": {"color": 4278190335}})
+    obs("CreateInput", {"sceneName": scene, "inputName": "hyprwalk colour", "inputKind": "color_source_v3", "inputSettings": {"color": 4278190335}})
     before = {x["address"] for x in json.loads(ctl("-j", "clients"))}
-    obs("OpenInputPropertiesDialog", {"inputName": "h3d colour"})
+    obs("OpenInputPropertiesDialog", {"inputName": "hyprwalk colour"})
     d = wait_for("its properties dialog", lambda: next((x for x in json.loads(ctl("-j", "clients")) if x["address"] not in before), None), 30, 0.5)
     time.sleep(1.5)
     pd, po = placed(d["class"]), placed(c["class"])
     frame("obs-dialog")
     check("22", "a dialog of OBS's (a source's properties) opens by it, in the world", pd and po and math.dist(pd["center"], po["center"]) < 1.5,
           f"{d['title']!r}; {pd and pd['center']} by {po and po['center']}")
-    ctl("hypr3d", "window", d["address"], "close")
+    ctl("hyprwalk", "window", d["address"], "close")
     time.sleep(1)
-    obs("RemoveInput", {"inputName": "h3d colour"})
+    obs("RemoveInput", {"inputName": "hyprwalk colour"})
     # a PipeWire capture created through obs-websocket stalls at the portal: it's made off OBS's UI thread, whose GLib
     # loop would take the answer. Saved in the scene collection and OBS launched again, it's made on that thread and the
     # picker opens
-    obs("CreateInput", {"sceneName": scene, "inputName": "h3d screen", "inputKind": "pipewire-screen-capture-source", "inputSettings": {}})
-    ctl("hypr3d", "window", c["address"], "close")
+    obs("CreateInput", {"sceneName": scene, "inputName": "hyprwalk screen", "inputKind": "pipewire-screen-capture-source", "inputSettings": {}})
+    ctl("hyprwalk", "window", c["address"], "close")
     try:
         wait_for("OBS to quit", lambda: machine.execute("pgrep -f '[.]obs-wrapped'")[0] != 0, 30, 0.5)
     except TimeoutError:
@@ -4037,7 +4037,7 @@ def s_obs():
     before = {x["address"] for x in json.loads(ctl("-j", "clients"))}
     # the portal's D-Bus traffic, for a missing picker
     as_alice("DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus setsid -f dbus-monitor --session > /tmp/dbus.log 2>&1", 10)
-    r = ctl("hypr3d", "launch", "obs --verbose --disable-shutdown-check --disable-missing-files-check --multi > /tmp/obs2.log 2>&1")
+    r = ctl("hyprwalk", "launch", "obs --verbose --disable-shutdown-check --disable-missing-files-check --multi > /tmp/obs2.log 2>&1")
     picker = lambda x: x["address"] not in before and ("share" in x["title"].lower() or "share-picker" in x["class"])
     try:
         pk = wait_for("the portal's picker", lambda: next((x for x in json.loads(ctl("-j", "clients")) if picker(x)), None), 90, 0.5)
@@ -4055,7 +4055,7 @@ def s_obs():
     check("22", "the portal's screen picker opens in front of you", pp, f"{pk['class']} {pk['title']!r} {pk['size']}; {pp}")
     note("22", "the picker's panels", [(q["kind"], q["class"], q["box"]) for q in panels() if q["class"] == pk["class"]])
     # played by address: the picker's class is empty
-    r = ctl("hypr3d", "window", pk["address"], "play")
+    r = ctl("hyprwalk", "window", pk["address"], "play")
     wait_for("play mode", lambda: play_settled(st()), 10, 0.2)
     # the first button of its Screen tab
     pointer_to(pk["size"][0] / 2, 70)
@@ -4063,17 +4063,17 @@ def s_obs():
     time.sleep(1)
     gone = wait_for("the picker to go", lambda: not any(x["address"] == pk["address"] for x in json.loads(ctl("-j", "clients"))), 15, 0.5)
     check("22", "... a click on its screen in 3D picks it", gone, machine.execute("grep -a '\\[pipewire\\]' /tmp/obs2.log | tail -n 4")[1][-300:])
-    ctl("hypr3d", "play", "off")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "play", "off")
+    ctl("hyprwalk", "spawn")
     time.sleep(3)
-    obs("GetSourceScreenshot", {"sourceName": "h3d screen", "imageFormat": "bmp", "imageWidth": 320}, save="/tmp/obs-shot.bmp")
+    obs("GetSourceScreenshot", {"sourceName": "hyprwalk screen", "imageFormat": "bmp", "imageWidth": 320}, save="/tmp/obs-shot.bmp")
     shot = bmp("/tmp/obs-shot.bmp")
     view = frame("obs-capturing")
     a, b = mean_rgb(shot), mean_rgb(view)
     (FRAMES / "obs-capture.ppm").write_bytes(f"P6 {shot.w} {shot.h} 255\n".encode() + shot.px)
     check("22", "OBS's screen capture shows the 3D view (its colours are the frame's)", shot.w == 320 and max(abs(a[k] - b[k]) for k in range(3)) < 25, f"OBS {a}, the frame {b}")
-    t = next(x for x in json.loads(ctl("-j", "clients")) if x["class"] == "h3d-left")
-    ctl("hypr3d", "window", "h3d-left", "bring")
+    t = next(x for x in json.loads(ctl("-j", "clients")) if x["class"] == "hyprwalk-left")
+    ctl("hyprwalk", "window", "hyprwalk-left", "bring")
     time.sleep(1)
     status, _ = as_alice(f"grim -T {t['stableId']} -t ppm /tmp/window.ppm", 30)
     ok = status == 0
@@ -4084,15 +4084,15 @@ def s_obs():
         (FRAMES / "placed-window-capture.ppm").write_bytes((RAW / "window.ppm").read_bytes())
     check("22", "a placed window captured as a window (grim -T, ext-image-copy-capture): the window, at its size", ok and img and abs(img.w - t["size"][0]) <= 2,
           f"grim {status}; {img and (img.w, img.h)} vs {t['size']}")
-    obs("RemoveInput", {"inputName": "h3d screen"})
-    ctl("hypr3d", "window", c["class"], "close")
+    obs("RemoveInput", {"inputName": "hyprwalk screen"})
+    ctl("hyprwalk", "window", c["class"], "close")
     time.sleep(3)
     machine.execute("pkill -x obs; true")
     ctl("eval", 'hl.config({ input = { accel_profile = "" } })')
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "reset-windows", "forget")
     ensure_3d(False)
     machine.execute("pkill -u alice foot; true")
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     time.sleep(1)
 
@@ -4108,14 +4108,14 @@ def s_games():
     machine.execute("pkill -u alice foot; pkill -f chocolate-doom; pkill -f supertux; true")
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     # 2D first: how far the mouse turns Doom there
     ensure_3d(False)
     d2 = {}
     for driver in ("wayland", "x11"):
-        alice(f"SDL_VIDEODRIVER={driver} DISPLAY={x_display()} SDL_APP_ID=chocolate-doom setsid -f chocolate-doom -iwad /etc/h3d/freedoom2.wad -window "
+        alice(f"SDL_VIDEODRIVER={driver} DISPLAY={x_display()} SDL_APP_ID=chocolate-doom setsid -f chocolate-doom -iwad /etc/hyprwalk/freedoom2.wad -window "
               f"-geometry 960x600 -nosound -nomusic -warp 1 -skill 3 > /tmp/doom-2d-{driver}.log 2>&1")
         c = wait_for("Chocolate Doom's window", lambda: next((c for c in json.loads(ctl("-j", "clients")) if "doom" in c["class"].lower()), None), 60, 1)
         time.sleep(4)
@@ -4129,12 +4129,12 @@ def s_games():
         machine.execute("pkill -f chocolate-doom; true")
         gone("doom")
     ensure_3d()
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     for driver in ("wayland", "x11"):
         item = "23"
         env = f"SDL_VIDEODRIVER={driver} DISPLAY={x_display()} SDL_APP_ID=chocolate-doom"
-        r = ctl("hypr3d", "launch", f"{env} chocolate-doom -iwad /etc/h3d/freedoom2.wad -window -geometry 960x600 -nosound -nomusic -warp 1 -skill 3 "
+        r = ctl("hyprwalk", "launch", f"{env} chocolate-doom -iwad /etc/hyprwalk/freedoom2.wad -window -geometry 960x600 -nosound -nomusic -warp 1 -skill 3 "
                 f"> /tmp/doom-{driver}.log 2>&1")
         c = wait_for("Chocolate Doom's window", lambda: next((c for c in json.loads(ctl("-j", "clients")) if "doom" in c["class"].lower()), None), 60, 1)
         time.sleep(4)
@@ -4156,11 +4156,11 @@ def s_games():
               f"{c['class']} xwayland {c['xwayland']}; locked {p and p['locked']}; turned {d_turn:.0%} (on the 2D desktop {d2[driver]:.0%}), walked {d_walk:.0%}")
         note(item, f"Chocolate Doom ({driver}): 3D frames a second while played", st()["fps"])
         press("meta_l", "esc")
-        ctl("hypr3d", "window", c["class"], "close")
+        ctl("hyprwalk", "window", c["class"], "close")
         time.sleep(1.5)
         machine.execute("pkill -f chocolate-doom; true")
         time.sleep(1)
-    r = ctl("hypr3d", "launch", "supertux2 > /tmp/supertux.log 2>&1")
+    r = ctl("hyprwalk", "launch", "supertux2 > /tmp/supertux.log 2>&1")
     c = wait_for("SuperTux's window", lambda: next((c for c in json.loads(ctl("-j", "clients")) if "supertux" in c["class"].lower()), None), 90, 1)
     time.sleep(8)  # its title screen
     aim_find(c["class"])
@@ -4177,12 +4177,12 @@ def s_games():
     d_keys, d_pad = a.differs(b), b.differs(e)
     check("23", "SuperTux: played, its menu moves with the keys and with a controller", d_keys > 0.002 and d_pad > 0.002, f"keys {d_keys:.2%}, controller {d_pad:.2%} of the frame changed")
     press("meta_l", "esc")
-    ctl("hypr3d", "window", c["class"], "close")
+    ctl("hyprwalk", "window", c["class"], "close")
     time.sleep(1.5)
     machine.execute("pkill -f supertux; true")
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "reset-windows", "forget")
     ensure_3d(False)
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     time.sleep(1)
 
@@ -4212,35 +4212,35 @@ def s_perf():
     note("24", "on the 2D desktop, the game draws", f"{d2['game']} frames a second (vsync: FIFO or frame callbacks)")
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
     walk = frame_rates("walking")
     note("24", "3D, first person, 4 windows on the wall", walk)
-    ctl("hypr3d", "view", "third")
+    ctl("hyprwalk", "view", "third")
     time.sleep(1)
     third = frame_rates("third person")
     note("24", "... in third person (the avatar drawn)", third)
-    ctl("hypr3d", "view", "first")
-    aim_find("h3dgame")
-    ctl("hypr3d", "grab")
-    ctl("hypr3d", "place")
+    ctl("hyprwalk", "view", "first")
+    aim_find("hyprwalkgame")
+    ctl("hyprwalk", "grab")
+    ctl("hyprwalk", "place")
     play_on("fill")
     play = frame_rates("playing")
     note("24", "... the game played (placed in the world, the camera facing it: Shift+P)", play)
-    ctl("hypr3d", "play", "off")
-    ctl("hypr3d", "window", "wev", "pin")
+    ctl("hyprwalk", "play", "off")
+    ctl("hyprwalk", "window", "wev", "pin")
     time.sleep(1)
     pin = frame_rates("pinned")
     note("24", "... and wev pinned to the view", pin)
     check("24", "the game keeps drawing behind the 3D view, at its frame rate (frame callbacks, presentation, FIFO at the 3D view's pace)",
           all(r["game"] and min(r["game"]) > 0 and abs(r["game"][-1] - r["fps"]) < max(4, 0.35 * r["fps"]) for r in (walk, play)),
           {"walking": walk, "playing": play})
-    # direct scanout (render:direct_scanout = 1) on the 2D desktop vs played in 3D, where hypr3d blocks it
-    ctl("hypr3d", "window", "wev", "unpin")
+    # direct scanout (render:direct_scanout = 1) on the 2D desktop vs played in 3D, where hyprwalk blocks it
+    ctl("hyprwalk", "window", "wev", "unpin")
     ensure_3d(False)
     ctl("eval", 'hl.config({ render = { direct_scanout = 1 } })')
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3dgame" })')
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalkgame" })')
     time.sleep(0.5)
     press("f")
     time.sleep(2.5)
@@ -4249,18 +4249,18 @@ def s_perf():
     note("24", "the game fullscreen on the 2D desktop, direct scanout allowed", f"game {fs2d['game']} frames a second; directScanoutTo {m.get('directScanoutTo')}, "
          f"blocked by {m.get('directScanoutBlockedBy')}")
     ensure_3d()
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
-    aim_find("h3dgame")
+    aim_find("hyprwalkgame")
     play_on("fill")
     fs3d = frame_rates("fullscreen played")
     m = json.loads(ctl("-j", "monitors"))[0]
     note("24", "... and fullscreen, played in 3D", f"{fs3d}; directScanoutTo {m.get('directScanoutTo')}, blocked by {m.get('directScanoutBlockedBy')}")
     press("f")
     time.sleep(0.8)
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
     ctl("eval", 'hl.config({ render = { direct_scanout = 0 } })')
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "reset-windows", "forget")
     clean_windows()
     ensure_3d(False)
 
@@ -4270,7 +4270,7 @@ def shell_overlay(on=True):
     machine.execute("pkill -f 'quickshell -p'; true")
     if on:
         alice(f"setsid -f quickshell -p {H}/overlay.qml > /tmp/quickshell.log 2>&1")
-        wait_for("the overlay", lambda: "h3d-overlay" in ctl("-j", "layers"), 30)
+        wait_for("the overlay", lambda: "hyprwalk-overlay" in ctl("-j", "layers"), 30)
         time.sleep(0.5)
 
 
@@ -4282,41 +4282,41 @@ def s_overlay():
     shell_overlay()
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1.0)
     s = st()
     check("25", "the crosshair on the overlay's band (it takes input there): the overlay", (s.get("aimed") or {}).get("kind") == "layer", s.get("aimed"))
-    r = ctl("hypr3d", "aim", "h3d-left")
+    r = ctl("hyprwalk", "aim", "hyprwalk-left")
     time.sleep(0.8)
     s = st()
     aimed = s.get("aimed") or {}
-    check("25", "on the terminal behind its see-through part: the terminal, not the overlay", aimed.get("kind") == "window" and aimed.get("class") == "h3d-left", f"{r}; {aimed}")
+    check("25", "on the terminal behind its see-through part: the terminal, not the overlay", aimed.get("kind") == "window" and aimed.get("class") == "hyprwalk-left", f"{r}; {aimed}")
     click("left")
     time.sleep(0.5)
     active = json.loads(ctl("-j", "activewindow") or "{}").get("class")
-    check("25", "... a click there focuses the terminal", active == "h3d-left", active)
+    check("25", "... a click there focuses the terminal", active == "hyprwalk-left", active)
     frame("overlay-3d")
     ensure_3d(False)
     shell_overlay(False)
 
 
-@section("25h", "H and Shift+H, the keys (with a shell's overlay over the desktop, as on a user's): H picks a window up and puts it down where you point, as G does, by a wall too; Shift+H pins one to the view and takes it back into your hands; the one carried, two pinned, the Action Menu open, hyprctl hypr3d grab and pin")
+@section("25h", "H and Shift+H, the keys (with a shell's overlay over the desktop, as on a user's): H picks a window up and puts it down where you point, as G does, by a wall too; Shift+H pins one to the view and takes it back into your hands; the one carried, two pinned, the Action Menu open, hyprctl hyprwalk grab and pin")
 def s_pin_key():
     lua_session()
     ensure_plugin()
     ensure_3d(False)
     clean_windows()
-    for cls in ("h3d-left", "h3d-right"):  # section 20 leaves only the left one
+    for cls in ("hyprwalk-left", "hyprwalk-right"):  # section 20 leaves only the left one
         if not any(c["class"] == cls for c in json.loads(ctl("-j", "clients"))):
             alice(f"setsid -f foot --app-id {cls} > /dev/null 2>&1")
             wait_for(cls, lambda: any(c["class"] == cls for c in json.loads(ctl("-j", "clients"))), 20)
     shell_overlay()
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "reset-windows", "forget")
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "reset-windows", "forget")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1.0)
 
     def pins():
@@ -4326,23 +4326,23 @@ def s_pin_key():
         return next((p["class"] for p in windows3d()["placed"] if p["held"]), None)
 
     def errors(text):
-        return ctl("hypr3d", "log").count(text)
+        return ctl("hyprwalk", "log").count(text)
 
     def fresh():
-        ctl("hypr3d", "reset-windows", "forget")
-        ctl("hypr3d", "spawn")
+        ctl("hyprwalk", "reset-windows", "forget")
+        ctl("hyprwalk", "spawn")
         time.sleep(1.0)
 
-    a = aim_find("h3d-left")
+    a = aim_find("hyprwalk-left")
     press("h")
-    s, g = st(), placed("h3d-left")
+    s, g = st(), placed("hyprwalk-left")
     check("25h", "H on a terminal on the wall, through the overlay's see-through part: picked up, as G does",
           a and g and g["held"] and not g["pinned"] and s["holding"] is True, f"aimed {a}; {g}; holding {s['holding']}")
-    ctl("hypr3d", "walk", "1.5", "back")  # about 2 m
+    ctl("hyprwalk", "walk", "1.5", "back")  # about 2 m
     rel(250, 0)
     walked_off()
     w1 = settled()
-    s1, g1 = st(), placed("h3d-left")
+    s1, g1 = st(), placed("hyprwalk-left")
     moved = math.dist(s1["eye"], s["eye"])
     check("25h", "walked back and turned: it goes along, its middle where you look",
           g1 and g1["held"] and moved > 1 and off_middle(g1, s1) < 1.5 and math.dist(g1["center"], g["center"]) > 0.5,
@@ -4350,72 +4350,72 @@ def s_pin_key():
     frame("h-carried")
     press("h")
     time.sleep(0.3)
-    s2, g2 = st(), placed("h3d-left")
+    s2, g2 = st(), placed("hyprwalk-left")
     check("25h", "H again: put down there, where you point, and carried no more",
           g2 and not g2["held"] and not g2["pinned"] and s2["holding"] is False and off_middle(g2, s2) < 1.5 and math.dist(g2["center"], g1["center"]) < 0.02,
           f"{g1['center']} -> {g2 and g2['center']}; {off_middle(g2, s2):.2f} degrees off the middle")
-    ctl("hypr3d", "walk", "0.5", "left")  # stays on its front side
+    ctl("hyprwalk", "walk", "0.5", "left")  # stays on its front side
     rel(-400, 0)
     walked_off()
-    g3 = placed("h3d-left")
+    g3 = placed("hyprwalk-left")
     check("25h", "... and it stays there as you walk away and look around", g3 and not g3["held"] and math.dist(g3["center"], g2["center"]) < 0.02,
           f"{g2['center']} -> {g3 and g3['center']}")
-    ctl("hypr3d", "aim", "h3d-left")
+    ctl("hyprwalk", "aim", "hyprwalk-left")
     time.sleep(0.8)
     frame("h-put-down")
     a = st()["aimed"]
     press("g")
     s4 = st()
     press("h")
-    check("25h", "G picks it up and H puts it down (one carrying, whichever key)", a and a["class"] == "h3d-left" and s4["holding"] is True and st()["holding"] is False,
+    check("25h", "G picks it up and H puts it down (one carrying, whichever key)", a and a["class"] == "hyprwalk-left" and s4["holding"] is True and st()["holding"] is False,
           f"aimed {a}; holding {s4['holding']} -> {st()['holding']}")
 
     # the south gate's doors (face at z 21.88) 0.6 m ahead, nearer than it's held
     fresh()
-    a = aim_find("h3d-left")
+    a = aim_find("hyprwalk-left")
     press("h")
-    ctl("hypr3d", "tp", "0", "0", "21.3")
-    ctl("hypr3d", "turn", "180", "0")
+    ctl("hyprwalk", "tp", "0", "0", "21.3")
+    ctl("hyprwalk", "turn", "180", "0")
     time.sleep(1.0)
     settled()
     press("h")
     time.sleep(0.5)
-    s, g = st(), placed("h3d-left")
+    s, g = st(), placed("hyprwalk-left")
     check("25h", "carried to the gate, the doors 0.6 m ahead: H puts it flat on them, where you point",
           a and g and not g["held"] and 21.8 < g["center"][2] < 21.88 and off_middle(g, s) < 3 and abs(g["distance"] - 0.56) < 0.1,
           f"{g and g['center']}, {g and g['distance']} m from the eye, {off_middle(g, s):.2f} degrees off the middle")
     frame("h-on-the-doors")
 
     fresh()
-    ctl("hypr3d", "turn", "0", "70")
+    ctl("hyprwalk", "turn", "0", "70")
     time.sleep(0.8)
     n = errors("point the crosshair at a window to pick it up")
     press("h")
     check("25h", "H at the sky: nothing picked up, and a notification says to point at a window",
           st()["holding"] is False and not windows3d()["placed"] and errors("point the crosshair at a window to pick it up") == n + 1, f"{windows3d()}; aimed {st()['aimed']}")
 
-    ctl("hypr3d", "turn", "0", "0")
-    a = aim_find("h3d-right")
+    ctl("hyprwalk", "turn", "0", "0")
+    a = aim_find("hyprwalk-right")
     press("shift", "h")
-    s, g = st(), placed("h3d-right")
+    s, g = st(), placed("hyprwalk-right")
     ahead, right, up = relative(g, s) if g else (0, 0, 0)
-    pan = next((p for p in panels() if p["kind"] == "window" and p["class"] == "h3d-right"), {})
+    pan = next((p for p in panels() if p["kind"] == "window" and p["class"] == "hyprwalk-right"), {})
     check("25h", "Shift+H on a terminal on the wall: pinned to the view's top right corner, over the world",
           a and g and g["pinned"] and not g["held"] and right > 0.2 and up > 0.05 and pan.get("front"), f"aimed {a}; {g}; ahead {ahead:.2f} right {right:.2f} up {up:.2f}")
     frame("shift-h-pinned")
-    ctl("hypr3d", "walk", "0.6", "back")
+    ctl("hyprwalk", "walk", "0.6", "back")
     time.sleep(1.2)
     press("shift", "h")
     w, s = windows3d(), st()
-    g = placed("h3d-right")
+    g = placed("hyprwalk-right")
     check("25h", "walked back, Shift+H again: out of the corner into your hands, as big as it was on the wall, as far off as it was",
           g and g["held"] and not g["pinned"] and s["holding"] is True and w["hold"] and abs(w["hold"]["size"] - 1) < 0.02 and 3.5 < w["hold"]["dist"] < 5,
           f"{g}; hold {w['hold']}")
     settled()
-    s1, g1 = st(), placed("h3d-right")
+    s1, g1 = st(), placed("hyprwalk-right")
     press("h")
     time.sleep(0.3)
-    g2 = placed("h3d-right")
+    g2 = placed("hyprwalk-right")
     check("25h", "... and H puts it down where you point", g2 and not g2["held"] and not g2["pinned"] and off_middle(g1, s1) < 1.5 and math.dist(g2["center"], g1["center"]) < 0.02,
           f"{off_middle(g1, s1):.2f} degrees off the middle; {g1['center']} -> {g2 and g2['center']}")
     press("shift", "h")  # under the crosshair: pinned again
@@ -4425,20 +4425,20 @@ def s_pin_key():
     press("esc")
     s = st()
     check("25h", "pinned again, taken back, then Esc: back in the view's corner, and 3D stays on",
-          p1.get("h3d-right") is True and h1 == "h3d-right" and pins().get("h3d-right") is True and s["holding"] is False and s["mode"] == "active", f"{p1}, held {h1} -> {pins()}; {s['mode']}")
+          p1.get("hyprwalk-right") is True and h1 == "hyprwalk-right" and pins().get("hyprwalk-right") is True and s["holding"] is False and s["mode"] == "active", f"{p1}, held {h1} -> {pins()}; {s['mode']}")
 
     fresh()
-    a = aim_find("h3d-right")
+    a = aim_find("hyprwalk-right")
     press("h")
     h0 = held()
     press("shift", "h")
     p = pins()
     check("25h", "carrying a terminal (H), Shift+H pins it, not what's behind it: carried no more",
-          a and h0 == "h3d-right" and p.get("h3d-right") and not p.get("h3d-left") and st()["holding"] is False, f"aimed {a and a.get('class')}, held {h0}; {p}")
+          a and h0 == "hyprwalk-right" and p.get("hyprwalk-right") and not p.get("hyprwalk-left") and st()["holding"] is False, f"aimed {a and a.get('class')}, held {h0}; {p}")
 
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "reset-windows", "forget")
     time.sleep(1.0)
-    r = [ctl("hypr3d", "window", "h3d-left", "pin"), ctl("hypr3d", "window", "h3d-right", "pin")]
+    r = [ctl("hyprwalk", "window", "hyprwalk-left", "pin"), ctl("hyprwalk", "window", "hyprwalk-right", "pin")]
     p0 = pins()
     press("shift", "h")
     p1, h1 = pins(), held()
@@ -4447,45 +4447,45 @@ def s_pin_key():
     p2, h2 = pins(), held()
     press("h")
     check("25h", "two pinned: Shift+H takes the last one pinned into your hands (H puts it down), Shift+H again the other",
-          r == ["pinned", "pinned"] and p0 == {"h3d-left": True, "h3d-right": True} and p1 == {"h3d-left": True, "h3d-right": False} and h1 == "h3d-right"
-          and p2 == {"h3d-left": False, "h3d-right": False} and h2 == "h3d-left" and st()["holding"] is False, f"{r}; {p0} -> {p1} (held {h1}) -> {p2} (held {h2})")
+          r == ["pinned", "pinned"] and p0 == {"hyprwalk-left": True, "hyprwalk-right": True} and p1 == {"hyprwalk-left": True, "hyprwalk-right": False} and h1 == "hyprwalk-right"
+          and p2 == {"hyprwalk-left": False, "hyprwalk-right": False} and h2 == "hyprwalk-left" and st()["holding"] is False, f"{r}; {p0} -> {p1} (held {h1}) -> {p2} (held {h2})")
 
     fresh()
-    a = aim_find("h3d-left")
-    ctl("hypr3d", "window", "h3d-right", "pin")
+    a = aim_find("hyprwalk-left")
+    ctl("hyprwalk", "window", "hyprwalk-right", "pin")
     press("tab")
     n = errors("close the Action Menu first")
     press("h")
     press("shift", "h")
     s0, p0 = st(), pins()
     check("25h", "the Action Menu open (the crosshair hidden): H picks nothing up, Shift+H doesn't take the pinned one back, and they say to close the menu",
-          a and menu().get("open") and s0["holding"] is False and p0 == {"h3d-right": True} and errors("close the Action Menu first") == n + 2, f"{p0}; holding {s0['holding']}; menu {menu().get('open')}")
+          a and menu().get("open") and s0["holding"] is False and p0 == {"hyprwalk-right": True} and errors("close the Action Menu first") == n + 2, f"{p0}; holding {s0['holding']}; menu {menu().get('open')}")
     press("esc", after=0.05)
     press("h")  # at once, while the menu fades
     h1 = held()
     press("h")
     check("25h", "... closed (H at once, as it fades), H picks up; H again puts it down",
-          h1 == "h3d-left" and st()["holding"] is False and not menu().get("open"), f"held {h1}; holding {st()['holding']}")
+          h1 == "hyprwalk-left" and st()["holding"] is False and not menu().get("open"), f"held {h1}; holding {st()['holding']}")
 
     fresh()
-    a = aim_find("h3d-right")
-    r1 = ctl("hypr3d", "pin")
+    a = aim_find("hyprwalk-right")
+    r1 = ctl("hyprwalk", "pin")
     p1 = pins()
-    r2 = ctl("hypr3d", "pin")
+    r2 = ctl("hyprwalk", "pin")
     h2 = held()
-    r3 = ctl("hypr3d", "grab")
+    r3 = ctl("hyprwalk", "grab")
     p3 = pins()
-    check("25h", "hyprctl hypr3d pin: pins the window under the crosshair, then takes it back into your hands, as Shift+H does; hyprctl hypr3d grab puts it down, as H does",
-          a and r1 == "pinned" and p1.get("h3d-right") is True and r2 == "holding" and h2 == "h3d-right" and r3 == "placed" and p3.get("h3d-right") is False and st()["holding"] is False,
+    check("25h", "hyprctl hyprwalk pin: pins the window under the crosshair, then takes it back into your hands, as Shift+H does; hyprctl hyprwalk grab puts it down, as H does",
+          a and r1 == "pinned" and p1.get("hyprwalk-right") is True and r2 == "holding" and h2 == "hyprwalk-right" and r3 == "placed" and p3.get("hyprwalk-right") is False and st()["holding"] is False,
           f"{r1} {p1}; {r2} held {h2}; {r3} {p3}")
 
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "reset-windows", "forget")
     ensure_3d(False)
     shell_overlay(False)
 
 
 LAUNCHER = f"{H}/launcher.qml"
-LAUNCHER_LOG = "/tmp/h3d-launcher.log"
+LAUNCHER_LOG = "/tmp/hyprwalk-launcher.log"
 
 
 def launcher_log():
@@ -4520,17 +4520,17 @@ def s_launcher():
     r = ctl("eval", f'hl.bind("SUPER + D", hl.dsp.exec_cmd("quickshell ipc -p {LAUNCHER} call launcher toggle"))')
     # 2D first
     press("meta_l", "d")
-    wait_for("the launcher", lambda: "h3d-launcher" in ctl("-j", "layers"), 10)
+    wait_for("the launcher", lambda: "hyprwalk-launcher" in ctl("-j", "layers"), 10)
     time.sleep(0.8)
     frame("launcher-2d")
     press("esc")
-    wait_for("the launcher gone", lambda: "h3d-launcher" not in ctl("-j", "layers"), 10)
+    wait_for("the launcher gone", lambda: "hyprwalk-launcher" not in ctl("-j", "layers"), 10)
     check("26", "on the 2D desktop Super+D opens the launcher and Esc closes it", "open" in launcher_log() and "escape" in launcher_log(), f"{r}; {launcher_log()}")
 
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1.0)
     feet = st()["feet"]
     n = len(launcher_log())
@@ -4538,7 +4538,7 @@ def s_launcher():
     sh = wait_for("the launcher over the 3D view", shell_layer, 10)
     time.sleep(0.8)
     check("26", "Super+D in 3D (the keybind still Hyprland's): its launcher comes over the 3D view, with the keys and the mouse",
-          sh.get("namespace") == "h3d-launcher" and st()["mode"] == "active", sh)
+          sh.get("namespace") == "hyprwalk-launcher" and st()["mode"] == "active", sh)
     img = frame("launcher-3d")
     cx, cy = img.w // 2, img.h // 2
 
@@ -4611,7 +4611,7 @@ def s_launcher():
         return r < 60 and g > 170 and b < 140
     got = img.count(green, (cx - 150, cy - 50, cx + 150, cy + 50), step=4) / (75 * 25)
     check("26", "one that takes the keyboard exclusively (as rofi and fuzzel do): over the view too, in the middle, typed into",
-          sh.get("namespace") == "h3d-exclusive" and got > 0.6 and "exclusive text hi" in launcher_log(), f"{sh}; {got:.0%} green; {launcher_log()[-2:]}")
+          sh.get("namespace") == "hyprwalk-exclusive" and got > 0.6 and "exclusive text hi" in launcher_log(), f"{sh}; {got:.0%} green; {launcher_log()[-2:]}")
     press("esc")
     wait_for("the exclusive one closed", lambda: not shell_layer(), 10)
     feet = st()["feet"]
@@ -4651,13 +4651,13 @@ def s_gait():
     ensure_plugin()
     ensure_3d(False)
     clean_windows()
-    ctl("hypr3d", "map", "none")
+    ctl("hyprwalk", "map", "none")
     ensure_avatar(AV)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "third")
-    ctl("hypr3d", "tp", "0", "0", "6")
-    ctl("hypr3d", "turn", "180", "0")  # away from the desktop wall
+    ctl("hyprwalk", "view", "third")
+    ctl("hyprwalk", "tp", "0", "0", "6")
+    ctl("hyprwalk", "turn", "180", "0")  # away from the desktop wall
     time.sleep(1.5)
     g = gait()
     check("27", "standing: walked procedurally (the avatar has no clips), both feet down",
@@ -4685,25 +4685,25 @@ def s_gait():
           [(round(x["speed"], 2), x["run"], round(x["duty"], 2)) for x in moving[:4]])
     time.sleep(2.0)
 
-    r = ctl("eval", "hl.config({ plugin = { hypr3d = { walk_speed = 1.2 } } })")
+    r = ctl("eval", "hl.config({ plugin = { hyprwalk = { walk_speed = 1.2 } } })")
     time.sleep(0.5)
-    ctl("hypr3d", "tp", "0", "0", "6")
+    ctl("hyprwalk", "tp", "0", "0", "6")
     time.sleep(0.5)
     seen = walking(["w"], 1.0)
     speeds = [x["speed"] for x in seen if x.get("moving")]
-    check("27", "plugin:hypr3d:walk_speed set at run time (hl.config() through hyprctl eval, 1.2): walks at that", speeds and all(abs(v - 1.2) < 0.15 for v in speeds), f"eval: {r}; {speeds}")
-    ctl("eval", "hl.config({ plugin = { hypr3d = { walk_speed = 1.6 } } })")
+    check("27", "plugin:hyprwalk:walk_speed set at run time (hl.config() through hyprctl eval, 1.2): walks at that", speeds and all(abs(v - 1.2) < 0.15 for v in speeds), f"eval: {r}; {speeds}")
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { walk_speed = 1.6 } } })")
     time.sleep(0.5)
 
     # the courtyard's east corner: a 0.45 m step (x 6.2-6.8) onto a 0.9 m platform (from x 6.8), z 18-20
-    ctl("hypr3d", "tp", "3.5", "0", "19")
-    ctl("hypr3d", "turn", "90", "0")
+    ctl("hyprwalk", "tp", "3.5", "0", "19")
+    ctl("hyprwalk", "turn", "90", "0")
     time.sleep(1.5)
 
     def over_steps(done):
         """walks forward till done(status): planted feet heights, (body, seen) heights, samples off the ground or in an
         air pose"""
-        ctl("hypr3d", "walk", "3", "forward")
+        ctl("hyprwalk", "walk", "3", "forward")
         heights, ys, off, x = set(), [], [], {}
         end, n = time.time() + 30, 0
         while time.time() < end:
@@ -4729,14 +4729,14 @@ def s_gait():
     jumps = [(round(b[0] - a[0], 2), round(b[1] - a[1], 2)) for a, b in zip(ys, ys[1:]) if b[0] - a[0] > 0.3]
     check("27", "... the body stepped up each ledge at once, the view went up smoothly (the seen height not half as far in that moment)",
           jumps and all(sy < 0.5 * fy for fy, sy in jumps) and abs(ys[-1][1] - ys[-1][0]) < 0.02, f"steps (body, seen): {jumps}; last {ys[-1]}")
-    ctl("hypr3d", "turn", "270", "0")
+    ctl("hyprwalk", "turn", "270", "0")
     time.sleep(1.0)
     heights, ys, off = over_steps(lambda s: s["feet"][0] < 4.0)
     frame("gait-platform-down")
     on = lambda y: any(abs(h - y) < 0.03 for h in heights)  # noqa: E731
     check("27", "down off the platform and the step: on the ground all the way (never falling, nor the air pose), feet on the platform, the step and the floor",
           not off and on(0.0) and on(0.45) and on(0.9) and abs(st()["feet"][1]) < 0.05, f"off the ground {off[:4]}; planted at {sorted(heights)}; feet {st()['feet']}")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     ensure_3d(False)
 
 
@@ -4746,13 +4746,13 @@ def s_fly():
     ensure_plugin()
     ensure_3d(False)
     clean_windows()
-    ctl("hypr3d", "map", "none")
+    ctl("hyprwalk", "map", "none")
     ensure_avatar(AV)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "third")
-    ctl("hypr3d", "tp", "0", "0", "6")
-    ctl("hypr3d", "turn", "180", "0")  # away from the desktop wall
+    ctl("hyprwalk", "view", "third")
+    ctl("hyprwalk", "tp", "0", "0", "6")
+    ctl("hyprwalk", "turn", "180", "0")  # away from the desktop wall
     time.sleep(1.5)
 
     def air():
@@ -4790,8 +4790,8 @@ def s_fly():
     a = air()
     check("30", "... letting go it leans back as it slows (to 20° or more under how it lay), then hovers upright again",
           least < cruise - 20 and a and abs(a["pitch"]) < 12, f"cruise {cruise:.0f}, least {least:.0f}, then {a}")
-    ctl("hypr3d", "tp", "0", "3", "6")
-    ctl("hypr3d", "turn", "180", "0")
+    ctl("hyprwalk", "tp", "0", "3", "6")
+    ctl("hyprwalk", "turn", "180", "0")
     time.sleep(1.0)
     qmp([key_event("w", True)])
     time.sleep(0.6)
@@ -4809,8 +4809,8 @@ def s_fly():
     check("30", "... it falls and lands on its feet ahead in the yard: on the ground, standing on both, not in the air pose",
           s["onGround"] and s1["feet"][2] > feet0[2] + 1.0 and g and not g.get("air") and all(f["planted"] for f in g.get("feet", [])) and not s1["anim"].startswith("air"),
           f"at {s1['feet']}; {s1['anim']}; {g}")
-    ctl("hypr3d", "tp", "0", "0", "6")
-    ctl("hypr3d", "turn", "180", "0")
+    ctl("hyprwalk", "tp", "0", "0", "6")
+    ctl("hyprwalk", "turn", "180", "0")
     time.sleep(1.0)
     qmp([key_event("shift", True)])
     time.sleep(0.03)
@@ -4827,7 +4827,7 @@ def s_fly():
     check("30", "a jump from a run: a stride in the air (the leading thigh 20° or more ahead of the other), and it lands running on",
           strides and min(ahead) >= 20 and landed, f"{len(strides)} in the air, ahead {ahead[:6]}; landed running {len(landed)}")
     time.sleep(1.5)
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     ensure_3d(False)
 
 
@@ -4864,7 +4864,7 @@ def mode_is(mode, arms=None):
     return lambda: (lambda h: h if h.get("mode") == mode and (arms is None or arms(h.get("arms", -1))) else None)(hands())
 
 
-@section("32", "first person with the avatar's body (plugin:hypr3d:first_person_body): the camera in its eyes, its own height, still standing; its hands up low in the view as a first person game's, walking (bobbing) and running (pumping); looking far down they let go; a window pressed: the right hand's finger to the crosshair; typing (E): lower and nearer together; carrying (G): out to it; playing here (P): let down, the camera still; an emote: the camera out behind it and back in; hyprctl view body and the config value: as before when off (1.65 m, no body)")
+@section("32", "first person with the avatar's body (plugin:hyprwalk:first_person_body): the camera in its eyes, its own height, still standing; its hands up low in the view as a first person game's, walking (bobbing) and running (pumping); looking far down they let go; a window pressed: the right hand's finger to the crosshair; typing (E): lower and nearer together; carrying (G): out to it; playing here (P): let down, the camera still; an emote: the camera out behind it and back in; hyprctl view body and the config value: as before when off (1.65 m, no body)")
 def s_fpbody():
     lua_session()
     ensure_plugin()
@@ -4872,14 +4872,14 @@ def s_fpbody():
     clean_windows()
     machine.execute("pkill -u alice foot; true")
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
-    ctl("hypr3d", "map", "none")
+    ctl("hyprwalk", "map", "none")
     ensure_avatar(AV)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
+    ctl("hyprwalk", "view", "first")
     first_person_body(True)
-    ctl("hypr3d", "tp", "0", "0", "6")
-    ctl("hypr3d", "turn", "180", "0")  # away from the desktop wall
+    ctl("hyprwalk", "tp", "0", "0", "6")
+    ctl("hyprwalk", "turn", "180", "0")  # away from the desktop wall
     wait_for("the hands up", mode_is("ready", lambda w: w > 0.95), 15, 0.2)
     time.sleep(0.6)
     s, a = st(), av()
@@ -4898,8 +4898,8 @@ def s_fpbody():
     time.sleep(2.0)
     e1 = st()["eye"]
     check("32", "... standing, the camera doesn't move (breathing moves the eyes a little: over 2 s it's within 1 mm)", math.dist(e0, e1) < 0.001, f"{math.dist(e0, e1) * 1000:.2f} mm")
-    r = ctl("hypr3d", "view", "body", "sideways")
-    check("32", "hyprctl hypr3d view body with a wrong word: says how it goes", r == "error: view body [on|off|toggle]", r)
+    r = ctl("hyprwalk", "view", "body", "sideways")
+    check("32", "hyprctl hyprwalk view body with a wrong word: says how it goes", r == "error: view body [on|off|toggle]", r)
 
     seen = hands_while(["w"], 1.5)
     ok = [x for x in seen if x.get("arms", 0) > 0.9 and all(wrist_in_view(p, 0.45) for p in (x.get("at") or [None, None]))]
@@ -4908,16 +4908,16 @@ def s_fpbody():
     ys = [p[1] for x in seen for p in (x.get("at") or []) if p]
     check("32", "running (Shift+W): the hands pump, each up into the view and back down (their height in the view goes over a sixth of it)",
           len(ys) >= 6 and max(ys) - min(ys) > 0.16 and min(ys) < 0.9, f"{len(ys)} samples, {min(ys or [0]):.2f}..{max(ys or [0]):.2f}")
-    ctl("hypr3d", "tp", "0", "0", "6")
+    ctl("hyprwalk", "tp", "0", "0", "6")
     time.sleep(0.5)
     s, a = st(), av()
-    check("32", "hyprctl hypr3d tp: the camera with the body at once, in its eyes", abs(s["eye"][1] - s["seenY"] - a["eyeHeight"]) < 0.06 and math.dist([s["eye"][0], s["eye"][2]], [0, 6]) < 0.3,
+    check("32", "hyprctl hyprwalk tp: the camera with the body at once, in its eyes", abs(s["eye"][1] - s["seenY"] - a["eyeHeight"]) < 0.06 and math.dist([s["eye"][0], s["eye"][2]], [0, 6]) < 0.3,
           f"eye {s['eye']}, feet {s['feet']}")
 
-    ctl("hypr3d", "turn", "180", "-80")
+    ctl("hyprwalk", "turn", "180", "-80")
     h = wait_for("the arms let go", mode_is("ready", lambda w: w < 0.05), 10, 0.2)
     frame("fpbody-down")
-    ctl("hypr3d", "turn", "180", "0")
+    ctl("hyprwalk", "turn", "180", "0")
     h2 = wait_for("the arms up again", mode_is("ready", lambda w: w > 0.95), 10, 0.2)
     check("32", "looking far down (80°): the hands let go, the arms hang (the body below in view); looking up again they come back", h and h2, f"{h}; {h2}")
     # the camera follows the eyes down, not the crouched body's top (its neck)
@@ -4933,10 +4933,10 @@ def s_fpbody():
           f"the eye {up:.3f} m up; {h}")
     wait_for("standing up", lambda: abs(st()["eye"][1] - st()["seenY"] - av()["eyeHeight"]) < 0.06, 10, 0.2)
 
-    alice("setsid -f foot --app-id h3d-fp > /dev/null 2>&1")
-    wait_for("the terminal in the world", lambda: placed("h3d-fp"), 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-fp > /dev/null 2>&1")
+    wait_for("the terminal in the world", lambda: placed("hyprwalk-fp"), 20, 0.5)
     time.sleep(1.0)
-    a = aim_find("h3d-fp")
+    a = aim_find("hyprwalk-fp")
     check("32", "a terminal opened in 3D, in front of you, the crosshair on it", a, a or AIM.get("last"))
     qmp([{"type": "btn", "data": {"down": True, "button": "left"}}])
     try:
@@ -4962,7 +4962,7 @@ def s_fpbody():
           st()["typing"] is True and h.get("mode") == "type" and all(wrist_in_view(p) for p in t) and t[1][0] - t[0][0] < ready[1][0] - ready[0][0] - 0.08, f"{h}; ready {ready}")
     press("meta_l", "esc")
     wait_for("walking again", lambda: st()["typing"] is False, 5, 0.2)
-    a = aim_find("h3d-fp")
+    a = aim_find("hyprwalk-fp")
     press("g")
     h = wait_for("holding", mode_is("hold"), 5, 0.1)
     time.sleep(1.0)
@@ -4973,7 +4973,7 @@ def s_fpbody():
           st()["holding"] is True and h.get("mode") == "hold" and wrist_in_view(g[0]) and wrist_in_view(g[1]) and g[0][1] < ready[0][1] - 0.08 and g[1][1] < ready[1][1] - 0.08, f"{h}; ready {ready}")
     press("esc")  # put back where it was
     wait_for("not holding", lambda: st()["holding"] is False, 5, 0.2)
-    a = aim_find("h3d-fp")
+    a = aim_find("hyprwalk-fp")
     wait_for("ready again", mode_is("ready", lambda w: w > 0.95), 10, 0.2)
     time.sleep(0.5)
     before = calm_frame("fpbody-before-play")
@@ -4995,10 +4995,10 @@ def s_fpbody():
     machine.execute("pkill -u alice foot; true")
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
 
-    ctl("hypr3d", "tp", "0", "0", "6")
-    ctl("hypr3d", "turn", "180", "0")
+    ctl("hyprwalk", "tp", "0", "0", "6")
+    ctl("hyprwalk", "turn", "180", "0")
     time.sleep(0.8)
-    r = ctl("hypr3d", "avatar", "emote", "Wave")
+    r = ctl("hyprwalk", "avatar", "emote", "Wave")
     a = wait_for("out behind it", lambda: (lambda a: a if a.get("emoteView", 0) >= 1 else None)(av()), 15, 0.2)
     s = st()
     eyes = [s["feet"][0], s["seenY"] + a["eyeHeight"], s["feet"][2]]
@@ -5026,26 +5026,26 @@ def s_fpbody():
     first_person_body(False)
     time.sleep(1.0)
     s, a = st(), av()
-    check("32", "hyprctl hypr3d view body off: first person as before (1.65 m up, the body not drawn, no hands)",
+    check("32", "hyprctl hyprwalk view body off: first person as before (1.65 m up, the body not drawn, no hands)",
           s["body"] is False and a["body"] is False and abs(s["eye"][1] - s["seenY"] - 1.65) < 0.03 and a.get("hands") is None, f"eye {s['eye'][1] - s['seenY']:.3f} m up; {a.get('hands')}")
     frame("fpbody-off")
-    ctl("eval", "hl.config({ plugin = { hypr3d = { first_person_body = false } } })")
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { first_person_body = false } } })")
     time.sleep(1.5)
-    r = ctl("eval", "hl.config({ plugin = { hypr3d = { first_person_body = true } } })")
+    r = ctl("eval", "hl.config({ plugin = { hyprwalk = { first_person_body = true } } })")
     on = wait_for("the config's on", lambda: st()["body"] is True, 5, 0.2)
-    ctl("eval", "hl.config({ plugin = { hypr3d = { first_person_body = false } } })")
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { first_person_body = false } } })")
     off = wait_for("the config's off", lambda: st()["body"] is False, 5, 0.2)
-    check("32", "plugin:hypr3d:first_person_body set at run time (true, then false) takes effect", on and off, f"eval: {r}")
-    ctl("eval", "hl.config({ plugin = { hypr3d = { first_person_body = true } } })")
+    check("32", "plugin:hyprwalk:first_person_body set at run time (true, then false) takes effect", on and off, f"eval: {r}")
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { first_person_body = true } } })")
     wait_for("the config's on", lambda: st()["body"] is True, 5, 0.2)
     wait_for("the hands up", mode_is("ready", lambda w: w > 0.95), 15, 0.2)
-    ctl("hypr3d", "view", "third")
+    ctl("hyprwalk", "view", "third")
     going, end = [], time.time() + 1.5
     while time.time() < end:
         going.append(av().get("wrists") or [])
         time.sleep(0.05)
     third = st()["body"]
-    ctl("hypr3d", "view", "first")
+    ctl("hyprwalk", "view", "first")
     time.sleep(0.5)
     check("32", "third person (V): not the body's first person; V again: it is", third is False and st()["body"] is True, f"{third} -> {st()['body']}")
     zs = [w[2] for x in going for w in x]
@@ -5074,8 +5074,8 @@ def swings_done(timeout=10):
 
 def aim_nothing():
     """the crosshair on nothing: in the yard, away from the desktop wall, looking up a little"""
-    ctl("hypr3d", "tp", "0", "0", "6")
-    ctl("hypr3d", "turn", "180", "12")
+    ctl("hyprwalk", "tp", "0", "0", "6")
+    ctl("hyprwalk", "turn", "180", "12")
     return wait_for("the crosshair on nothing", lambda: st()["aimed"] is None or None, 5, 0.2) and st()["aimed"] is None
 
 
@@ -5108,7 +5108,7 @@ def swing_order(seen, before):
     return out
 
 
-@section("33", "attacks: a left click with the crosshair on nothing swings the avatar's arm, the fist closed (the right; clicks while it swings, one arm then the other; after a pause the right again), third person and first (the fist drawn back at the right of the view, struck across the middle); on a window the click is the window's; typing (E), the Action Menu, carrying (G) and playing (P): no swing; a window's menu open: the click closes it, the next swings; hyprctl hypr3d avatar attack; an avatar that isn't a humanoid: nothing")
+@section("33", "attacks: a left click with the crosshair on nothing swings the avatar's arm, the fist closed (the right; clicks while it swings, one arm then the other; after a pause the right again), third person and first (the fist drawn back at the right of the view, struck across the middle); on a window the click is the window's; typing (E), the Action Menu, carrying (G) and playing (P): no swing; a window's menu open: the click closes it, the next swings; hyprctl hyprwalk avatar attack; an avatar that isn't a humanoid: nothing")
 def s_attack():
     lua_session()
     ensure_plugin()
@@ -5116,11 +5116,11 @@ def s_attack():
     clean_windows()
     machine.execute("pkill -u alice foot; true")
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
-    ctl("hypr3d", "map", "none")
+    ctl("hyprwalk", "map", "none")
     ensure_avatar(AV)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "third")
+    ctl("hyprwalk", "view", "third")
     on_nothing = aim_nothing()
     time.sleep(1.0)
     n0, f0 = attacks().get("swings", 0), st()["feet"]
@@ -5157,8 +5157,8 @@ def s_attack():
     wev_start()
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "third")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "third")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     a = aim_find("wev")
     wev_mark("atk-click")
@@ -5169,7 +5169,7 @@ def s_attack():
           a and (272, 1) in b and (272, 0) in b and attacks().get("swings", 0) == n0, f"aimed {a and a.get('class')}; wev's buttons {b}; {attacks()}")
     press("e")
     wait_for("typing", lambda: st()["typing"] is True, 5, 0.2)
-    ctl("hypr3d", "turn", f"{st()['yaw'] + 180:.1f}", "12")
+    ctl("hyprwalk", "turn", f"{st()['yaw'] + 180:.1f}", "12")
     time.sleep(0.6)
     s = st()
     n0 = attacks().get("swings", 0)
@@ -5178,7 +5178,7 @@ def s_attack():
           s["typing"] is True and s["aimed"] is None and attacks().get("swings", 0) == n0 and st()["typing"] is True, f"typing {s['typing']}, aimed {s['aimed']}; {attacks()}")
     press("meta_l", "esc")
     wait_for("walking again", lambda: st()["typing"] is False, 5, 0.2)
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     aim_find("wev")
     press("g")
@@ -5198,11 +5198,11 @@ def s_attack():
     check("33", "playing it (P): a left click is the window's (wev gets it), no swing", st()["playing"] and (272, 1) in b and attacks().get("swings", 0) == n0, f"{b}; {attacks()}")
     press("meta_l", "esc")
     wait_for("walking again", lambda: st()["playing"] is None, 5, 0.2)
-    ctl("hypr3d", "reset-windows", "forget")  # later sections expect wev on the wall
+    ctl("hyprwalk", "reset-windows", "forget")  # later sections expect wev on the wall
     machine.execute("pkill -x wev; true")
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
 
-    ctl("hypr3d", "view", "first")
+    ctl("hyprwalk", "view", "first")
     first_person_body(True)
     aim_nothing()
     wait_for("the hands up", mode_is("ready", lambda w: w > 0.95), 15, 0.2)
@@ -5225,15 +5225,15 @@ def s_attack():
     frame("attack-first")
     swings_done()
     first_person_body(False)
-    ctl("hypr3d", "view", "third")
+    ctl("hyprwalk", "view", "third")
 
     # hyprctl
     swings_done()
-    r = ctl("hypr3d", "avatar", "attack", "left")
+    r = ctl("hyprwalk", "avatar", "attack", "left")
     ok = r.startswith("{") and json.loads(r).get("last") == "left"
     swings_done()
-    r2 = ctl("hypr3d", "avatar", "attack", "sideways")
-    check("33", "hyprctl hypr3d avatar attack left: that arm's swing (the attacks, as JSON); a wrong word says how it goes",
+    r2 = ctl("hyprwalk", "avatar", "attack", "sideways")
+    check("33", "hyprctl hyprwalk avatar attack left: that arm's swing (the attacks, as JSON); a wrong word says how it goes",
           ok and r2 == "error: avatar attack [left|right]", f"{r}; {r2}")
 
     # a menu that grabs the pointer (weston-terminal's; browser menus take no grab): a click on nothing only closes it,
@@ -5244,14 +5244,14 @@ def s_attack():
         c = wait_for("weston-terminal", lambda: next((c for c in json.loads(ctl("-j", "clients")) if c["title"] == "Wayland Terminal"), None), 20, 0.5)
         ensure_3d()
         menu_closed()
-        ctl("hypr3d", "view", "first")
-        ctl("hypr3d", "spawn")
+        ctl("hyprwalk", "view", "first")
+        ctl("hyprwalk", "spawn")
         time.sleep(0.8)
         cls = c["class"]
         a = aim_find(cls)
         click("right", hold=0.05, after=1.0)
         pops = popups_of(cls)
-        ctl("hypr3d", "turn", f"{st()['yaw'] + 180:.1f}", "12")
+        ctl("hyprwalk", "turn", f"{st()['yaw'] + 180:.1f}", "12")
         time.sleep(0.6)
         s = st()
         n0 = attacks().get("swings", 0)
@@ -5265,14 +5265,14 @@ def s_attack():
     except Exception as e:  # noqa: BLE001
         check("33", "(a window's menu: stopped)", False, f"{type(e).__name__}: {e}"[:500])
     machine.execute("pkill -x weston-terminal; pkill -f weston-; true")
-    ctl("hypr3d", "view", "third")
+    ctl("hyprwalk", "view", "third")
 
     ensure_avatar(TOON)
     aim_nothing()
     time.sleep(0.5)
     click("left", hold=0.05, after=0.6)
-    r = ctl("hypr3d", "avatar", "attack")
-    check("33", "an avatar that isn't a humanoid (ToonTest.glb): a click on nothing swings nothing, Hyprland fine; hyprctl hypr3d avatar attack says it has no arms",
+    r = ctl("hyprwalk", "avatar", "attack")
+    check("33", "an avatar that isn't a humanoid (ToonTest.glb): a click on nothing swings nothing, Hyprland fine; hyprctl hyprwalk avatar attack says it has no arms",
           alive() and attacks().get("swings", 0) == 0 and "no arms to swing" in r, f"{attacks()}; {r}")
     ensure_avatar(AV)
     ensure_3d(False)
@@ -5288,8 +5288,8 @@ def s_typing():
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
 
     def walks():
@@ -5299,52 +5299,52 @@ def s_typing():
         return math.dist(feet, st()["feet"])
 
     press("e")
-    s, told = st(), ctl("hypr3d", "log", "10")
+    s, told = st(), ctl("hyprwalk", "log", "10")
     moved = walks()
     check("28", "E with no window to type into: says to point at one, and W still walks",
           s["typing"] is False and "point the crosshair at a window to type into it" in told and moved > 0.3, f"typing {s['typing']}, moved {moved:.2f} m; {told.strip()[-160:]}")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.5)
     yaw0 = st()["yaw"]
-    for cls, dy in (("h3d-type1", -35), ("h3d-type2", 35)):
-        ctl("hypr3d", "turn", f"{yaw0 + dy:.1f}", "0")
+    for cls, dy in (("hyprwalk-type1", -35), ("hyprwalk-type2", 35)):
+        ctl("hyprwalk", "turn", f"{yaw0 + dy:.1f}", "0")
         time.sleep(0.4)
         alice(f"setsid -f foot --app-id {cls} > /dev/null 2>&1")
         wait_for(f"{cls} in the world", lambda: placed(cls), 20, 0.5)
     time.sleep(1)
-    a = aim_find("h3d-type1")
+    a = aim_find("hyprwalk-type1")
     press("e")
-    s, told = st(), ctl("hypr3d", "log", "10")
+    s, told = st(), ctl("hyprwalk", "log", "10")
     check("28", "E at a terminal: typing into it, and a notification says how to stop (Super+Esc)",
           a and s["typing"] is True and "Super+Esc to walk again" in told, f"aimed {a}; typing {s['typing']}; {told.strip()[-160:]}")
-    machine.execute("rm -f /tmp/h3d-sent")
-    type_text("touch /tmp/h3d-sent")
+    machine.execute("rm -f /tmp/walk-sent")
+    type_text("touch /tmp/walk-sent")
     frame("typed-into-terminal")
     press("ret")
     time.sleep(0.8)
-    check("28", "... what's typed reaches it, and it's typing still", machine.execute("test -e /tmp/h3d-sent")[0] == 0 and st()["typing"] is True, st()["typing"])
+    check("28", "... what's typed reaches it, and it's typing still", machine.execute("test -e /tmp/walk-sent")[0] == 0 and st()["typing"] is True, st()["typing"])
     # on close Hyprland focuses the other terminal; typing must not follow
     type_text("exit")
     press("ret")
-    wait_for("it closed", lambda: not placed("h3d-type1"), 10, 0.3)
+    wait_for("it closed", lambda: not placed("hyprwalk-type1"), 10, 0.3)
     time.sleep(0.3)
-    s, told = st(), ctl("hypr3d", "log", "10")
+    s, told = st(), ctl("hyprwalk", "log", "10")
     moved = walks()
     frame("typing-window-closed")
     check("28", "... it closed (exit): walking again, W walks (not typed into the other terminal)",
           s["typing"] is False and "typing ended: the window left the 3D view" in told and moved > 0.3, f"typing {s['typing']}, moved {moved:.2f} m; {told.strip()[-200:]}")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.5)
-    a = aim_find("h3d-type2")
+    a = aim_find("hyprwalk-type2")
     press("e")
     typing = st()["typing"]
-    alice("setsid -f foot --app-id h3d-type3 > /dev/null 2>&1")
-    wait_for("the new terminal", lambda: client("h3d-type3"), 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-type3 > /dev/null 2>&1")
+    wait_for("the new terminal", lambda: client("hyprwalk-type3"), 20, 0.5)
     time.sleep(0.6)
-    s, told = st(), ctl("hypr3d", "log", "10")
+    s, told = st(), ctl("hyprwalk", "log", "10")
     active = json.loads(ctl("-j", "activewindow")).get("class")
     check("28", "typing into the other, a new window takes the keyboard: walking again",
-          a and typing is True and active == "h3d-type3" and s["typing"] is False and "typing ended: another window has the keyboard" in told,
+          a and typing is True and active == "hyprwalk-type3" and s["typing"] is False and "typing ended: another window has the keyboard" in told,
           f"aimed {a and a.get('class')}; typing {typing} -> {s['typing']}; active {active}; {told.strip()[-200:]}")
     machine.execute("pkill -u alice foot; true")
     ensure_3d(False)
@@ -5392,7 +5392,7 @@ def tiled_row():
 
 def aim_row(cls):
     """aims at a window anywhere round you (aim_find searches only the view)"""
-    ctl("hypr3d", "aim", cls)
+    ctl("hyprwalk", "aim", cls)
     time.sleep(0.3)
     return aim_find(cls)
 
@@ -5405,34 +5405,34 @@ def s_tiling():
     clean_windows()
     machine.execute("pkill -u alice foot; true")
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "tile", "follow", "on")  # an earlier Y may have left it staying
-    ctl("hypr3d", "reset-windows", "forget")
-    alice("setsid -f foot --app-id h3d-wall > /dev/null 2>&1")
-    wait_for("the wall's terminal", lambda: client("h3d-wall"), 20, 0.5)
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "tile", "follow", "on")  # an earlier Y may have left it staying
+    ctl("hyprwalk", "reset-windows", "forget")
+    alice("setsid -f foot --app-id hyprwalk-wall > /dev/null 2>&1")
+    wait_for("the wall's terminal", lambda: client("hyprwalk-wall"), 20, 0.5)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     yaw0 = st()["yaw"]
-    for cls, dy in (("h3d-t1", -60), ("h3d-t2", 0), ("h3d-t3", 60)):
-        ctl("hypr3d", "turn", f"{yaw0 + dy:.1f}", "0")
+    for cls, dy in (("hyprwalk-t1", -60), ("hyprwalk-t2", 0), ("hyprwalk-t3", 60)):
+        ctl("hyprwalk", "turn", f"{yaw0 + dy:.1f}", "0")
         time.sleep(0.4)
         alice(f"setsid -f foot --app-id {cls} > /dev/null 2>&1")
         wait_for(f"{cls} in the world", lambda: placed(cls), 20, 0.5)
-    ctl("hypr3d", "turn", f"{yaw0:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{yaw0:.1f}", "0")
     time.sleep(0.5)
     before = {p["class"]: p["center"] for p in settled(10)["placed"]}
     frame("tiling-before")
 
     press("t")
-    s, told = st(), ctl("hypr3d", "log", "6")
+    s, told = st(), ctl("hyprwalk", "log", "6")
     w = settled(10)
     row = [x["class"] for x in ring_view(w)]
-    check("29", "T: tiling, said so; the three in the world and the wall's in the row", s["tiling"] is True and w["tiling"]["on"] and sorted(row) == ["h3d-t1", "h3d-t2", "h3d-t3", "h3d-wall"]
+    check("29", "T: tiling, said so; the three in the world and the wall's in the row", s["tiling"] is True and w["tiling"]["on"] and sorted(row) == ["hyprwalk-t1", "hyprwalk-t2", "hyprwalk-t3", "hyprwalk-wall"]
           and "tiling: 4 windows round you" in told and all(p["tiled"] for p in w["placed"]), f"{row}; {told.strip()[-160:]}")
-    check("29", "... in the order they were round you: the left one first, the right one last", row.index("h3d-t1") < row.index("h3d-t2") < row.index("h3d-t3"), row)
+    check("29", "... in the order they were round you: the left one first, the right one last", row.index("hyprwalk-t1") < row.index("hyprwalk-t2") < row.index("hyprwalk-t3"), row)
     t = w["tiling"]
     check("29", "... round your eye, 2 m out, the row's middle where you look", math.dist(t["center"], s["eye"]) < 0.02 and abs(t["radius"] - 2) < 0.001 and t["back"] == 0
           and abs(((t["yaw"] - s["yaw"] + 180) % 360) - 180) < 0.2, t)
@@ -5442,31 +5442,31 @@ def s_tiling():
     check("29", "... each as big as on your screen, facing it, made smaller to fit 85% of the view", all(abs(a - b) < 0.02 for _, a, b in sizes), sizes)
     frame("tiled")
     for dy in (-75, 75):
-        ctl("hypr3d", "turn", f"{yaw0 + dy:.1f}", "0")
+        ctl("hyprwalk", "turn", f"{yaw0 + dy:.1f}", "0")
         time.sleep(0.5)
         frame(f"tiled-{'left' if dy < 0 else 'right'}")
 
     # a window opening while tiling
     v = ring_view()
     look = t["yaw"] + math.degrees((v[1]["rel"] + v[2]["rel"]) / 2)  # between the second and third
-    ctl("hypr3d", "turn", f"{look:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{look:.1f}", "0")
     time.sleep(0.4)
     rel_look = (math.radians(look - t["yaw"]) + math.pi) % (2 * math.pi) - math.pi
     slot = sum(1 for x in v if x["rel"] < rel_look)
-    alice("setsid -f foot --app-id h3d-t4 > /dev/null 2>&1")
-    wait_for("h3d-t4 in the row", lambda: "h3d-t4" in tiled_row(), 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-t4 > /dev/null 2>&1")
+    wait_for("hyprwalk-t4 in the row", lambda: "hyprwalk-t4" in tiled_row(), 20, 0.5)
     w = settled(10)
     row = [x["class"] for x in ring_view(w)]
-    check("29", "a window opening while tiling goes into the row where you look (between the second and the third)", row.index("h3d-t4") == slot == 2 and len(row) == 5, f"{row}, slot {slot}")
+    check("29", "a window opening while tiling goes into the row where you look (between the second and the third)", row.index("hyprwalk-t4") == slot == 2 and len(row) == 5, f"{row}, slot {slot}")
     ring_checks("five", w)
     frame("tiled-five")
 
-    a = aim_row("h3d-t1")
+    a = aim_row("hyprwalk-t1")
     press("g")
     row = tiled_row()
-    check("29", "G on a window in the row: carrying it, out of the row", a and st()["holding"] is True and "h3d-t1" not in row and len(row) == 4, f"aimed {a and a['class']}; {row}")
+    check("29", "G on a window in the row: carrying it, out of the row", a and st()["holding"] is True and "hyprwalk-t1" not in row and len(row) == 4, f"aimed {a and a['class']}; {row}")
     v = ring_view()
-    ctl("hypr3d", "turn", f"{t['yaw'] + math.degrees(v[-1]['rel'] + v[-1]['half']) + 30:.1f}", "0")  # past the right end
+    ctl("hyprwalk", "turn", f"{t['yaw'] + math.degrees(v[-1]['rel'] + v[-1]['half']) + 30:.1f}", "0")  # past the right end
     time.sleep(1.2)
     w = windows3d()
     check("29", "... carried past the row's right end: room left for it there", w["tiling"]["holdSlot"] == 4 and not w["hold"]["onWall"], f"{w['tiling']['holdSlot']}; {w['hold']}")
@@ -5474,44 +5474,44 @@ def s_tiling():
     press("g")
     w = settled(10)
     row = [x["class"] for x in ring_view(w)]
-    check("29", "G puts it down in the air there: the row's right end now", st()["holding"] is False and row[-1] == "h3d-t1" and len(row) == 5, row)
+    check("29", "G puts it down in the air there: the row's right end now", st()["holding"] is False and row[-1] == "hyprwalk-t1" and len(row) == 5, row)
     ring_checks("reordered", w)
     row0 = row
-    aim_row("h3d-t2")
+    aim_row("hyprwalk-t2")
     press("g")
     rel(250, 0)
     time.sleep(0.8)
     press("esc")
     w = settled(10)
     check("29", "carried out of the row, Esc puts it back where it was in it (and 3D stays on)", st()["mode"] == "active" and tiled_row() == row0, f"{row0} -> {tiled_row()}")
-    aim_row("h3d-t3")
+    aim_row("hyprwalk-t3")
     press("g")
-    ctl("hypr3d", "turn", f"{yaw0:.1f}", "0")
-    ctl("hypr3d", "hold", "6")
+    ctl("hyprwalk", "turn", f"{yaw0:.1f}", "0")
+    ctl("hyprwalk", "hold", "6")
     time.sleep(1.2)
     on_wall = windows3d()["hold"]["onWall"]
     press("g")
     w = settled(10)
-    p3 = next(p for p in w["placed"] if p["class"] == "h3d-t3")
+    p3 = next(p for p in w["placed"] if p["class"] == "hyprwalk-t3")
     row = [x["class"] for x in ring_view(w)]
-    check("29", "carried to a wall and put down: it stays there, out of the row, the row closing up", on_wall and "h3d-t3" not in row and not p3["tiled"] and len(row) == 4
+    check("29", "carried to a wall and put down: it stays there, out of the row, the row closing up", on_wall and "hyprwalk-t3" not in row and not p3["tiled"] and len(row) == 4
           and p3["center"][2] < 0.1, f"on the wall {on_wall}; {row}; {p3['center']}")
     ring_checks("closed up", w)
     wall_spot = p3["center"]
-    aim_row("h3d-t2")
+    aim_row("hyprwalk-t2")
     press("x")
     time.sleep(1.5)
     row = tiled_row()
-    check("29", "X on a window in the row: back to the wall, and it stays there", "h3d-t2" not in row and not placed("h3d-t2") and len(row) == 3, row)
+    check("29", "X on a window in the row: back to the wall, and it stays there", "hyprwalk-t2" not in row and not placed("hyprwalk-t2") and len(row) == 3, row)
 
-    ctl("hypr3d", "tp", "1.5", "0", "6")
+    ctl("hyprwalk", "tp", "1.5", "0", "6")
     time.sleep(0.5)
     s = st()
     w = settled(10)
     t2 = w["tiling"]
     check("29", "put somewhere else: the ring's round you there at once, the row as it was", math.dist(t2["center"], s["eye"]) < 0.05
           and [x["class"] for x in ring_view(w)] == row, f"{t2}; eye {s['eye']}")
-    ctl("hypr3d", "turn", f"{yaw0 + 150:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{yaw0 + 150:.1f}", "0")
     time.sleep(0.8)
     press("shift", "t")
     s = st()
@@ -5528,12 +5528,12 @@ def s_tiling():
         return [(x["class"], round(abs((x["rel"] - before[x["class"]] + math.pi) % (2 * math.pi) - math.pi), 4),
                  round(abs(x["p"]["distance"] - math.dist(x["p"]["center"], w["tiling"]["center"])), 3)) for x in ring_view(w) if x["class"] in before]
 
-    ctl("hypr3d", "turn", "180", "0")  # into the yard: turning doesn't turn the row
+    ctl("hyprwalk", "turn", "180", "0")  # into the yard: turning doesn't turn the row
     time.sleep(0.5)
     w = settled(10)
     round0 = {x["class"]: x["rel"] for x in ring_view(w)}
     ground0, feet0 = w["tiling"]["ground"], st()["feet"]
-    ctl("hypr3d", "walk", "2.5")
+    ctl("hyprwalk", "walk", "2.5")
     time.sleep(1.0)
     mid = []
     for _ in range(4):
@@ -5555,7 +5555,7 @@ def s_tiling():
 
     # a jump doesn't lift the ring; flying does
     ground0 = t["ground"]
-    ctl("hypr3d", "jump")
+    ctl("hyprwalk", "jump")
     hop, end = [], time.time() + 1.2
     while time.time() < end:
         hop.append((st()["feet"][1], windows3d()["tiling"]["ground"]))
@@ -5564,7 +5564,7 @@ def s_tiling():
     check("29", "a jump: the ring doesn't go up with you (at most a landing's settle)", top > ground0 + 0.4 and max(g for _, g in hop) < ground0 + 0.1,
           f"feet up to {top - ground0:.2f} m, the ring's ground up to {max(g for _, g in hop) - ground0:.3f} m")
     wait_for("down from the jump", lambda: st()["onGround"], 10, 0.2)
-    ctl("hypr3d", "fly")
+    ctl("hyprwalk", "fly")
     qmp([key_event("spc", True)])  # held until above the 5.55 m yard walls
     try:
         wait_for("up over the yard's walls", lambda: st()["feet"][1] > ground0 + 6.5, 20, 0.1)
@@ -5581,28 +5581,28 @@ def s_tiling():
           f"feet {s['feet']}; {t}; {[(x['class'], x['p']['center']) for x in v]}")
     frame("tiling-flying")
 
-    alice("setsid -f foot --app-id h3d-t5 > /dev/null 2>&1")
-    wait_for("h3d-t5 in the row", lambda: "h3d-t5" in tiled_row(), 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-t5 > /dev/null 2>&1")
+    wait_for("hyprwalk-t5 in the row", lambda: "hyprwalk-t5" in tiled_row(), 20, 0.5)
     s = st()
     w = settled(10)
-    p5 = next((x for x in ring_view(w) if x["class"] == "h3d-t5"), None)
+    p5 = next((x for x in ring_view(w) if x["class"] == "hyprwalk-t5"), None)
     check("29", "... a window opening up there: in the row round you, in front of you", p5 and p5["dist"] < w["tiling"]["radius"] + 0.02
           and p5["p"]["center"][1] > s["feet"][1] and p5["p"]["apparent"] > 0.3, p5 and {k: p5[k] for k in ("dist", "rel")} | {"apparent": p5["p"]["apparent"], "center": p5["p"]["center"]})
-    a = aim_row("h3d-t1")
+    a = aim_row("hyprwalk-t1")
     press("g")
-    ctl("hypr3d", "turn", f"{st()['yaw'] + 100:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{st()['yaw'] + 100:.1f}", "0")
     time.sleep(1.0)
     on_wall = windows3d()["hold"]["onWall"]
     press("g")
     s = st()
     w = settled(10)
-    p1 = next((x for x in ring_view(w) if x["class"] == "h3d-t1"), None)
+    p1 = next((x for x in ring_view(w) if x["class"] == "hyprwalk-t1"), None)
     check("29", "... one carried and put down up there in the air: into the row round you", a and not on_wall and p1 and p1["dist"] < w["tiling"]["radius"] + 0.02
           and p1["p"]["center"][1] > s["feet"][1] and math.dist(w["tiling"]["center"], s["eye"]) < 0.05, f"aimed {a and a.get('class')}, on a wall {on_wall}; {p1 and p1['p']['center']}; {w['tiling']}")
     ring_checks("in the air", w)
     frame("tiling-flying-row")
 
-    ctl("hypr3d", "fly")
+    ctl("hyprwalk", "fly")
     wait_for("landed", lambda: st()["onGround"], 10, 0.2)
     time.sleep(1.0)
     s = st()
@@ -5611,8 +5611,8 @@ def s_tiling():
     check("29", "out of the air: the ring comes down with you, round you on the ground", abs(t["ground"] - s["feet"][1]) < 0.03 and abs(s["feet"][1] - ground0) < 0.1
           and math.dist(t["center"], s["eye"]) < 0.05, f"feet {s['feet']}; {t}")
     ring_checks("landed", w)
-    machine.execute("pkill -u alice -f 'app-id h3d-t5'; true")
-    wait_for("h3d-t5 gone", lambda: "h3d-t5" not in tiled_row() and not client("h3d-t5"), 20, 0.5)
+    machine.execute("pkill -u alice -f 'app-id hyprwalk-t5'; true")
+    wait_for("hyprwalk-t5 gone", lambda: "hyprwalk-t5" not in tiled_row() and not client("hyprwalk-t5"), 20, 0.5)
     row = tiled_row()
 
     press("b")
@@ -5620,38 +5620,38 @@ def s_tiling():
     m = menu()
     it = (m.get("items") or [{}])[0]
     check("29", "B, the Windows page: Tiling first, on, how many round you", it.get("label") == "Tiling" and it.get("on") is True and it.get("hint") == "on: 3 round you", it)
-    t4 = placed("h3d-t4")["center"]
+    t4 = placed("hyprwalk-t4")["center"]
     press("1")
     time.sleep(0.3)
-    s, told = st(), ctl("hypr3d", "log", "4")
+    s, told = st(), ctl("hyprwalk", "log", "4")
     w = settled(10)
     pl = {p["class"]: p for p in w["placed"]}
     check("29", "... picked: tiling off, said so, the menu closed", s["tiling"] is False and not w["tiling"]["on"] and "tiling off" in told and menu().get("open") is False,
           f"{s['tiling']}; {told.strip()[-120:]}")
-    check("29", "... the one from the world back where it was, the wall's back on the wall", "h3d-t1" in pl and math.dist(pl["h3d-t1"]["center"], before["h3d-t1"]) < 0.05
-          and "h3d-wall" not in pl, f"{pl.get('h3d-t1', {}).get('center')} vs {before['h3d-t1']}; {sorted(pl)}")
-    check("29", "... the one that opened meanwhile and the one on the wall stay where they are", math.dist(pl["h3d-t4"]["center"], t4) < 0.05
-          and math.dist(pl["h3d-t3"]["center"], wall_spot) < 0.05 and not any(p["tiled"] for p in w["placed"]), f"{pl['h3d-t4']['center']} vs {t4}; {pl['h3d-t3']['center']} vs {wall_spot}")
+    check("29", "... the one from the world back where it was, the wall's back on the wall", "hyprwalk-t1" in pl and math.dist(pl["hyprwalk-t1"]["center"], before["hyprwalk-t1"]) < 0.05
+          and "hyprwalk-wall" not in pl, f"{pl.get('hyprwalk-t1', {}).get('center')} vs {before['hyprwalk-t1']}; {sorted(pl)}")
+    check("29", "... the one that opened meanwhile and the one on the wall stay where they are", math.dist(pl["hyprwalk-t4"]["center"], t4) < 0.05
+          and math.dist(pl["hyprwalk-t3"]["center"], wall_spot) < 0.05 and not any(p["tiled"] for p in w["placed"]), f"{pl['hyprwalk-t4']['center']} vs {t4}; {pl['hyprwalk-t3']['center']} vs {wall_spot}")
     frame("untiled")
 
     # hyprctl, Lua, the config value
-    r = [ctl("hypr3d", "tile", "on"), ctl("hypr3d", "tile", "on"), st()["tiling"], ctl("hypr3d", "tile", "toggle"), st()["tiling"], ctl("hypr3d", "tile", "here"),
-         st()["tiling"], ctl("hypr3d", "tile", "off"), ctl("hypr3d", "tile", "sideways")]
-    check("29", "hyprctl hypr3d tile on, on, toggle, here (not tiling: on), off, and a wrong word",
+    r = [ctl("hyprwalk", "tile", "on"), ctl("hyprwalk", "tile", "on"), st()["tiling"], ctl("hyprwalk", "tile", "toggle"), st()["tiling"], ctl("hyprwalk", "tile", "here"),
+         st()["tiling"], ctl("hyprwalk", "tile", "off"), ctl("hyprwalk", "tile", "sideways")]
+    check("29", "hyprctl hyprwalk tile on, on, toggle, here (not tiling: on), off, and a wrong word",
           r[:8] == ["tiling", "tiling", True, "not tiling", False, "tiling", True, "not tiling"] and r[8].startswith("error"), r)
-    j = ctlj("hypr3d", "tile")
-    check("29", "hyprctl hypr3d tile: how it is (JSON)", j["on"] is False and j["row"] == [] and j["holdSlot"] == -1, j)
-    r1 = ctl("eval", "hl.plugin.hypr3d.tile()")
+    j = ctlj("hyprwalk", "tile")
+    check("29", "hyprctl hyprwalk tile: how it is (JSON)", j["on"] is False and j["row"] == [] and j["holdSlot"] == -1, j)
+    r1 = ctl("eval", "hl.plugin.hyprwalk.tile()")
     on1 = st()["tiling"]
-    r2 = ctl("eval", "hl.plugin.hypr3d.tile()")
-    check("29", "hl.plugin.hypr3d.tile(): tiling on, and again off", r1 == "ok" and r2 == "ok" and on1 is True and st()["tiling"] is False, f"{r1} {on1}, {r2} {st()['tiling']}")
-    ctl("eval", "hl.config({ plugin = { hypr3d = { tiling = true } } })")
+    r2 = ctl("eval", "hl.plugin.hyprwalk.tile()")
+    check("29", "hl.plugin.hyprwalk.tile(): tiling on, and again off", r1 == "ok" and r2 == "ok" and on1 is True and st()["tiling"] is False, f"{r1} {on1}, {r2} {st()['tiling']}")
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { tiling = true } } })")
     on2 = wait_for("tiling from the config", lambda: st()["tiling"], 4, 0.2)
-    ctl("eval", "hl.config({ plugin = { hypr3d = { tiling = false } } })")
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { tiling = false } } })")
     off2 = wait_for("not tiling from the config", lambda: st()["tiling"] is False, 4, 0.2)
-    check("29", "plugin:hypr3d:tiling set at run time: tiling on, and off again", on2 and off2, f"{on2} {off2}")
+    check("29", "plugin:hyprwalk:tiling set at run time: tiling on, and off again", on2 and off2, f"{on2} {off2}")
 
-    ctl("hypr3d", "tile", "on")
+    ctl("hyprwalk", "tile", "on")
     ensure_3d(False)
     ensure_3d()
     time.sleep(0.5)
@@ -5660,14 +5660,14 @@ def s_tiling():
     check("29", "leaving 3D tiling and coming back: tiling still, round where you come in", s["tiling"] is True and math.dist(w["tiling"]["center"], s["eye"]) < 0.05
           and len(ring_view(w)) >= 3, f"{w['tiling']}; eye {s['eye']}")
     ring_checks("coming in", w)
-    ctl("hypr3d", "tile", "off")
+    ctl("hyprwalk", "tile", "off")
 
     # third person: the ring reaches 1 m past the boom, so the camera is inside it and sees every window's front
     ensure_avatar(AV)
-    ctl("hypr3d", "view", "third", "2.6", "0.4")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "third", "2.6", "0.4")
+    ctl("hyprwalk", "spawn")
     time.sleep(1.2)
-    ctl("hypr3d", "tile", "on")
+    ctl("hyprwalk", "tile", "on")
     s = st()
     w = settled(10)
     t3 = w["tiling"]
@@ -5680,10 +5680,10 @@ def s_tiling():
     frame("tiled-third")
     # third person: the ring follows the avatar and refits to the boom
     round3 = {x["class"]: x["rel"] for x in v}
-    ctl("hypr3d", "turn", "180", "0")  # into the yard
+    ctl("hyprwalk", "turn", "180", "0")  # into the yard
     time.sleep(0.5)
     feet3 = st()["feet"]
-    ctl("hypr3d", "walk", "2")
+    ctl("hyprwalk", "walk", "2")
     walked_off()
     s = st()
     w = settled(10)
@@ -5692,22 +5692,22 @@ def s_tiling():
           and math.hypot(t3["center"][0] - s["feet"][0], t3["center"][2] - s["feet"][2]) < 0.05 and all(a < 0.01 for _, a, _ in way_round(w, round3)),
           f"walked {math.dist(s['feet'], feet3):.2f} m; {t3}; feet {s['feet']}; {way_round(w, round3)}")
     ring_checks("third person, walked", w)
-    ctl("hypr3d", "view", "third", "4")
+    ctl("hyprwalk", "view", "third", "4")
     time.sleep(0.5)
     w = settled(10)
     t3 = w["tiling"]
     check("29", "... the camera's boom made longer (4 m): the ring fits it, 1 m past it", abs(t3["back"] - 4) < 0.001 and abs(t3["radius"] - 5) < 0.001, t3)
     ring_checks("a longer boom", w)
-    ctl("hypr3d", "view", "first")
+    ctl("hyprwalk", "view", "first")
     time.sleep(0.5)
     w = settled(10)
     t1 = w["tiling"]
     check("29", "... V to first person: the ring round your eye, 2 m out", t1["back"] == 0 and abs(t1["radius"] - 2) < 0.001 and math.dist(t1["center"], st()["eye"]) < 0.05, t1)
     ring_checks("first person again", w)
-    ctl("hypr3d", "view", "third", "2.6", "0.4")
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "view", "third", "2.6", "0.4")
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "reset-windows", "forget")
     machine.execute("pkill -u alice foot; true")
     ensure_3d(False)
 
@@ -5733,60 +5733,60 @@ def s_tiling_stay():
     clean_windows()
     machine.execute("pkill -u alice foot; true")
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "tile", "follow", "on")
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "tile", "follow", "on")
+    ctl("hyprwalk", "reset-windows", "forget")
     # a terminal on workspace 2, for Play to bring out
     ctl("dispatch", 'hl.dsp.focus({ workspace = "2" })')
     time.sleep(0.5)
-    alice("setsid -f foot --app-id h3d-s6 > /dev/null 2>&1")
-    wait_for("h3d-s6 on workspace 2", lambda: ((client("h3d-s6") or {}).get("workspace") or {}).get("id") == 2, 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-s6 > /dev/null 2>&1")
+    wait_for("hyprwalk-s6 on workspace 2", lambda: ((client("hyprwalk-s6") or {}).get("workspace") or {}).get("id") == 2, 20, 0.5)
     ctl("dispatch", 'hl.dsp.focus({ workspace = "1" })')
     time.sleep(0.5)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "tp", "0", "0", "8")
-    for cls, yaw in (("h3d-s1", 130), ("h3d-s2", 180), ("h3d-s3", 230)):
-        ctl("hypr3d", "turn", f"{yaw}", "0")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "tp", "0", "0", "8")
+    for cls, yaw in (("hyprwalk-s1", 130), ("hyprwalk-s2", 180), ("hyprwalk-s3", 230)):
+        ctl("hyprwalk", "turn", f"{yaw}", "0")
         time.sleep(0.4)
         alice(f"setsid -f foot --app-id {cls} > /dev/null 2>&1")
         wait_for(f"{cls} in the world", lambda: placed(cls), 20, 0.5)
-    ctl("hypr3d", "turn", "180", "0")
+    ctl("hyprwalk", "turn", "180", "0")
     time.sleep(0.5)
     before = {p["class"]: p["center"] for p in settled(10)["placed"]}
     press("t")
-    told = ctl("hypr3d", "log", "6")
+    told = ctl("hyprwalk", "log", "6")
     w = settled(10)
     t0 = w["tiling"]
     check("29s", "T: tiling, going with you, said so (and that Y leaves it here)", t0["on"] and t0["follow"] is True and t0["atRing"] is True
-          and "tiling: 3 windows round you, going with you" in told and "Y leaves it here" in told and tiled_row() == ["h3d-s1", "h3d-s2", "h3d-s3"],
+          and "tiling: 3 windows round you, going with you" in told and "Y leaves it here" in told and tiled_row() == ["hyprwalk-s1", "hyprwalk-s2", "hyprwalk-s3"],
           f"{t0}; {tiled_row()}; {told.strip()[-200:]}")
 
-    ctl("hypr3d", "turn", "215", "0")
+    ctl("hyprwalk", "turn", "215", "0")
     time.sleep(0.5)
     w = settled(10)
     pre, turned = {p["class"]: p["center"] for p in w["placed"]}, w["tiling"]
     press("y")
-    told = ctl("hypr3d", "log", "6")
+    told = ctl("hyprwalk", "log", "6")
     w = settled(10)
     ring0 = w["tiling"]
     went = max([math.dist(p["center"], pre[p["class"]]) for p in w["placed"] if p["class"] in pre] or [9])
     check("29s", "Y, turned away from the row's middle: the row stays here, said so; the ring where it was, its yaw too, and no window moved", ring0["follow"] is False
           and ring0["atRing"] is True and "the row stays here" in told and abs(turned["yaw"] - t0["yaw"]) < 0.01 and math.dist(ring0["center"], t0["center"]) < 0.001
-          and abs(ring0["yaw"] - t0["yaw"]) < 0.01 and went < 0.005 and ctlj("hypr3d", "tile")["follow"] is False,
+          and abs(ring0["yaw"] - t0["yaw"]) < 0.01 and went < 0.005 and ctlj("hyprwalk", "tile")["follow"] is False,
           f"{ring0} (T: {t0['yaw']}, turned: {turned['yaw']}); the windows moved up to {went:.3f} m; {told.strip()[-160:]}")
     frame("staying")
 
     # walking up to the row
-    ctl("hypr3d", "turn", "180", "0")
+    ctl("hyprwalk", "turn", "180", "0")
     time.sleep(0.5)
     at0 = {p["class"]: p["center"] for p in w["placed"]}
     ahead = min(ring_view(w), key=lambda x: abs(x["rel"]))["class"]
-    ctl("hypr3d", "walk", "0.8", "back")
+    ctl("hyprwalk", "walk", "0.8", "back")
     walked_off()
     s0, near0 = st(), placed(ahead)["distance"]
-    ctl("hypr3d", "walk", "1.6")
+    ctl("hyprwalk", "walk", "1.6")
     time.sleep(0.5)
     mid = []
     for _ in range(4):
@@ -5801,92 +5801,92 @@ def s_tiling_stay():
           f"walked {math.dist(s['feet'], s0['feet']):.2f} m; moved at most {[round(d, 3) for d in moved]}; {ahead} {near0:.2f} -> {near:.2f} m")
     frame("staying-walked-up")
 
-    ctl("hypr3d", "turn", "215", "0")
+    ctl("hyprwalk", "turn", "215", "0")
     time.sleep(0.5)
     s, w = st(), windows3d()
     look = ring_look(s, w["tiling"])
     slot = sum(1 for x in ring_view(w) if x["rel"] < look)
-    alice("setsid -f foot --app-id h3d-s4 > /dev/null 2>&1")
-    wait_for("h3d-s4 in the row", lambda: "h3d-s4" in tiled_row(), 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-s4 > /dev/null 2>&1")
+    wait_for("hyprwalk-s4 in the row", lambda: "hyprwalk-s4" in tiled_row(), 20, 0.5)
     w = settled(10)
     row = [x["class"] for x in ring_view(w)]
-    check("29s", "in the ring: a window opening goes into the row where you look, the ring where it was", row.index("h3d-s4") == slot and len(row) == 4
+    check("29s", "in the ring: a window opening goes into the row where you look, the ring where it was", row.index("hyprwalk-s4") == slot and len(row) == 4
           and math.dist(w["tiling"]["center"], ring0["center"]) < 0.001, f"{row}, slot {slot} (looking {look:.3f} rad from the row's middle); {w['tiling']['center']}")
     ring_checks("staying, four", w, "29s")
 
-    ctl("hypr3d", "tp", "0", "0", "8")
-    ctl("hypr3d", "turn", "180", "0")
+    ctl("hyprwalk", "tp", "0", "0", "8")
+    ctl("hyprwalk", "turn", "180", "0")
     time.sleep(0.5)
-    a = aim_row("h3d-s1")
+    a = aim_row("hyprwalk-s1")
     press("g")
     time.sleep(0.5)
     slot_in = windows3d()["tiling"]["holdSlot"]
-    ctl("hypr3d", "tp", "-4.5", "0", "11")
-    ctl("hypr3d", "turn", "180", "0")
-    ctl("hypr3d", "hold", "2")
+    ctl("hyprwalk", "tp", "-4.5", "0", "11")
+    ctl("hyprwalk", "turn", "180", "0")
+    ctl("hyprwalk", "hold", "2")
     time.sleep(1.2)
     s, w = st(), windows3d()
     t = w["tiling"]
     check("29s", "a row window carried out of the ring: room made for it in the row at the ring, none out there", a and s["holding"] is True and slot_in >= 0
-          and t["holdSlot"] == -1 and w["hold"] and not w["hold"]["onWall"] and t["atRing"] is False and "h3d-s1" not in tiled_row(),
+          and t["holdSlot"] == -1 and w["hold"] and not w["hold"]["onWall"] and t["atRing"] is False and "hyprwalk-s1" not in tiled_row(),
           f"aimed {a and a.get('class')}; at the ring {slot_in}, out there {t['holdSlot']}; {w['hold']}; {t}")
     frame("staying-carried-away")
-    carried = placed("h3d-s1")["center"]
+    carried = placed("hyprwalk-s1")["center"]
     press("g")
     s, w = st(), settled(10)
-    p1 = next(p for p in w["placed"] if p["class"] == "h3d-s1")
+    p1 = next(p for p in w["placed"] if p["class"] == "hyprwalk-s1")
     check("29s", "... put down in the air out there: it stays there, out of the row; the ring where it was", s["holding"] is False and not p1["tiled"]
-          and "h3d-s1" not in tiled_row() and math.dist(p1["center"], carried) < 0.25 and abs(relative(p1, s)[0] - 2) < 0.3
+          and "hyprwalk-s1" not in tiled_row() and math.dist(p1["center"], carried) < 0.25 and abs(relative(p1, s)[0] - 2) < 0.3
           and math.dist(w["tiling"]["center"], ring0["center"]) < 0.001, f"{p1['center']} (carried at {carried}); {relative(p1, s)}; {w['tiling']}")
-    ctl("hypr3d", "tp", "0", "0", "8")
-    ctl("hypr3d", "turn", "180", "0")
+    ctl("hyprwalk", "tp", "0", "0", "8")
+    ctl("hyprwalk", "turn", "180", "0")
     time.sleep(0.5)
     w = settled(10)
-    row, at2 = tiled_row(), next(p for p in w["placed"] if p["class"] == "h3d-s2")["center"]
-    a = aim_row("h3d-s2")
+    row, at2 = tiled_row(), next(p for p in w["placed"] if p["class"] == "hyprwalk-s2")["center"]
+    a = aim_row("hyprwalk-s2")
     press("g")
     time.sleep(0.5)
-    ctl("hypr3d", "tp", "-4.5", "0", "11")
-    ctl("hypr3d", "turn", "150", "0")
+    ctl("hyprwalk", "tp", "-4.5", "0", "11")
+    ctl("hyprwalk", "turn", "150", "0")
     time.sleep(1.2)
     s, t = st(), windows3d()["tiling"]
     if s["holding"]:  # Esc with nothing carried would leave 3D
         press("esc")
     s2, w = st(), settled(10)
-    p2 = next(p for p in w["placed"] if p["class"] == "h3d-s2")
+    p2 = next(p for p in w["placed"] if p["class"] == "hyprwalk-s2")
     check("29s", "... one carried out there and let go of (Esc): back in its place in the row", a and s["holding"] is True and t["holdSlot"] == -1 and t["atRing"] is False
           and s2["holding"] is False and s2["mode"] == "active" and p2["tiled"] and tiled_row() == row and math.dist(p2["center"], at2) < 0.02,
           f"aimed {a and a.get('class')}; out there {t['holdSlot']}; {row} -> {tiled_row()}; {p2['center']} (was {at2})")
 
-    ctl("hypr3d", "turn", "140", "0")
+    ctl("hyprwalk", "turn", "140", "0")
     time.sleep(0.5)
-    alice("setsid -f foot --app-id h3d-s5 > /dev/null 2>&1")
-    wait_for("h3d-s5 in the world", lambda: placed("h3d-s5"), 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-s5 > /dev/null 2>&1")
+    wait_for("hyprwalk-s5 in the world", lambda: placed("hyprwalk-s5"), 20, 0.5)
     s, w = st(), settled(10)
-    p5 = next(p for p in w["placed"] if p["class"] == "h3d-s5")
-    check("29s", "away from the ring: a window opening comes in front of you, not into the row; the ring where it was", not p5["tiled"] and "h3d-s5" not in tiled_row()
+    p5 = next(p for p in w["placed"] if p["class"] == "hyprwalk-s5")
+    check("29s", "away from the ring: a window opening comes in front of you, not into the row; the ring where it was", not p5["tiled"] and "hyprwalk-s5" not in tiled_row()
           and relative(p5, s)[0] > 0.3 and off_middle(p5, s) < 20 and math.dist(w["tiling"]["center"], ring0["center"]) < 0.001 and abs(w["tiling"]["yaw"] - ring0["yaw"]) < 0.01,
           f"{relative(p5, s)}; {p5['center']}; {w['tiling']}")
-    ctl("hypr3d", "turn", "220", "0")
+    ctl("hyprwalk", "turn", "220", "0")
     time.sleep(0.5)
-    r = ctl("hypr3d", "window", "h3d-s3", "bring")
+    r = ctl("hyprwalk", "window", "hyprwalk-s3", "bring")
     s, w = st(), settled(10)
-    p3 = next(p for p in w["placed"] if p["class"] == "h3d-s3")
-    check("29s", "... Bring here out there: in front of you, out of the row; the ring where it was", r == "here" and not p3["tiled"] and "h3d-s3" not in tiled_row()
+    p3 = next(p for p in w["placed"] if p["class"] == "hyprwalk-s3")
+    check("29s", "... Bring here out there: in front of you, out of the row; the ring where it was", r == "here" and not p3["tiled"] and "hyprwalk-s3" not in tiled_row()
           and relative(p3, s)[0] > 0.3 and off_middle(p3, s) < 20 and math.dist(w["tiling"]["center"], ring0["center"]) < 0.001, f"{r}; {relative(p3, s)}; {w['tiling']}")
-    ctl("hypr3d", "turn", "100", "0")
+    ctl("hyprwalk", "turn", "100", "0")
     time.sleep(0.5)
-    r = ctl("hypr3d", "window", "h3d-s6", "play")  # brought out, not played yet: "try again"
-    wait_for("h3d-s6 in the world", lambda: placed("h3d-s6"), 10, 0.3)
-    ctl("hypr3d", "play", "off")
+    r = ctl("hyprwalk", "window", "hyprwalk-s6", "play")  # brought out, not played yet: "try again"
+    wait_for("hyprwalk-s6 in the world", lambda: placed("hyprwalk-s6"), 10, 0.3)
+    ctl("hyprwalk", "play", "off")
     s, w = st(), settled(10)
-    p6 = next(p for p in w["placed"] if p["class"] == "h3d-s6")
+    p6 = next(p for p in w["placed"] if p["class"] == "hyprwalk-s6")
     check("29s", "... Play on one from another workspace out there: out here in front of you first, not into the row; the ring where it was", not p6["tiled"]
-          and "h3d-s6" not in tiled_row() and relative(p6, s)[0] > 0.3 and math.dist(w["tiling"]["center"], ring0["center"]) < 0.001, f"{r}; {relative(p6, s)}; {w['tiling']}")
+          and "hyprwalk-s6" not in tiled_row() and relative(p6, s)[0] > 0.3 and math.dist(w["tiling"]["center"], ring0["center"]) < 0.001, f"{r}; {relative(p6, s)}; {w['tiling']}")
     frame("staying-away")
 
     row = tiled_row()
-    ctl("hypr3d", "turn", "150", "0")
+    ctl("hyprwalk", "turn", "150", "0")
     time.sleep(0.5)
     press("shift", "t")
     s, w = st(), settled(10)
@@ -5899,18 +5899,18 @@ def s_tiling_stay():
 
     # tile follow on (Y) elsewhere: the ring centres on your eye at once, yaw kept, and the windows fly over (one
     # --batch request sees the state before any frame; a poll after a frame sees them on the way)
-    ctl("hypr3d", "tp", "2", "0", "7")
-    ctl("hypr3d", "turn", "250", "0")
+    ctl("hyprwalk", "tp", "2", "0", "7")
+    ctl("hyprwalk", "turn", "250", "0")
     time.sleep(0.5)
     was = {p["class"]: p["center"] for p in settled(10)["placed"] if p["tiled"]}
     t_y = time.time()
-    got = ctl("--batch", "hypr3d tile follow on ; hypr3d windows ; hypr3d status").split("\n\n\n")
+    got = ctl("--batch", "hyprwalk tile follow on ; hyprwalk windows ; hyprwalk status").split("\n\n\n")
     first, took, framed = None, time.time() - t_y, False
     while not framed and time.time() - t_y < 0.25:
         first = windows3d()
         took = time.time() - t_y
         framed = any(math.dist(p["center"], was[p["class"]]) > 0.05 for p in first["placed"] if p["class"] in was)
-    told = ctl("hypr3d", "log", "6")
+    told = ctl("hyprwalk", "log", "6")
     s, w = st(), settled(10)
     t = w["tiling"]
     try:
@@ -5935,7 +5935,7 @@ def s_tiling_stay():
     v = ring_checks("with you again", w, "29s")
     frame("staying-with-you-again")
     rel0, feet0 = {x["class"]: x["rel"] for x in v}, s["feet"]
-    ctl("hypr3d", "walk", "1.2")
+    ctl("hyprwalk", "walk", "1.2")
     walked_off()
     s, w = st(), settled(10)
     t = w["tiling"]
@@ -5944,56 +5944,56 @@ def s_tiling_stay():
           f"walked {math.dist(s['feet'], feet0):.2f} m; {t}; eye {s['eye']}")
 
     kept = {p["class"]: p["center"] for p in w["placed"]}
-    ctl("hypr3d", "tile", "off")
+    ctl("hyprwalk", "tile", "off")
     w = settled(10)
     pl = {p["class"]: p["center"] for p in w["placed"]}
     check("29s", "tiling off: the ones put down, brought, opened and played away from the ring stay where they are (and the one opened in it), the one from before goes back",
-          all(c in pl and math.dist(pl[c], kept[c]) < 0.05 for c in ("h3d-s1", "h3d-s3", "h3d-s4", "h3d-s5", "h3d-s6")) and "h3d-s2" in pl and math.dist(pl["h3d-s2"], before["h3d-s2"]) < 0.05,
-          {c: (pl[c], before["h3d-s2"] if c == "h3d-s2" else kept.get(c)) for c in pl})
+          all(c in pl and math.dist(pl[c], kept[c]) < 0.05 for c in ("hyprwalk-s1", "hyprwalk-s3", "hyprwalk-s4", "hyprwalk-s5", "hyprwalk-s6")) and "hyprwalk-s2" in pl and math.dist(pl["hyprwalk-s2"], before["hyprwalk-s2"]) < 0.05,
+          {c: (pl[c], before["hyprwalk-s2"] if c == "hyprwalk-s2" else kept.get(c)) for c in pl})
 
     # hyprctl, the JSON, Lua, the config value
-    r = [ctl("hypr3d", "tile", "follow", "off"), ctl("hypr3d", "tile", "follow", "off"), ctlj("hypr3d", "tile")["follow"], ctl("hypr3d", "tile", "follow", "toggle"),
-         ctlj("hypr3d", "tile")["follow"], ctl("hypr3d", "tile", "follow", "on"), ctl("hypr3d", "tile", "follow"), ctlj("hypr3d", "tile")["follow"],
-         ctl("hypr3d", "tile", "follow"), ctl("hypr3d", "tile", "follow", "sideways"), ctl("hypr3d", "tile", "sideways")]
-    check("29s", "hyprctl hypr3d tile follow off, off, toggle, on, none (toggle) twice, and a wrong word; tile and a wrong word",
+    r = [ctl("hyprwalk", "tile", "follow", "off"), ctl("hyprwalk", "tile", "follow", "off"), ctlj("hyprwalk", "tile")["follow"], ctl("hyprwalk", "tile", "follow", "toggle"),
+         ctlj("hyprwalk", "tile")["follow"], ctl("hyprwalk", "tile", "follow", "on"), ctl("hyprwalk", "tile", "follow"), ctlj("hyprwalk", "tile")["follow"],
+         ctl("hyprwalk", "tile", "follow"), ctl("hyprwalk", "tile", "follow", "sideways"), ctl("hyprwalk", "tile", "sideways")]
+    check("29s", "hyprctl hyprwalk tile follow off, off, toggle, on, none (toggle) twice, and a wrong word; tile and a wrong word",
           r[:9] == ["staying", "staying", False, "following", True, "following", "staying", False, "following"] and r[9] == "error: tile follow [on|off|toggle]"
           and r[10] == "error: tile [on|off|toggle|here|follow]", r)
-    j = ctlj("hypr3d", "tile")
-    ctl("hypr3d", "tile", "on")
-    j2, jw = ctlj("hypr3d", "tile"), windows3d()["tiling"]
-    ctl("hypr3d", "tile", "follow", "off")
-    j3 = ctlj("hypr3d", "tile")
-    check("29s", "hyprctl hypr3d tile (and windows): follow and atRing (off: not at it; going with you: at it; staying, in it: at it)",
+    j = ctlj("hyprwalk", "tile")
+    ctl("hyprwalk", "tile", "on")
+    j2, jw = ctlj("hyprwalk", "tile"), windows3d()["tiling"]
+    ctl("hyprwalk", "tile", "follow", "off")
+    j3 = ctlj("hyprwalk", "tile")
+    check("29s", "hyprctl hyprwalk tile (and windows): follow and atRing (off: not at it; going with you: at it; staying, in it: at it)",
           (j["follow"], j["atRing"], j2["follow"], j2["atRing"], jw["follow"], jw["atRing"], j3["follow"], j3["atRing"]) == (True, False, True, True, True, True, False, True),
           f"{j}; {j2}; {j3}")
-    r1 = ctl("eval", 'local r = hl.plugin.hypr3d.tile("follow"); if r ~= "following" then error("gave " .. tostring(r)) end')
-    f1 = ctlj("hypr3d", "tile")["follow"]
-    r2 = ctl("eval", 'local r = hl.plugin.hypr3d.tile("follow"); if r ~= "staying" then error("gave " .. tostring(r)) end')
-    f2 = ctlj("hypr3d", "tile")["follow"]
-    check("29s", 'hl.plugin.hypr3d.tile("follow"): going with you, and again staying (saying so)', r1 == "ok" and r2 == "ok" and f1 is True and f2 is False, f"{r1} {f1}, {r2} {f2}")
-    ctl("hypr3d", "turn", "30", "0")
+    r1 = ctl("eval", 'local r = hl.plugin.hyprwalk.tile("follow"); if r ~= "following" then error("gave " .. tostring(r)) end')
+    f1 = ctlj("hyprwalk", "tile")["follow"]
+    r2 = ctl("eval", 'local r = hl.plugin.hyprwalk.tile("follow"); if r ~= "staying" then error("gave " .. tostring(r)) end')
+    f2 = ctlj("hyprwalk", "tile")["follow"]
+    check("29s", 'hl.plugin.hyprwalk.tile("follow"): going with you, and again staying (saying so)', r1 == "ok" and r2 == "ok" and f1 is True and f2 is False, f"{r1} {f1}, {r2} {f2}")
+    ctl("hyprwalk", "turn", "30", "0")
     time.sleep(0.5)
-    r3 = ctl("eval", 'local r = hl.plugin.hypr3d.tile("here"); if r ~= "tiling here" then error("gave " .. tostring(r)) end')
-    s, t = st(), ctlj("hypr3d", "tile")
-    r4 = ctl("eval", "hl.plugin.hypr3d.tile()")
-    check("29s", 'hl.plugin.hypr3d.tile("here"): the ring round you, its middle where you look (Shift+T); tile(): tiling off', r3 == "ok" and math.dist(t["center"], s["eye"]) < 0.05
+    r3 = ctl("eval", 'local r = hl.plugin.hyprwalk.tile("here"); if r ~= "tiling here" then error("gave " .. tostring(r)) end')
+    s, t = st(), ctlj("hyprwalk", "tile")
+    r4 = ctl("eval", "hl.plugin.hyprwalk.tile()")
+    check("29s", 'hl.plugin.hyprwalk.tile("here"): the ring round you, its middle where you look (Shift+T); tile(): tiling off', r3 == "ok" and math.dist(t["center"], s["eye"]) < 0.05
           and abs(((t["yaw"] - s["yaw"] + 180) % 360) - 180) < 0.2 and t["follow"] is False and r4 == "ok" and st()["tiling"] is False, f"{r3}; {t}; eye {s['eye']} yaw {s['yaw']}; {r4}")
-    ctl("hypr3d", "tile", "follow", "on")
-    ctl("eval", "hl.config({ plugin = { hypr3d = { tiling_follow = false } } })")
-    off = wait_for("staying from the config", lambda: ctlj("hypr3d", "tile")["follow"] is False, 4, 0.2)
-    ctl("eval", "hl.config({ plugin = { hypr3d = { tiling_follow = true } } })")
-    on = wait_for("going with you from the config", lambda: ctlj("hypr3d", "tile")["follow"] is True, 4, 0.2)
-    check("29s", "plugin:hypr3d:tiling_follow set at run time: staying, and going with you again", off and on, f"{off} {on}")
+    ctl("hyprwalk", "tile", "follow", "on")
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { tiling_follow = false } } })")
+    off = wait_for("staying from the config", lambda: ctlj("hyprwalk", "tile")["follow"] is False, 4, 0.2)
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { tiling_follow = true } } })")
+    on = wait_for("going with you from the config", lambda: ctlj("hyprwalk", "tile")["follow"] is True, 4, 0.2)
+    check("29s", "plugin:hyprwalk:tiling_follow set at run time: staying, and going with you again", off and on, f"{off} {on}")
 
     press("y")
-    told, f = ctl("hypr3d", "log", "4"), ctlj("hypr3d", "tile")["follow"]
+    told, f = ctl("hyprwalk", "log", "4"), ctlj("hyprwalk", "tile")["follow"]
     check("29s", "Y with tiling off: the row will stay where you turn it on, said so", f is False and st()["tiling"] is False and "will stay where you turn it on (T)" in told,
           f"{f}; {told.strip()[-120:]}")
     press("t")
-    told = ctl("hypr3d", "log", "6")
+    told = ctl("hyprwalk", "log", "6")
     s, w = st(), settled(10)
     t = w["tiling"]
-    ctl("hypr3d", "walk", "0.8", "back")
+    ctl("hyprwalk", "walk", "0.8", "back")
     walked_off()
     t2 = windows3d()["tiling"]
     check("29s", "... T: tiling round you, staying (said so), and it stays there as you walk", s["tiling"] is True and t["follow"] is False and "round you, staying here" in told
@@ -6008,18 +6008,18 @@ def s_tiling_stay():
           items[:2])
     press("2")
     time.sleep(0.3)
-    s, told = st(), ctl("hypr3d", "log", "4")
+    s, told = st(), ctl("hyprwalk", "log", "4")
     t = settled(10)["tiling"]
     check("29s", "... picked: going with you again, said so, the menu closed, the ring round you", t["follow"] is True and "the row goes with you again" in told
           and menu().get("open") is False and math.dist(t["center"], s["eye"]) < 0.05, f"{t}; eye {s['eye']}; {told.strip()[-120:]}")
 
-    ctl("hypr3d", "tile", "follow", "off")
+    ctl("hyprwalk", "tile", "follow", "off")
     ensure_3d(False)
     ensure_3d()
     time.sleep(0.5)
     s, w = st(), settled(10)
     t = w["tiling"]
-    ctl("hypr3d", "walk", "0.8", "back")
+    ctl("hyprwalk", "walk", "0.8", "back")
     walked_off()
     t2 = windows3d()["tiling"]
     check("29s", "leaving 3D staying and coming back: tiling, still staying, round where you come in (and it stays there as you walk)", s["tiling"] is True
@@ -6029,7 +6029,7 @@ def s_tiling_stay():
 
     # staying, third person: V and the wheel's boom move nothing
     ensure_avatar(AV)
-    ctl("hypr3d", "view", "first")
+    ctl("hyprwalk", "view", "first")
     time.sleep(0.5)
     w = settled(10)
     t, at = w["tiling"], {p["class"]: p["center"] for p in w["placed"]}
@@ -6045,33 +6045,33 @@ def s_tiling_stay():
     time.sleep(0.8)
     d1 = same(settled(10))
     s = st()
-    ctl("hypr3d", "turn", f"{s['yaw']:.1f}", "-30")  # aim at the ground so the wheel zooms the camera
+    ctl("hyprwalk", "turn", f"{s['yaw']:.1f}", "-30")  # aim at the ground so the wheel zooms the camera
     time.sleep(0.5)
     boom = av()["distance"]
     wheel(3)
     time.sleep(1.0)
     boom2 = av()["distance"]
     d2 = same(settled(10))
-    ctl("hypr3d", "view", "third", "4")  # the wheel's longest boom, whatever is aimed at
+    ctl("hyprwalk", "view", "third", "4")  # the wheel's longest boom, whatever is aimed at
     time.sleep(1.0)
     boom3 = av()["distance"]
     d3 = same(settled(10))
     frame("staying-third")
-    ctl("hypr3d", "turn", f"{s['yaw']:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{s['yaw']:.1f}", "0")
     press("v")
     wait_for("first person", lambda: st()["view"] == "first", 5, 0.2)
     time.sleep(0.5)
     d4 = same(settled(10))
     check("29s", "third person while staying: V, the wheel and a longer boom, and V back move neither the ring nor its windows", abs(boom3 - boom) > 0.3
           and max(d1, d2, d3, d4) < 0.02, f"moved {d1:.3f}, {d2:.3f}, {d3:.3f}, {d4:.3f} m; the boom {boom:.2f}, after the wheel {boom2:.2f}, then {boom3:.2f} m")
-    ctl("hypr3d", "view", "third", "2.6", "0.4")
-    ctl("hypr3d", "view", "first")
-    r = ctl("hypr3d", "reset-windows")
-    j = ctlj("hypr3d", "tile")
+    ctl("hyprwalk", "view", "third", "2.6", "0.4")
+    ctl("hyprwalk", "view", "first")
+    r = ctl("hyprwalk", "reset-windows")
+    j = ctlj("hyprwalk", "tile")
     check("29s", "reset-windows while staying: tiling off, still staying", r == "ok" and j["on"] is False and j["follow"] is False, f"{r}; {j}")
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "tile", "follow", "on")
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "tile", "follow", "on")
+    ctl("hyprwalk", "reset-windows", "forget")
     machine.execute("pkill -u alice foot; true")
     ensure_3d(False)
 
@@ -6113,7 +6113,7 @@ while socks:
 
 def fs_events_start():
     machine.execute("pkill -f /tmp/fs-socket2[.]py; true")
-    machine.succeed(f"cat > /tmp/fs-socket2.py << 'H3D_EOF'\n{FS_S2}\nH3D_EOF\nchmod 644 /tmp/fs-socket2.py; rm -f {FS_S2_LOG}")
+    machine.succeed(f"cat > /tmp/fs-socket2.py << 'HYPRWALK_EOF'\n{FS_S2}\nHYPRWALK_EOF\nchmod 644 /tmp/fs-socket2.py; rm -f {FS_S2_LOG}")
     alice(f"touch {FS_S2_LOG}; setsid -f python3 -u /tmp/fs-socket2.py {FS_S2_LOG} > /dev/null 2>&1")
     wait_for("Hyprland's events", lambda: "#connected" in machine.execute(f"cat {FS_S2_LOG}")[1], 10, 0.3)
 
@@ -6134,13 +6134,13 @@ def fs_bar(on=True):
     machine.execute("pkill -f 'quickshell -p .*topbar'; true")
     if on:
         alice(f"setsid -f quickshell -p {FS_BAR} > /tmp/topbar.log 2>&1")
-        wait_for("the top bar", lambda: "h3d-topbar" in ctl("-j", "layers"), 30)
+        wait_for("the top bar", lambda: "hyprwalk-topbar" in ctl("-j", "layers"), 30)
         time.sleep(0.5)
 
 
 def fs_game(cls, args="", log=GAME_LOG):
-    """starts h3dgame as alice logging to `log`, killing no other; returns its window"""
-    alice(f"rm -f {log}; SDL_APP_ID={cls} SDL_VIDEO_WAYLAND_WMCLASS={cls} setsid -f stdbuf -oL h3dgame --title {cls} {args} >> {log} 2>&1")
+    """starts hyprwalkgame as alice logging to `log`, killing no other; returns its window"""
+    alice(f"rm -f {log}; SDL_APP_ID={cls} SDL_VIDEO_WAYLAND_WMCLASS={cls} setsid -f stdbuf -oL hyprwalkgame --title {cls} {args} >> {log} 2>&1")
     return wait_for(f"{cls}'s window", lambda: client(cls), 30, 0.2)
 
 
@@ -6197,40 +6197,40 @@ def fs_setup(tiling, bg=True):
     clean_windows()
     machine.execute("pkill -u alice foot; pkill -f tkfs[.]py; true")
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "reset-windows", "forget")
-    ctl("eval", 'hl.window_rule({ name = "h3d-fs-float", match = { class = "h3d-float|h3d-fshelp" }, float = true })')
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "reset-windows", "forget")
+    ctl("eval", 'hl.window_rule({ name = "hyprwalk-fs-float", match = { class = "hyprwalk-float|hyprwalk-fshelp" }, float = true })')
     fs_bar(True)
-    alice("setsid -f foot --app-id h3d-wall > /dev/null 2>&1")
-    wait_for("the wall's terminal", lambda: client("h3d-wall"), 20, 0.5)
-    alice("setsid -f foot --app-id h3d-float > /dev/null 2>&1")
-    wait_for("the floating terminal", lambda: client("h3d-float"), 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-wall > /dev/null 2>&1")
+    wait_for("the wall's terminal", lambda: client("hyprwalk-wall"), 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-float > /dev/null 2>&1")
+    wait_for("the floating terminal", lambda: client("hyprwalk-float"), 20, 0.5)
     if bg:
-        fs_game("h3dgame-bg", log=FS_BG_LOG)
+        fs_game("hyprwalkgame-bg", log=FS_BG_LOG)
     time.sleep(1)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     FS["yaw0"] = yaw0 = st()["yaw"]
-    for cls, dy, cmd in (("h3d-t1", -50, "foot --app-id h3d-t1"), ("h3dxterm", 50, f"env DISPLAY={x_display()} xterm -class h3dxterm")):
-        ctl("hypr3d", "turn", f"{yaw0 + dy:.1f}", "0")
+    for cls, dy, cmd in (("hyprwalk-t1", -50, "foot --app-id hyprwalk-t1"), ("hyprwalkxterm", 50, f"env DISPLAY={x_display()} xterm -class hyprwalkxterm")):
+        ctl("hyprwalk", "turn", f"{yaw0 + dy:.1f}", "0")
         time.sleep(0.4)
         alice(f"setsid -f {cmd} > /dev/null 2>&1")
         wait_for(f"{cls} in the world", lambda: placed(cls), 20, 0.5)
-    ctl("hypr3d", "turn", f"{yaw0:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{yaw0:.1f}", "0")
     time.sleep(0.5)
     settled(10)
     if tiling:
         press("t")
         time.sleep(0.5)
         settled(10)
-        ctl("hypr3d", "turn", f"{yaw0 + 170:.1f}", "0")  # behind you: the row's end
+        ctl("hyprwalk", "turn", f"{yaw0 + 170:.1f}", "0")  # behind you: the row's end
         time.sleep(0.4)
-        alice("setsid -f foot --app-id h3d-t2 > /dev/null 2>&1")
-        wait_for("h3d-t2 in the row", lambda: "h3d-t2" in tiled_row(), 20, 0.5)
-        ctl("hypr3d", "turn", f"{yaw0:.1f}", "0")
+        alice("setsid -f foot --app-id hyprwalk-t2 > /dev/null 2>&1")
+        wait_for("hyprwalk-t2 in the row", lambda: "hyprwalk-t2" in tiled_row(), 20, 0.5)
+        ctl("hyprwalk", "turn", f"{yaw0:.1f}", "0")
         settled(10)
 
 
@@ -6261,30 +6261,30 @@ def fs_kill(cls):
 
 
 def fs_done():
-    machine.execute("pkill -f 'title h3dgame'; pkill -x h3dgame; pkill -f tkfs[.]py; pkill -f /tmp/fs-socket2[.]py; true")
-    ctl("hypr3d", "play", "off")
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "reset-windows", "forget")
+    machine.execute("pkill -f 'title hyprwalkgame'; pkill -x hyprwalkgame; pkill -f tkfs[.]py; pkill -f /tmp/fs-socket2[.]py; true")
+    ctl("hyprwalk", "play", "off")
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "reset-windows", "forget")
     fs_bar(False)
     clean_windows()
 
 
 def fs_plain(inside=True):
-    """no windows, tiling off, h3d-fshelp set to float; with `inside`, in 3D in first person at the spawn"""
+    """no windows, tiling off, hyprwalk-fshelp set to float; with `inside`, in 3D in first person at the spawn"""
     lua_session()
     ensure_plugin()
     ensure_3d(False)
     clean_windows()
     machine.execute("pkill -u alice foot; pkill -f tkfs[.]py; true")
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "reset-windows", "forget")
-    ctl("eval", 'hl.window_rule({ name = "h3d-fs-float", match = { class = "h3d-float|h3d-fshelp" }, float = true })')
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "reset-windows", "forget")
+    ctl("eval", 'hl.window_rule({ name = "hyprwalk-fs-float", match = { class = "hyprwalk-float|hyprwalk-fshelp" }, float = true })')
     if inside:
         ensure_3d()
         menu_closed()
-        ctl("hypr3d", "view", "first")
-        ctl("hypr3d", "spawn")
+        ctl("hyprwalk", "view", "first")
+        ctl("hyprwalk", "spawn")
         time.sleep(0.8)
 
 
@@ -6301,19 +6301,19 @@ def s_fullscreen():
     time.sleep(2.5)
     A = fs_state("31a")
     bg0, n0 = fs_bg_rate()
-    fs_game("h3dgame", "--fullscreen")
-    p = fs_playing("h3dgame")
+    fs_game("hyprwalkgame", "--fullscreen")
+    p = fs_playing("hyprwalkgame")
     time.sleep(1.0)
     B = fs_state("31b")
     frame("31b-played")
-    g = B["clients"].get("h3dgame") or {}
-    check("31", "tiling: a game opening fullscreen (Hyprland's fullscreen 2) goes into the row", g.get("fullscreen") == 2 and "h3dgame" in B["row"],
+    g = B["clients"].get("hyprwalkgame") or {}
+    check("31", "tiling: a game opening fullscreen (Hyprland's fullscreen 2) goes into the row", g.get("fullscreen") == 2 and "hyprwalkgame" in B["row"],
           f"fullscreen {g.get('fullscreen')}; row {B['row']}")
-    check("31", "... and it's played by itself (it has the keyboard)", (p or {}).get("class") == "h3dgame", p)
+    check("31", "... and it's played by itself (it has the keyboard)", (p or {}).get("class") == "hyprwalkgame", p)
     lost = [c for c in A["panels"] if c not in B["panels"]]
     kept = [c for c in A["panels"] if c in B["panels"]]
     check("31", "... every other window round you is still drawn (from the wall, from the world, a floating one, another game), the row as it was",
-          not lost and [c for c in B["row"] if c != "h3dgame"] == A["row"],
+          not lost and [c for c in B["row"] if c != "hyprwalkgame"] == A["row"],
           f"gone {lost}; row {A['row']} -> {B['row']}; Hyprland shows {[c for c in A['panels'] if (B['clients'].get(c) or {}).get('visible')]}")
     check("31", "... as they were (alpha)", kept and all(abs(B["panels"][c]["alpha"] - A["panels"][c]["alpha"]) < 0.02 for c in kept),
           {c: (A["panels"][c]["alpha"], B["panels"][c]["alpha"]) for c in kept})
@@ -6327,18 +6327,18 @@ def s_fullscreen():
     press("meta_l", "esc")
     time.sleep(1.0)
     C = fs_state("31c")
-    check("31", "Super+Esc: walking, it stays fullscreen", C["playing"] is None and (C["clients"].get("h3dgame") or {}).get("fullscreen") == 2,
-          f"playing {C['playing']}; fullscreen {(C['clients'].get('h3dgame') or {}).get('fullscreen')}")
-    ctl("hypr3d", "turn", f"{FS['yaw0']:.1f}", "0")
+    check("31", "Super+Esc: walking, it stays fullscreen", C["playing"] is None and (C["clients"].get("hyprwalkgame") or {}).get("fullscreen") == 2,
+          f"playing {C['playing']}; fullscreen {(C['clients'].get('hyprwalkgame') or {}).get('fullscreen')}")
+    ctl("hyprwalk", "turn", f"{FS['yaw0']:.1f}", "0")
     time.sleep(0.5)
     frame("31c-ring")
-    a = aim_row("h3dgame")
+    a = aim_row("hyprwalkgame")
     click("left")
     time.sleep(1.0)
     s, act = st(), fs_active().get("class")
-    check("31", "... a click on it gives it the keyboard, and it isn't played (you ended that, till it's fullscreen again)", a and act == "h3dgame" and s["playing"] is None,
+    check("31", "... a click on it gives it the keyboard, and it isn't played (you ended that, till it's fullscreen again)", a and act == "hyprwalkgame" and s["playing"] is None,
           f"aimed {a and a.get('class')}; active {act}; playing {s['playing']}")
-    ctl("hypr3d", "turn", f"{FS['yaw0']:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{FS['yaw0']:.1f}", "0")
     time.sleep(0.3)
     press("t")
     time.sleep(1.2)
@@ -6348,74 +6348,74 @@ def s_fullscreen():
     press("t")
     time.sleep(1.2)
     E = fs_state("31e")
-    check("31", "T again: tiling on, every window in the row again, the fullscreen game too", E["tiling"] and set(A["row"]) | {"h3dgame"} <= set(E["row"]),
-          f"{A['row']} + h3dgame -> {E['row']}")
+    check("31", "T again: tiling on, every window in the row again, the fullscreen game too", E["tiling"] and set(A["row"]) | {"hyprwalkgame"} <= set(E["row"]),
+          f"{A['row']} + hyprwalkgame -> {E['row']}")
     frame("31e-ring")
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3dgame" })')
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalkgame" })')
     time.sleep(0.3)
-    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "unset", mode = "fullscreen", window = "class:h3dgame" })')
+    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "unset", mode = "fullscreen", window = "class:hyprwalkgame" })')
     time.sleep(1.0)
-    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "set", mode = "fullscreen", window = "class:h3dgame" })')
-    p = fs_playing("h3dgame")
-    check("31", "out of fullscreen and fullscreen again, with the keyboard: played by itself again", (p or {}).get("class") == "h3dgame", p)
+    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "set", mode = "fullscreen", window = "class:hyprwalkgame" })')
+    p = fs_playing("hyprwalkgame")
+    check("31", "out of fullscreen and fullscreen again, with the keyboard: played by itself again", (p or {}).get("class") == "hyprwalkgame", p)
     # a floating window over it takes the keyboard, ending play; when it closes by itself play resumes at once (the
     # shortcut hold applies only when a window closes just after a shortcut key)
-    alice("setsid -f foot --app-id h3d-fshelp > /dev/null 2>&1")
-    wait_for("the window over it", lambda: client("h3d-fshelp"), 20, 0.3)
+    alice("setsid -f foot --app-id hyprwalk-fshelp > /dev/null 2>&1")
+    wait_for("the window over it", lambda: client("hyprwalk-fshelp"), 20, 0.3)
     time.sleep(1.2)
     F = fs_state("31f")
     check("31", "a window opening over it takes the keyboard: play ends, it stays fullscreen",
-          F["active"] == "h3d-fshelp" and F["playing"] is None and (F["clients"].get("h3dgame") or {}).get("fullscreen") == 2,
-          f"active {F['active']}; playing {F['playing']}; fullscreen {(F['clients'].get('h3dgame') or {}).get('fullscreen')}")
-    machine.execute("pkill -f 'app-id h3d-fshelp'; true")
-    wait_for("the window over it gone", lambda: not client("h3d-fshelp"), 10, 0.3)
+          F["active"] == "hyprwalk-fshelp" and F["playing"] is None and (F["clients"].get("hyprwalkgame") or {}).get("fullscreen") == 2,
+          f"active {F['active']}; playing {F['playing']}; fullscreen {(F['clients'].get('hyprwalkgame') or {}).get('fullscreen')}")
+    machine.execute("pkill -f 'app-id hyprwalk-fshelp'; true")
+    wait_for("the window over it gone", lambda: not client("hyprwalk-fshelp"), 10, 0.3)
     time.sleep(0.8)
     act = fs_active().get("class")
-    if act != "h3dgame":  # Hyprland focused another window: refocus the game
+    if act != "hyprwalkgame":  # Hyprland focused another window: refocus the game
         note("31", "the keyboard after the window over it closed", act)
-        ctl("dispatch", 'hl.dsp.focus({ window = "class:h3dgame" })')
+        ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalkgame" })')
     s1 = st()
-    p = fs_playing("h3dgame", 2)
+    p = fs_playing("hyprwalkgame", 2)
     check("31", "... it closes by itself, the keyboard back with the game: played by itself again at once (no shortcut closed it: nothing held back, not the 5 s)",
-          (p or {}).get("class") == "h3dgame", f"active {act}; 0.8 s after: playing {s1['playing']}, playHeld {s1.get('playHeld')}; then {p}")
+          (p or {}).get("class") == "hyprwalkgame", f"active {act}; 0.8 s after: playing {s1['playing']}, playHeld {s1.get('playHeld')}; then {p}")
     # ... same once the keys' 4 s hold ran out: auto-played at once when it closes
-    alice("setsid -f foot --app-id h3d-fshelp > /dev/null 2>&1")
-    wait_for("the window over it", lambda: client("h3d-fshelp"), 20, 0.3)
+    alice("setsid -f foot --app-id hyprwalk-fshelp > /dev/null 2>&1")
+    wait_for("the window over it", lambda: client("hyprwalk-fshelp"), 20, 0.3)
     try:
         s0 = wait_for("the game's keys held back", lambda: (lambda s: s if s.get("playHeld") else None)(st()), 5, 0.2)
         s1 = wait_for("walking again, 4 s without a key", lambda: (lambda s: s if s.get("playHeld") is False else None)(st()), 8, 0.3)
     except TimeoutError:
         s0, s1 = None, st()
     act0 = fs_active().get("class")
-    machine.execute("pkill -f 'app-id h3d-fshelp'; true")
-    wait_for("the window over it gone", lambda: not client("h3d-fshelp"), 10, 0.3)
+    machine.execute("pkill -f 'app-id hyprwalk-fshelp'; true")
+    wait_for("the window over it gone", lambda: not client("hyprwalk-fshelp"), 10, 0.3)
     time.sleep(0.8)
     act = fs_active().get("class")
-    if act != "h3dgame":
+    if act != "hyprwalkgame":
         note("31", "the keyboard after the window over it closed", act)
-        ctl("dispatch", 'hl.dsp.focus({ window = "class:h3dgame" })')
+        ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalkgame" })')
         time.sleep(0.3)
     s2 = st()
-    p = fs_playing("h3dgame", 2)
-    told = cl_log_since(40, "walking again: the keys are hypr3d's")
-    check("31", "... over it again, the game's keys' hold run out (4 s without a key), then it closes: the keyboard back with the game, played by itself at once (\"h3dgame: fullscreen, played\")",
-          s0 and s1.get("playHeld") is False and act0 == "h3d-fshelp" and (p or {}).get("class") == "h3dgame" and "h3dgame: fullscreen, played" in told
+    p = fs_playing("hyprwalkgame", 2)
+    told = cl_log_since(40, "walking again: the keys are hyprwalk's")
+    check("31", "... over it again, the game's keys' hold run out (4 s without a key), then it closes: the keyboard back with the game, played by itself at once (\"hyprwalkgame: fullscreen, played\")",
+          s0 and s1.get("playHeld") is False and act0 == "hyprwalk-fshelp" and (p or {}).get("class") == "hyprwalkgame" and "hyprwalkgame: fullscreen, played" in told
           and "has the keyboard again" not in told, f"held {bool(s0)}, then playHeld {s1.get('playHeld')}, active {act0}; closed: playing {s2['playing']}, then {p}; {told.strip()[-400:]}")
-    alice("setsid -f foot --app-id h3d-fshelp > /dev/null 2>&1")
-    wait_for("the window over it", lambda: client("h3d-fshelp"), 20, 0.3)
+    alice("setsid -f foot --app-id hyprwalk-fshelp > /dev/null 2>&1")
+    wait_for("the window over it", lambda: client("hyprwalk-fshelp"), 20, 0.3)
     time.sleep(1.2)
     s0, act0 = st(), fs_active().get("class")
-    a = aim_row("h3dgame")
+    a = aim_row("hyprwalkgame")
     click("left")
-    p = fs_playing("h3dgame")
+    p = fs_playing("hyprwalkgame")
     check("31", "... over it again, the keyboard its: a click on the game gives the game the keyboard, and it's played by itself",
-          act0 == "h3d-fshelp" and s0["playing"] is None and a and (p or {}).get("class") == "h3dgame",
+          act0 == "hyprwalk-fshelp" and s0["playing"] is None and a and (p or {}).get("class") == "hyprwalkgame",
           f"before: active {act0}, playing {s0['playing']}; aimed {a and a.get('class')}; after {p}")
-    machine.execute("pkill -f 'app-id h3d-fshelp'; true")
-    wait_for("the window over it gone", lambda: not client("h3d-fshelp"), 10, 0.3)
-    ctl("hypr3d", "play", "off")
-    machine.execute("pkill -f 'title h3dgame --fullscreen'; true")
-    wait_for("the game gone", lambda: not client("h3dgame"), 10, 0.3)
+    machine.execute("pkill -f 'app-id hyprwalk-fshelp'; true")
+    wait_for("the window over it gone", lambda: not client("hyprwalk-fshelp"), 10, 0.3)
+    ctl("hyprwalk", "play", "off")
+    machine.execute("pkill -f 'title hyprwalkgame --fullscreen'; true")
+    wait_for("the game gone", lambda: not client("hyprwalkgame"), 10, 0.3)
     time.sleep(2.0)
     Z = fs_state("31z")
     missing = [c for c in A["panels"] if c not in Z["panels"]]
@@ -6428,13 +6428,13 @@ def s_fullscreen():
     time.sleep(2.5)
     A = fs_state("31g")
     bg0, n0 = fs_bg_rate()
-    fs_game("h3dgame", "--fullscreen")
-    p = fs_playing("h3dgame")
+    fs_game("hyprwalkgame", "--fullscreen")
+    p = fs_playing("hyprwalkgame")
     time.sleep(1.0)
     B = fs_state("31h")
-    g = B["clients"].get("h3dgame") or {}
+    g = B["clients"].get("hyprwalkgame") or {}
     check("31", "no tiling: a game opening fullscreen opens in front of you, played by itself",
-          g.get("fullscreen") == 2 and "h3dgame" in B["placed"] and (p or {}).get("class") == "h3dgame", f"fullscreen {g.get('fullscreen')}; placed {list(B['placed'])}; {p}")
+          g.get("fullscreen") == 2 and "hyprwalkgame" in B["placed"] and (p or {}).get("class") == "hyprwalkgame", f"fullscreen {g.get('fullscreen')}; placed {list(B['placed'])}; {p}")
     lost = [c for c in A["panels"] if c not in B["panels"]]
     kept = [c for c in A["panels"] if c in B["panels"]]
     check("31", "... every other window still drawn, as it was: the wall's (tiled, floating, another game), the world's",
@@ -6446,32 +6446,32 @@ def s_fullscreen():
     press("meta_l", "esc")
     time.sleep(0.8)
     frame("31h-view")
-    r = ctl("hypr3d", "window", "h3dgame", "wall")
-    wait_for("the game on the wall", lambda: not placed("h3dgame"), 10, 0.3)
+    r = ctl("hyprwalk", "window", "hyprwalkgame", "wall")
+    wait_for("the game on the wall", lambda: not placed("hyprwalkgame"), 10, 0.3)
     time.sleep(1.0)
     C = fs_state("31i")
     frame("31i-wall")
-    wall = [c for c in ("h3d-wall", "h3d-float", "h3dgame-bg") if c in C["panels"]]
-    world = [c for c in ("h3d-t1", "h3dxterm") if c not in C["panels"]]
+    wall = [c for c in ("hyprwalk-wall", "hyprwalk-float", "hyprwalkgame-bg") if c in C["panels"]]
+    world = [c for c in ("hyprwalk-t1", "hyprwalkxterm") if c not in C["panels"]]
     check("31", "sent to the wall, fullscreen: it hides the wall's other windows and the top bar there, as on the 2D desktop",
-          (C["clients"].get("h3dgame") or {}).get("fullscreen") == 2 and "h3dgame" in C["panels"] and not wall and not C["bar"], f"{r}; still drawn {wall}; bar {C['bar']}")
+          (C["clients"].get("hyprwalkgame") or {}).get("fullscreen") == 2 and "hyprwalkgame" in C["panels"] and not wall and not C["bar"], f"{r}; still drawn {wall}; bar {C['bar']}")
     check("31", "... and nothing else: the windows out in the world still drawn", not world, f"gone {world}")
     fs_bar(True)  # restarted: maps over it, like a notification
     time.sleep(0.8)
     C2 = fs_state("31i2")
     check("31", "... a surface on the top layer mapped after it went fullscreen (the bar started again, as a notification maps) is drawn over it, as on the 2D desktop",
-          (C2["clients"].get("h3dgame") or {}).get("fullscreen") == 2 and "h3dgame" in C2["panels"] and C2["bar"], f"bar {C['bar']} -> {C2['bar']}")
+          (C2["clients"].get("hyprwalkgame") or {}).get("fullscreen") == 2 and "hyprwalkgame" in C2["panels"] and C2["bar"], f"bar {C['bar']} -> {C2['bar']}")
     fs_done()
 
     # ---- maximized (Hyprland's fullscreen 1) hides the rest of its workspace too
     fs_setup(True, bg=False)
     A = fs_state("31j")
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3d-t2" })')
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalk-t2" })')
     time.sleep(0.4)
     ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "set", mode = "maximized" })')
     time.sleep(1.5)
     B = fs_state("31k")
-    g = B["clients"].get("h3d-t2") or {}
+    g = B["clients"].get("hyprwalk-t2") or {}
     lost = [c for c in A["panels"] if c not in B["panels"]]
     check("31", "tiling: a terminal in the row maximized (Hyprland's fullscreen 1): every other window still drawn", g.get("fullscreen") == 1 and not lost,
           f"fullscreen {g.get('fullscreen')}; gone {lost}")
@@ -6490,14 +6490,14 @@ def s_fullscreen():
     alice(f"rm -f {GAME_LOG}; touch {GAME_LOG}")
     env = f"DISPLAY={xd} SDL_VIDEODRIVER=x11 SDL_VIDEO_X11_WMCLASS=steam_app_553850 SteamAppId=553850 SteamGameId=553850"
     hd2 = lambda: next((c for c in json.loads(ctl("-j", "clients")) if c["title"] == "hd2main"), None)
-    alice(f"env {env} setsid -f h3dgame --title hd2main --log {GAME_LOG} > /dev/null 2>&1")
+    alice(f"env {env} setsid -f hyprwalkgame --title hd2main --log {GAME_LOG} > /dev/null 2>&1")
     try:
         g = wait_for("the game's window", hd2, 20, 0.1)
     except TimeoutError:  # sometimes: no matching xwaylandSurface
         note("31", "the game's X11 window never mapped: started again")
         machine.execute("pkill -f 'title hd2main'; true")
         time.sleep(0.5)
-        alice(f"env {env} setsid -f h3dgame --title hd2main --log {GAME_LOG} > /dev/null 2>&1")
+        alice(f"env {env} setsid -f hyprwalkgame --title hd2main --log {GAME_LOG} > /dev/null 2>&1")
         g = wait_for("the game's window", hd2, 30, 0.1)
     time.sleep(0.3)
     alice(f"env DISPLAY={xd} SteamAppId=553850 SteamGameId=553850 setsid -f xterm -class steam_app_553850 -T hd2helper -geometry 60x12 > /dev/null 2>&1")
@@ -6512,7 +6512,7 @@ def s_fullscreen():
     p = fs_playing("steam_app_553850")
     time.sleep(0.5)
     ev = fs_events("hd2")
-    told = ctl("hypr3d", "log", "12")
+    told = ctl("hyprwalk", "log", "12")
     i = ev.index("fullscreen>>1") if "fullscreen>>1" in ev else -1
     # the empty activewindow comes after fullscreen>>1 in Hyprland 0.55, before it in 0.56
     nofocus = ev[i + 1:i + 2] == ["activewindow>>,"] or ev[max(i - 2, 0):i] == ["activewindow>>,", "activewindowv2>>"]
@@ -6523,15 +6523,15 @@ def s_fullscreen():
     got, moved = fs_keys("31-hd2")
     check("31", "... its keys are its: W and 8 reach it, and you don't walk", "key down W" in got and "key down 8" in got and moved < 0.05,
           f"the game got {got}; you moved {moved:.2f} m")
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
     fs_kill("steam_app_553850")
 
     # ---- Wine's way (Tk): fullscreen by client message after its own dialog took the keyboard
-    alice(f"rm -f {FS_TK_LOG}; DISPLAY={xd} setsid -f python3 -u {H}/tkfs.py h3dtkfs transient 1500 3000 > {FS_TK_LOG} 2>&1")
+    alice(f"rm -f {FS_TK_LOG}; DISPLAY={xd} setsid -f python3 -u {H}/tkfs.py hyprwalktkfs transient 1500 3000 > {FS_TK_LOG} 2>&1")
     wait_for("its dialog", lambda: "helper mapped" in machine.succeed(f"cat {FS_TK_LOG}"), 30, 0.2)
     wait_for("its fullscreen request", lambda: "asked for fullscreen" in machine.succeed(f"cat {FS_TK_LOG}"), 30, 0.2)
     time.sleep(0.5)
-    main = next((c for c in json.loads(ctl("-j", "clients")) if c["title"].startswith("MAIN h3dtkfs")), {})
+    main = next((c for c in json.loads(ctl("-j", "clients")) if c["title"].startswith("MAIN hyprwalktkfs")), {})
     p = fs_playing(main.get("class", "?"))
     check("31", "an X11 app (Tk) going fullscreen by a client message after its dialog took the keyboard (Wine's way): played by itself",
           main.get("fullscreen") == 2 and p and p["title"].startswith("MAIN"), f"fullscreen {main.get('fullscreen')}; {p}")
@@ -6549,11 +6549,11 @@ def s_fullscreen():
     fs_plain()
     xd = x_display()
     go = "/tmp/tkfs-dialog.go"
-    alice(f"rm -f {go} {FS_TK_LOG}; DISPLAY={xd} setsid -f python3 -u {H}/tkfs.py h3dtkdlg none 500 1000 {go} > {FS_TK_LOG} 2>&1")
+    alice(f"rm -f {go} {FS_TK_LOG}; DISPLAY={xd} setsid -f python3 -u {H}/tkfs.py hyprwalktkdlg none 500 1000 {go} > {FS_TK_LOG} 2>&1")
     wait_for("its fullscreen request", lambda: "asked for fullscreen" in machine.succeed(f"cat {FS_TK_LOG}"), 30, 0.2)
-    p0 = fs_playing("H3dtkdlg")
-    alice("setsid -f foot --app-id h3d-fshelp > /dev/null 2>&1")
-    wait_for("the window over it", lambda: client("h3d-fshelp"), 20, 0.3)
+    p0 = fs_playing("Hyprwalktkdlg")
+    alice("setsid -f foot --app-id hyprwalk-fshelp > /dev/null 2>&1")
+    wait_for("the window over it", lambda: client("hyprwalk-fshelp"), 20, 0.3)
     time.sleep(1.2)
     s1, act1 = st(), fs_active().get("class")
     alice(f"touch {go}")
@@ -6567,28 +6567,28 @@ def s_fullscreen():
     got = [l for l in machine.succeed(f"cat {FS_TK_LOG}").split("### keys", 1)[-1].splitlines() if l.startswith("key ")]
     frame("31-dialog")
     check("31", "a dialog of the game's own opening over it after play mode ended by itself (a window over it took the keyboard): the dialog keeps the keyboard, the game's played with it, and your keys are the dialog's",
-          fs_title(p0).startswith("MAIN") and act1 == "h3d-fshelp" and s1["playing"] is None and act2.startswith("DIALOG") and fs_title(s2["playing"]).startswith("MAIN") and
+          fs_title(p0).startswith("MAIN") and act1 == "hyprwalk-fshelp" and s1["playing"] is None and act2.startswith("DIALOG") and fs_title(s2["playing"]).startswith("MAIN") and
           got == ["key k dialog", "key j dialog"],
           f"played first: {fs_title(p0)}; a window over it: active {act1}, playing {fs_title(s1['playing'])}; its dialog: active {act2}, playing {fs_title(s2['playing'])}; "
           f"keys {got}")
-    machine.execute("pkill -f tkfs[.]py; pkill -f 'app-id h3d-fshelp'; true")
-    wait_for("the app gone", lambda: not client("H3dtkdlg"), 10, 0.3)
+    machine.execute("pkill -f tkfs[.]py; pkill -f 'app-id hyprwalk-fshelp'; true")
+    wait_for("the app gone", lambda: not client("Hyprwalktkdlg"), 10, 0.3)
 
     # ---- a transient dialog going fullscreen: the dialog itself is played (focusing its parent would end the
     # fullscreen); Super+Esc or play off ends play for good; also with misc:on_focus_under_fullscreen 0
-    dlg = lambda: client("H3dtkpfsdlg") or {}
-    autoplays = lambda: sum(1 for l in ctl("hypr3d", "log", "400").splitlines() if "fullscreen, played" in l or "focused and played" in l)
+    dlg = lambda: client("Hyprwalktkpfsdlg") or {}
+    autoplays = lambda: sum(1 for l in ctl("hyprwalk", "log", "400").splitlines() if "fullscreen, played" in l or "focused and played" in l)
     for setting in (2, 0):
         ctl("eval", f"hl.config({{ misc = {{ on_focus_under_fullscreen = {setting} }} }})")
-        alice(f"rm -f {FS_TK_LOG}; DISPLAY={xd} setsid -f python3 -u {H}/tkfs.py h3dtkpfs fullscreen 1000 1500 > {FS_TK_LOG} 2>&1")
+        alice(f"rm -f {FS_TK_LOG}; DISPLAY={xd} setsid -f python3 -u {H}/tkfs.py hyprwalktkpfs fullscreen 1000 1500 > {FS_TK_LOG} 2>&1")
         wait_for("its fullscreen request", lambda: "asked for fullscreen" in machine.succeed(f"cat {FS_TK_LOG}"), 30, 0.2)
-        p = fs_playing("H3dtkpfsdlg")
+        p = fs_playing("Hyprwalktkpfsdlg")
         time.sleep(1.0)
         d0, s0 = dlg(), st()
         frame(f"31-dialog-fullscreen-{setting}")
         check("31", f"a dialog of an app's out in the world going fullscreen (misc:on_focus_under_fullscreen {setting}): it's played itself, and stays fullscreen",
               fs_title(p).startswith("DIALOG") and fs_title(s0["playing"]).startswith("DIALOG") and d0.get("fullscreen") == 2,
-              f"played {fs_title(p)}, then {fs_title(s0['playing'])}; the dialog: fullscreen {d0.get('fullscreen')}; the window: {(client('H3dtkpfs') or {}).get('fullscreen')}")
+              f"played {fs_title(p)}, then {fs_title(s0['playing'])}; the dialog: fullscreen {d0.get('fullscreen')}; the window: {(client('Hyprwalktkpfs') or {}).get('fullscreen')}")
         n0 = autoplays()
         press("meta_l", "esc")
         time.sleep(1.5)
@@ -6596,66 +6596,66 @@ def s_fullscreen():
         check("31", "... Super+Esc: walking, and it stays so while the dialog stays fullscreen", s0["playing"] and s1["playing"] is None and d1.get("fullscreen") == 2,
               f"playing {fs_title(s0['playing'])} -> {fs_title(s1['playing'])}; played by itself since: {autoplays() - n0}; fullscreen {d1.get('fullscreen')}")
         if setting == 2:
-            a = aim_row("H3dtkpfsdlg")
+            a = aim_row("Hyprwalktkpfsdlg")
             press("p")
-            p2 = fs_playing("H3dtkpfsdlg")
+            p2 = fs_playing("Hyprwalktkpfsdlg")
             time.sleep(1.0)
             d2 = dlg()
             n1 = autoplays()
-            ctl("hypr3d", "play", "off")
+            ctl("hyprwalk", "play", "off")
             time.sleep(1.5)
             s3, d3 = st(), dlg()
-            check("31", "... P on it: it's played itself, still fullscreen; hyprctl hypr3d play off: walking, and it stays so",
+            check("31", "... P on it: it's played itself, still fullscreen; hyprctl hyprwalk play off: walking, and it stays so",
                   a and fs_title(p2).startswith("DIALOG") and d2.get("fullscreen") == 2 and s3["playing"] is None and d3.get("fullscreen") == 2,
                   f"aimed {a and a.get('class')}; P: {fs_title(p2)}, fullscreen {d2.get('fullscreen')}; play off: {fs_title(s3['playing'])}, fullscreen {d3.get('fullscreen')}, "
                   f"played by itself since: {autoplays() - n1}")
         machine.execute("pkill -f tkfs[.]py; true")
-        wait_for("the app gone", lambda: not client("H3dtkpfs") and not dlg(), 10, 0.3)
-        ctl("hypr3d", "play", "off")
+        wait_for("the app gone", lambda: not client("Hyprwalktkpfs") and not dlg(), 10, 0.3)
+        ctl("hyprwalk", "play", "off")
     ctl("eval", "hl.config({ misc = { on_focus_under_fullscreen = 2 } })")
     fs_done()
 
     # ---- two monitors: play ended, the mouse away and back: the fullscreen game isn't auto-played (you came back to
     # walk); a click plays it
     fs_plain(inside=False)
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { monitor = "" } } })')
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { monitor = "" } } })')
     r, m = second_monitor()
-    ctl("dispatch", 'hl.dsp.focus({ monitor = "H3D-2" })')
-    alice("setsid -f foot --app-id h3d-other > /dev/null 2>&1")
-    wait_for("a terminal on the other monitor", lambda: (client("h3d-other") or {}).get("monitor") == m["H3D-2"]["id"], 20, 0.3)
+    ctl("dispatch", 'hl.dsp.focus({ monitor = "HYPRWALK-2" })')
+    alice("setsid -f foot --app-id hyprwalk-other > /dev/null 2>&1")
+    wait_for("a terminal on the other monitor", lambda: (client("hyprwalk-other") or {}).get("monitor") == m["HYPRWALK-2"]["id"], 20, 0.3)
     ctl("dispatch", 'hl.dsp.focus({ monitor = "Virtual-1" })')
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
-    fs_game("h3dgame", "--fullscreen")
-    p0 = fs_playing("h3dgame")
-    alice("setsid -f foot --app-id h3d-fshelp > /dev/null 2>&1")
-    wait_for("the window over it", lambda: client("h3d-fshelp"), 20, 0.3)
+    fs_game("hyprwalkgame", "--fullscreen")
+    p0 = fs_playing("hyprwalkgame")
+    alice("setsid -f foot --app-id hyprwalk-fshelp > /dev/null 2>&1")
+    wait_for("the window over it", lambda: client("hyprwalk-fshelp"), 20, 0.3)
     time.sleep(1.2)
     s1, act1 = st(), fs_active().get("class")
-    ctl("hypr3d", "away", "on")
+    ctl("hyprwalk", "away", "on")
     time.sleep(0.5)
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3d-other" })')  # as a click on it there
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalk-other" })')  # as a click on it there
     time.sleep(0.5)
     s2, act2 = st(), fs_active().get("class")
-    ctl("hypr3d", "away", "off")
+    ctl("hyprwalk", "away", "off")
     time.sleep(1.5)
     s3, act3 = st(), fs_active().get("class")
     check("31", "two monitors: the game fullscreen, play mode ended by itself (a window over it took the keyboard), the mouse away on the other monitor (a terminal there gets the keyboard) and back: the game isn't played by itself",
-          fs_title(p0) == "h3dgame" and act1 == "h3d-fshelp" and s1["playing"] is None and s2["away"] and act2 == "h3d-other" and not s3["away"] and s3["playing"] is None and
-          act3 != "h3dgame", f"{r}; played first: {fs_title(p0)}; the window over it: active {act1}, playing {fs_title(s1['playing'])}; away {s2['away']}, active {act2}; "
+          fs_title(p0) == "hyprwalkgame" and act1 == "hyprwalk-fshelp" and s1["playing"] is None and s2["away"] and act2 == "hyprwalk-other" and not s3["away"] and s3["playing"] is None and
+          act3 != "hyprwalkgame", f"{r}; played first: {fs_title(p0)}; the window over it: active {act1}, playing {fs_title(s1['playing'])}; away {s2['away']}, active {act2}; "
           f"back: away {s3['away']}, active {act3}, playing {fs_title(s3['playing'])}")
-    a = aim_row("h3dgame")
+    a = aim_row("hyprwalkgame")
     click("left")
-    p = fs_playing("h3dgame")
-    check("31", "... a click on it: played by itself", a and fs_title(p) == "h3dgame", f"aimed {a and a.get('class')}; {fs_title(p)}")
+    p = fs_playing("hyprwalkgame")
+    check("31", "... a click on it: played by itself", a and fs_title(p) == "hyprwalkgame", f"aimed {a and a.get('class')}; {fs_title(p)}")
     fs_done()
-    machine.execute("pkill -f 'app-id h3d-other'; pkill -f 'app-id h3d-fshelp'; true")
+    machine.execute("pkill -f 'app-id hyprwalk-other'; pkill -f 'app-id hyprwalk-fshelp'; true")
     ensure_3d(False)
-    ctl("output", "remove", "H3D-2")
-    wait_for("one monitor", lambda: "H3D-2" not in monitors(), 10, 0.3)
+    ctl("output", "remove", "HYPRWALK-2")
+    wait_for("one monitor", lambda: "HYPRWALK-2" not in monitors(), 10, 0.3)
 
     # ---- a launcher (a keyboard-grabbing layer surface) over the played game: play ends, and resumes after Esc
     fs_plain()
@@ -6664,8 +6664,8 @@ def s_fullscreen():
     wait_for("the launcher's IPC", lambda: as_alice(f"quickshell ipc -p {LAUNCHER} show", 10)[0] == 0, 30, 0.5)
     ctl("eval", 'hl.unbind("SUPER + D")')  # an earlier bind would toggle it twice
     ctl("eval", f'hl.bind("SUPER + D", hl.dsp.exec_cmd("quickshell ipc -p {LAUNCHER} call launcher toggle"))')
-    fs_game("h3dgame", "--fullscreen")
-    p0 = fs_playing("h3dgame")
+    fs_game("hyprwalkgame", "--fullscreen")
+    p0 = fs_playing("hyprwalkgame")
     press("meta_l", "d")
     try:
         sh = wait_for("the launcher over the 3D view", shell_layer, 10)
@@ -6680,10 +6680,10 @@ def s_fullscreen():
         wait_for("the launcher closed", lambda: not shell_layer(), 10)
     except TimeoutError:
         pass
-    p2 = fs_playing("h3dgame")
+    p2 = fs_playing("hyprwalkgame")
     log = launcher_log()
     check("31", "a launcher (a layer surface on a keybind) over the game played: play mode ends, the keys its own; it closes (Esc): the game's played by itself again",
-          fs_title(p0) == "h3dgame" and sh and s1["playing"] is None and "text wasd" in log and "escape" in log and fs_title(p2) == "h3dgame",
+          fs_title(p0) == "hyprwalkgame" and sh and s1["playing"] is None and "text wasd" in log and "escape" in log and fs_title(p2) == "hyprwalkgame",
           f"played first: {fs_title(p0)}; the launcher: {sh and sh.get('namespace')}, playing {fs_title(s1['playing'])}, it got {log[-3:]}; closed: playing {fs_title(p2)}")
     machine.execute("pkill -f 'quickshell -p'; true")
     ctl("eval", 'hl.unbind("SUPER + D")')
@@ -6692,35 +6692,35 @@ def s_fullscreen():
     # ---- 3D left with the game fullscreen, and entered again
     fs_setup(True, bg=False)
     A = fs_state("31l")
-    fs_game("h3dgame", "--fullscreen")
-    fs_playing("h3dgame")
+    fs_game("hyprwalkgame", "--fullscreen")
+    fs_playing("hyprwalkgame")
     time.sleep(0.5)
     ensure_3d(False)
     time.sleep(1.0)
     cl = json.loads(ctl("-j", "clients"))
-    shown = [c["class"] for c in cl if c["visible"] and c["class"] != "h3dgame"]
+    shown = [c["class"] for c in cl if c["visible"] and c["class"] != "hyprwalkgame"]
     check("31", "3D left with the game fullscreen in the row: on the 2D desktop only it shows (Hyprland's own)",
-          any(c["class"] == "h3dgame" and c["fullscreen"] == 2 and c["visible"] for c in cl) and not shown, f"shown too: {shown}")
+          any(c["class"] == "hyprwalkgame" and c["fullscreen"] == 2 and c["visible"] for c in cl) and not shown, f"shown too: {shown}")
     frame("31-2d")
     ensure_3d()
     time.sleep(2.0)
     G = fs_state("31m")
     check("31", "3D entered with it fullscreen: it isn't played (it was fullscreen already: P plays it)", G["playing"] is None, G["playing"])
     lost = [c for c in A["panels"] if c not in G["panels"]]
-    check("31", "... and every other window is drawn round you, the game in the row", not lost and "h3dgame" in G["row"], f"gone {lost}; row {G['row']}")
+    check("31", "... and every other window is drawn round you, the game in the row", not lost and "hyprwalkgame" in G["row"], f"gone {lost}; row {G['row']}")
     frame("31m-entered")
     fs_done()
 
     # ---- an X11 app's tooltip (override-redirect) stays drawn while a no_focus wall window goes fullscreen
     machine.execute("pkill -u alice foot; true")
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
-    ctl("eval", 'hl.window_rule({ name = "h3d-fs-nofocus", match = { class = "h3d-nofocus" }, no_focus = true })')
+    ctl("eval", 'hl.window_rule({ name = "hyprwalk-fs-nofocus", match = { class = "hyprwalk-nofocus" }, no_focus = true })')
     ensure_3d(False)
-    alice("setsid -f foot --app-id h3d-nofocus > /dev/null 2>&1")
-    wait_for("the wall's terminal", lambda: client("h3d-nofocus"), 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-nofocus > /dev/null 2>&1")
+    wait_for("the wall's terminal", lambda: client("hyprwalk-nofocus"), 20, 0.5)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     c = tk_start()
     wait_for("the Tk app out in the world", lambda: placed(c["class"]), 20, 0.5)
@@ -6731,21 +6731,21 @@ def s_fullscreen():
         tips = wait_for("its tooltip", lambda: [p for p in panels() if p["kind"] == "popup" and p["class"] == c["class"]], 6, 0.3)
     except TimeoutError:
         tips = []
-    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "set", mode = "fullscreen", window = "class:h3d-nofocus" })')
+    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "set", mode = "fullscreen", window = "class:hyprwalk-nofocus" })')
     time.sleep(1.5)
     B = fs_state("31o")
     tips2 = [p for p in panels() if p["kind"] == "popup" and p["class"] == c["class"]]
     frame("31o-tooltip")
     check("31", "an X11 app out in the world with its tooltip up, a window on the wall going fullscreen: the app and its tooltip (an override-redirect window) still drawn, over it",
-          a and tips and (B["clients"].get("h3d-nofocus") or {}).get("fullscreen") == 2 and B["playing"] is None and c["class"] in B["panels"] and tips2 and
+          a and tips and (B["clients"].get("hyprwalk-nofocus") or {}).get("fullscreen") == 2 and B["playing"] is None and c["class"] in B["panels"] and tips2 and
           all(p["placed"] for p in tips2), f"aimed {a and a.get('local')}; tooltip before {[p['box'] for p in tips]}, after {[(p['box'], p['placed']) for p in tips2]}; "
           f"drawn {list(B['panels'])}; playing {B['playing']}")
-    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "unset", mode = "fullscreen", window = "class:h3d-nofocus" })')
+    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "unset", mode = "fullscreen", window = "class:hyprwalk-nofocus" })')
     machine.execute("pkill -f tkapp[.]py; true")
     fs_done()
     machine.execute("pkill -u alice foot; true")
     ensure_3d(False)
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     time.sleep(1)
 
@@ -6758,15 +6758,15 @@ def s_live():
     machine.execute("rm -rf /tmp/live /tmp/live.out /tmp/live.status")
     alice("setsid -f swaybg -c '#2b4a6f' > /dev/null 2>&1")
     shell_overlay()  # the crosshair starts on this overlay
-    alice("setsid -f foot --app-id h3d-clock sh -c 'while :; do clear; date +%T.%N; sleep 0.25; done' > /dev/null 2>&1")
-    wait_for("the clock", lambda: any(c["class"] == "h3d-clock" for c in json.loads(ctl("-j", "clients"))), 20)
+    alice("setsid -f foot --app-id hyprwalk-clock sh -c 'while :; do clear; date +%T.%N; sleep 0.25; done' > /dev/null 2>&1")
+    wait_for("the clock", lambda: any(c["class"] == "hyprwalk-clock" for c in json.loads(ctl("-j", "clients"))), 20)
     time.sleep(1.5)
     # CHECK_SAY: sings --mic's prompts into the test microphone, cutting off the previous one
     machine.succeed(f"""cat > {H}/sing.sh << 'EOF'
 #!/bin/sh
-pkill -f 'node.name=h3d-[s]ing'
+pkill -f 'node.name=hyprwalk-[s]ing'
 case "$1" in s) f=hiss ;; quiet) f=silence ;; *) f=man_$1 ;; esac
-exec pw-cat -p --target test_mic_in -P node.name=h3d-sing {H}/wav/${{f}}_long.wav
+exec pw-cat -p --target test_mic_in -P node.name=hyprwalk-sing {H}/wav/${{f}}_long.wav
 EOF
 chmod 755 {H}/sing.sh && chown alice {H}/sing.sh""")
     # CHECK_DO: does --app's prompts through hyprctl instead of keys
@@ -6774,14 +6774,14 @@ chmod 755 {H}/sing.sh && chown alice {H}/sing.sh""")
 #!/bin/sh
 sleep 1
 case "$1" in
-    play) hyprctl hypr3d play on ;;
-    stop) hyprctl hypr3d play off ;;
-    type) hyprctl hypr3d type on; sleep 2; hyprctl hypr3d type off ;;
-    carry) hyprctl hypr3d aim "$2"; sleep 1; hyprctl hypr3d grab; sleep 0.5; hyprctl hypr3d walk 0.4 back ;;
-    place) hyprctl hypr3d grab ;;
-    pin) hyprctl hypr3d window "$2" pin ;;
-    unpin) hyprctl hypr3d walk 0.4 back; sleep 1.5; hyprctl hypr3d pin; sleep 1; hyprctl hypr3d grab ;;
-    free) hyprctl hypr3d window "$2" play; sleep 8; hyprctl hypr3d play off ;;
+    play) hyprctl hyprwalk play on ;;
+    stop) hyprctl hyprwalk play off ;;
+    type) hyprctl hyprwalk type on; sleep 2; hyprctl hyprwalk type off ;;
+    carry) hyprctl hyprwalk aim "$2"; sleep 1; hyprctl hyprwalk grab; sleep 0.5; hyprctl hyprwalk walk 0.4 back ;;
+    place) hyprctl hyprwalk grab ;;
+    pin) hyprctl hyprwalk window "$2" pin ;;
+    unpin) hyprctl hyprwalk walk 0.4 back; sleep 1.5; hyprctl hyprwalk pin; sleep 1; hyprctl hyprwalk grab ;;
+    free) hyprctl hyprwalk window "$2" play; sleep 8; hyprctl hyprwalk play off ;;
 esac
 EOF
 chmod 755 {H}/do.sh && chown alice {H}/do.sh""")
@@ -6792,15 +6792,15 @@ chmod 755 {H}/do.sh && chown alice {H}/do.sh""")
         """runs check.sh ARGS in its own terminal, output teed to /tmp/NAME.out"""
         run = (f"cd {H} && HYPRLAND_INSTANCE_SIGNATURE={sig} CHECK_SAY={H}/sing.sh CHECK_DO={H}/do.sh bash {H}/repo/tools/test/live/check.sh /tmp/live {args} "
                f"2>&1 | tee /tmp/{name}.out; echo ${{PIPESTATUS[0]}} > /tmp/{name}.status")
-        alice(f"setsid -f foot --app-id h3d-check bash -c {shlex.quote(run)} > /dev/null 2>&1")
+        alice(f"setsid -f foot --app-id hyprwalk-check bash -c {shlex.quote(run)} > /dev/null 2>&1")
 
     t0 = time.time()
-    in_terminal(f"--mic --avatar {AV} {lit} --app 'h3dgame --title liveapp' --so {SO}", "live")
+    in_terminal(f"--mic --avatar {AV} {lit} --app 'hyprwalkgame --title liveapp' --so {SO}", "live")
     status = wait_for("the script to finish", lambda: machine.execute("cat /tmp/live.status")[1].strip(), 900, 1)
     took = time.time() - t0
     (LOGS / "live-check.txt").write_text(machine.execute("cat /tmp/live.out")[1])
     run1 = machine.execute("readlink /tmp/live/latest")[1].strip()
-    for f in ("results.txt", "lipsync.jsonl", "hypr3d.log"):
+    for f in ("results.txt", "lipsync.jsonl", "hyprwalk.log"):
         if machine.execute(f"test -f /tmp/live/{run1}/{f}")[0] == 0:
             copy_out(f"/tmp/live/{run1}/{f}", "live")
     machine.execute(f"cd /tmp/live/{run1} && tar cf /tmp/live-frames.tar frames audio status")
@@ -6818,8 +6818,8 @@ chmod 755 {H}/do.sh && chown alice {H}/do.sh""")
     check("live", "... the desktop comparisons pass, the clock ticking and the script's own terminal scrolling (left out)",
           len(desk) == 3 and all(l.startswith("ok") for l in desk) and "the terminal this runs in, at" in res, desk)
     carry = [l.strip() for l in res.splitlines() if "crosshair started on" in l or "grab (G)" in l or "put down" in l]
-    # without plugin:hypr3d:wallpaper the wallpaper isn't drawn in 3D: nothing to aim at there
-    check("live", "... the crosshair started on the shell's overlay: it turned to the nearest window (hyprctl hypr3d aim), through the overlay, and carried it",
+    # without plugin:hyprwalk:wallpaper the wallpaper isn't drawn in 3D: nothing to aim at there
+    check("live", "... the crosshair started on the shell's overlay: it turned to the nearest window (hyprctl hyprwalk aim), through the overlay, and carried it",
           any("started on layer" in l for l in carry) and any(l.startswith("ok") and "grab (G)" in l for l in carry), carry)
     check("live", "... its lip sync heard the five vowels sung into the microphone", len([l for l in res.splitlines() if l.startswith("ok") and "you held" in l]) == 5,
           [l for l in res.splitlines() if "you held" in l])
@@ -6828,38 +6828,38 @@ chmod 755 {H}/do.sh && chown alice {H}/do.sh""")
           any("linked to  [Test microphone (test_mic" in l and "muted: False" in l for l in mic) and any("links into it  [test_mic" in l for l in mic), mic)
     audio = machine.execute(f"ls /tmp/live/{run1}/audio; grep -c 'Test microphone' /tmp/live/{run1}/audio/wpctl-status.txt")[1]
     check("live", "... and saved wpctl status, wpctl inspect and pw-dump in audio/", all(f in audio for f in ("wpctl-status.txt", "wpctl-inspect-default-source.txt", "pw-dump.json")), audio)
-    plog = machine.execute(f"cat /tmp/live/{run1}/hypr3d.log")[1]
-    check("live", "... and the plugin's own log (hyprctl hypr3d log) in hypr3d.log", "INFO loaded" in plog and "lip sync: listening to test_mic" in plog,
+    plog = machine.execute(f"cat /tmp/live/{run1}/hyprwalk.log")[1]
+    check("live", "... and the plugin's own log (hyprctl hyprwalk log) in hyprwalk.log", "INFO loaded" in plog and "lip sync: listening to test_mic" in plog,
           f"{len(plog.splitlines())} lines: " + " | ".join(plog.splitlines()[:3]))
     apps = [l for l in res.splitlines() if "--app" in l or "playing" in l or "pinned" in l or "picked up" in l or "put down" in l or "typing into it" in l or "own cursor" in l or "your own try" in l]
     check("live", "... --app: the app launched from 3D, played, stopped, typed into, its cursor, carried and put down (H), pinned and taken back (Shift+H) (its prompts done as they came)",
           len([l for l in apps if l.startswith("ok")]) >= 10 and not [l for l in apps if l.startswith("FAIL")], apps)
-    check("live", "... and the free step: played, then walking again (the prompt done as it came)", "h3dgame, your own try" in res and "... done" in res,
+    check("live", "... and the free step: played, then walking again (the prompt done as it came)", "hyprwalkgame, your own try" in res and "... done" in res,
           [l.strip() for l in res.splitlines() if "your own try" in l or "... done" in l])
-    check("live", "... and its window closed after, as its close button does", "h3dgame: its window closed" in res,
-          [l.strip() for l in res.splitlines() if l.strip().startswith("h3dgame:")])
-    check("live", "... and it left 3D, unloaded the plugin and closed the microphone", "hypr3d" not in ctl("plugin", "list") and lipsync_node() is None and not ctl("hypr3d", "status").startswith("{"))
+    check("live", "... and its window closed after, as its close button does", "hyprwalkgame: its window closed" in res,
+          [l.strip() for l in res.splitlines() if l.strip().startswith("hyprwalkgame:")])
+    check("live", "... and it left 3D, unloaded the plugin and closed the microphone", "hyprwalk" not in ctl("plugin", "list") and lipsync_node() is None and not ctl("hyprwalk", "status").startswith("{"))
 
     # a real change: the clock closed mid-run
-    machine.execute("pkill -f 'app-id h3d-[c]heck'; true")
+    machine.execute("pkill -f 'app-id hyprwalk-[c]heck'; true")
     time.sleep(1)
     in_terminal(f"--avatar {AV} --no-map --so {SO}", "live2")
     wait_for("its first frames", lambda: machine.execute("test -f /tmp/live/run-2/frames/01-desktop-before.png")[0] == 0, 60, 0.2)
     time.sleep(2.5)  # and the one a second later
-    machine.execute("pkill -f 'app-id h3d-[c]lock'; true")
+    machine.execute("pkill -f 'app-id hyprwalk-[c]lock'; true")
     wait_for("the script to finish", lambda: machine.execute("cat /tmp/live2.status")[1].strip(), 400, 1)
     res2 = machine.execute("cat /tmp/live/run-2/results.txt")[1]
     desk = [l for l in res2.splitlines() if "changes nothing on the screen" in l or "looks as it did" in l]
     check("live", "a window closed while it ran (a real change): its desktop comparisons fail, in run-2, run-1 as it was",
           len(desk) == 3 and all(l.startswith("FAIL") for l in desk) and machine.execute("readlink /tmp/live/latest")[1].strip() == "run-2"
           and machine.execute("cat /tmp/live/run-1/results.txt")[1] == res, desk)
-    machine.execute("pkill -f 'app-id h3d-[c]heck'; true")
+    machine.execute("pkill -f 'app-id hyprwalk-[c]heck'; true")
 
     # Ctrl+C in 3D: check.sh's trap cleans up
     before = calm_frame("before-live-check-interrupted")
     alice(f"cd {H} && HYPRLAND_INSTANCE_SIGNATURE={sig} setsid -f bash {H}/repo/tools/test/live/check.sh /tmp/live --mic --avatar {AV} --no-map --so {SO} "
           "> /tmp/live3.out 2>&1")
-    in3d = wait_for("the script in 3D with its avatar", lambda: (lambda s: s if s.startswith("{") and '"mode": "active"' in s and "BoothAccessories" in s else None)(ctl("hypr3d", "status")), 120, 0.5)
+    in3d = wait_for("the script in 3D with its avatar", lambda: (lambda s: s if s.startswith("{") and '"mode": "active"' in s and "BoothAccessories" in s else None)(ctl("hyprwalk", "status")), 120, 0.5)
     machine.succeed("pkill -INT -f 'live/check[.]sh /tmp/live --mic'")  # [.] keeps pkill from matching its own shell
     # wait for its final line in results.txt: redirected to a file, its stdout loses what follows the interrupt
     try:
@@ -6869,8 +6869,8 @@ chmod 755 {H}/do.sh && chown alice {H}/do.sh""")
     res3 = machine.execute("cat /tmp/live/run-3/results.txt")[1]
     (LOGS / "live-check-interrupted.txt").write_text(machine.execute("cat /tmp/live3.out")[1] + "\n--- its results.txt:\n" + res3 +
                                                      "\n--- still running:\n" + machine.execute("ps -ef | grep '[c]heck[.]sh'")[1])
-    check("live", "Ctrl+C (SIGINT) while it's in 3D: it stops, leaves 3D and unloads the plugin (run-3)", in3d and gone and "hypr3d" not in ctl("plugin", "list")
-          and "interrupted: cleaning up" in res3 and machine.execute("test -s /tmp/live/run-3/hypr3d.log")[0] == 0, res3.strip().splitlines()[-3:])
+    check("live", "Ctrl+C (SIGINT) while it's in 3D: it stops, leaves 3D and unloads the plugin (run-3)", in3d and gone and "hyprwalk" not in ctl("plugin", "list")
+          and "interrupted: cleaning up" in res3 and machine.execute("test -s /tmp/live/run-3/hyprwalk.log")[0] == 0, res3.strip().splitlines()[-3:])
     d = before.differs(calm_frame("after-live-check-interrupted"))
     check("live", "... and the desktop is as it was", d < 0.005 and lipsync_node() is None, f"{d:.2%} of pixels differ")
     machine.execute("pkill swaybg; true")
@@ -6947,40 +6947,40 @@ def cl_press(tag, keys=("meta_l", "q"), times=1, every=0.6, wait=1.5):
 
 
 def cl_fresh(n):
-    """tiling on with only n terminals (h3d-c1...) 50 degrees apart, facing their middle; the last has the keyboard"""
+    """tiling on with only n terminals (hyprwalk-c1...) 50 degrees apart, facing their middle; the last has the keyboard"""
     ensure_3d(False)
     clean_windows()
     machine.execute("pkill -u alice foot; pkill -f slowclose[.]py; true")
     cl_wait("no windows", lambda: not cl_clients(), 15, 0.3)
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "reset-windows", "forget")
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "play", "off")
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "play", "off")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
-    ctl("hypr3d", "tile", "on")
+    ctl("hyprwalk", "tile", "on")
     time.sleep(0.5)
     yaw0 = st()["yaw"]
     for i in range(n):
-        cls = f"h3d-c{i + 1}"
-        ctl("hypr3d", "turn", f"{yaw0 + (i - (n - 1) / 2) * 50:.1f}", "0")
+        cls = f"hyprwalk-c{i + 1}"
+        ctl("hyprwalk", "turn", f"{yaw0 + (i - (n - 1) / 2) * 50:.1f}", "0")
         time.sleep(0.4)
         alice(f"setsid -f foot --app-id {cls} > /dev/null 2>&1")
         wait_for(f"{cls}'s window", lambda: client(cls), 20, 0.3)
         time.sleep(1.0)
-    ctl("hypr3d", "turn", f"{yaw0:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{yaw0:.1f}", "0")
     time.sleep(0.8)
     return yaw0
 
 
-def cl_game(args="", title="h3dgame", cls="h3dgame", kill=True):
-    """opens h3dgame into the row; kill=False keeps a running one"""
+def cl_game(args="", title="hyprwalkgame", cls="hyprwalkgame", kill=True):
+    """opens hyprwalkgame into the row; kill=False keeps a running one"""
     if kill:
-        machine.execute("pkill -x h3dgame; true")
+        machine.execute("pkill -x hyprwalkgame; true")
         time.sleep(0.8)
-    alice(f"SDL_APP_ID={cls} SDL_VIDEO_WAYLAND_WMCLASS={cls} setsid -f stdbuf -oL h3dgame --title {title} {args} >> {GAME_LOG} 2>&1")
+    alice(f"SDL_APP_ID={cls} SDL_VIDEO_WAYLAND_WMCLASS={cls} setsid -f stdbuf -oL hyprwalkgame --title {title} {args} >> {GAME_LOG} 2>&1")
     c = cl_wait(f"{title}'s window in the row", lambda: next((c for c in json.loads(ctl("-j", "clients")) if c["title"] == title), None) if cls in tiled_row() else None, 30, 0.3)
     time.sleep(1.0)
     return c
@@ -6994,7 +6994,7 @@ def cl_held(held=True, timeout=5):
 
 def cl_log_since(n, mark):
     """the plugin's log lines after the last one with `mark` in it, out of the last n"""
-    lines = ctl("hypr3d", "log", str(n)).splitlines()
+    lines = ctl("hyprwalk", "log", str(n)).splitlines()
     at = max((i for i, l in enumerate(lines) if mark in l), default=-1)
     return "\n".join(lines[at + 1:])
 
@@ -7022,41 +7022,41 @@ def s_closing():
     ctl("eval", CL_BIND)
 
     cl_fresh(4)
-    aim_row("h3d-c1")
-    b, a, closed = cl_press("Super+Q twice, 0.8 s apart, the crosshair on h3d-c1", times=2, every=0.8)
-    told = ctl("hypr3d", "log", "8")
-    check("31b", "Super+Q closes the window the crosshair is on (h3d-c1), not the one with the keyboard (h3d-c4, opened last); pressed again at once, nothing more",
-          closed == ["h3d-c1"] and b["active"] == "h3d-c4", f"closed {closed}; the keyboard was on {b['active']}")
+    aim_row("hyprwalk-c1")
+    b, a, closed = cl_press("Super+Q twice, 0.8 s apart, the crosshair on hyprwalk-c1", times=2, every=0.8)
+    told = ctl("hyprwalk", "log", "8")
+    check("31b", "Super+Q closes the window the crosshair is on (hyprwalk-c1), not the one with the keyboard (hyprwalk-c4, opened last); pressed again at once, nothing more",
+          closed == ["hyprwalk-c1"] and b["active"] == "hyprwalk-c4", f"closed {closed}; the keyboard was on {b['active']}")
     check("31b", "... the log says where the shortcut's focus went, what closed (where it was, the keyboard, the crosshair), and that the second was for no window",
-          "a shortcut: the keyboard to h3d-c1 (the crosshair's), was h3d-c4" in told and "closed: h3d-c1 (" in told and "in the ring, it had the keyboard, the crosshair on it" in told
+          "a shortcut: the keyboard to hyprwalk-c1 (the crosshair's), was hyprwalk-c4" in told and "closed: hyprwalk-c1 (" in told and "in the ring, it had the keyboard, the crosshair on it" in told
           and "a shortcut: the keyboard to none (a window with the keyboard closed" in told, told.strip()[-600:])
-    aim_row("h3d-c3")
-    b, a, closed = cl_press("turned onto h3d-c3, Super+Q")
-    check("31b", "turned onto another window, Super+Q closes that one", closed == ["h3d-c3"], f"closed {closed}; the crosshair was on {b['aimed']}")
+    aim_row("hyprwalk-c3")
+    b, a, closed = cl_press("turned onto hyprwalk-c3, Super+Q")
+    check("31b", "turned onto another window, Super+Q closes that one", closed == ["hyprwalk-c3"], f"closed {closed}; the crosshair was on {b['aimed']}")
     s = st()
-    ctl("hypr3d", "turn", f"{s['yaw']:.1f}", "80")
+    ctl("hyprwalk", "turn", f"{s['yaw']:.1f}", "80")
     time.sleep(0.6)
     b, a, closed = cl_press("looking at the sky, Super+Q")
-    told = ctl("hypr3d", "log", "4")
+    told = ctl("hyprwalk", "log", "4")
     check("31b", "the crosshair on no window (the sky): Super+Q closes nothing, the keyboard on no window",
           closed == [] and b["aimed"] is None and a["active"] is None and "a shortcut: the keyboard to none (the crosshair on no window)" in told,
           f"closed {closed}; aimed {b['aimed']}; the keyboard {b['active']} -> {a['active']}; {told.strip()[-200:]}")
-    ctl("hypr3d", "turn", f"{s['yaw']:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{s['yaw']:.1f}", "0")
 
     cl_fresh(3)
     cl_game()
-    aim_row("h3d-c1")
+    aim_row("hyprwalk-c1")
     click("left")
     time.sleep(0.5)
-    aim_row("h3dgame")
-    b, a, closed = cl_press("h3d-c1 clicked, then the crosshair on the game, Super+Q")
-    check("31b", "walking, a terminal clicked before, the crosshair on a game: Super+Q closes the game, not the terminal", closed == ["h3dgame"] and b["active"] == "h3d-c1",
+    aim_row("hyprwalkgame")
+    b, a, closed = cl_press("hyprwalk-c1 clicked, then the crosshair on the game, Super+Q")
+    check("31b", "walking, a terminal clicked before, the crosshair on a game: Super+Q closes the game, not the terminal", closed == ["hyprwalkgame"] and b["active"] == "hyprwalk-c1",
           f"closed {closed}; the keyboard was on {b['active']}")
 
     # a window 1.3 s slow to close (Tk via XWayland, like OBS stopping its outputs): Super+Q four times
-    machine.succeed(f"cat > {H}/slowclose.py << 'H3D_EOF'\n{CL_SLOW}\nH3D_EOF\nchown alice:users {H}/slowclose.py")
-    alice(f"DISPLAY={x_display()} setsid -f python3 -u {H}/slowclose.py h3dslow > /tmp/slowclose.log 2>&1")
-    c = cl_wait("the slow window in the row", lambda: next((c for c in cl_clients() if c.lower() == "h3dslow" and c in tiled_row()), None), 30, 0.5)
+    machine.succeed(f"cat > {H}/slowclose.py << 'HYPRWALK_EOF'\n{CL_SLOW}\nHYPRWALK_EOF\nchown alice:users {H}/slowclose.py")
+    alice(f"DISPLAY={x_display()} setsid -f python3 -u {H}/slowclose.py hyprwalkslow > /tmp/slowclose.log 2>&1")
+    c = cl_wait("the slow window in the row", lambda: next((c for c in cl_clients() if c.lower() == "hyprwalkslow" and c in tiled_row()), None), 30, 0.5)
     time.sleep(1.0)
     aim_row(c)
     click("left")
@@ -7066,26 +7066,26 @@ def s_closing():
     check("31b", "Super+Q pressed again and again while a window takes 1.3 s to close: only it closes", c and closed == [c], f"closed {closed}")
 
     cl_game("--relative")
-    aim_row("h3dgame")
+    aim_row("hyprwalkgame")
     play_on()
     b, a, closed = cl_press("playing the game, Super+Q 3 times 0.4 s apart", times=3, every=0.4)
-    told = ctl("hypr3d", "log", "12")
-    check("31b", "Super+Q three times while playing a game closes only the game", closed == ["h3dgame"], f"closed {closed}; the keyboard then {a['active']}")
+    told = ctl("hyprwalk", "log", "12")
+    check("31b", "Super+Q three times while playing a game closes only the game", closed == ["hyprwalkgame"], f"closed {closed}; the keyboard then {a['active']}")
     check("31b", "... the log says it closed while played, and that play mode ended by itself",
-          "closed: h3dgame (h3dgame), in the ring, it had the keyboard, the crosshair on it, played" in told and "play mode ended: its window closed" in told, told.strip()[-500:])
-    ctl("hypr3d", "play", "off")
+          "closed: hyprwalkgame (hyprwalkgame), in the ring, it had the keyboard, the crosshair on it, played" in told and "play mode ended: its window closed" in told, told.strip()[-500:])
+    ctl("hyprwalk", "play", "off")
 
     # the played game quits: a gamer's keys keep coming and must be held back
     cl_game()
-    aim_row("h3dgame")
+    aim_row("hyprwalkgame")
     play_on()
-    row = [r for r in tiled_row() if r != "h3dgame"]
-    machine.execute("pkill -x h3dgame; true")
-    cl_wait("the game gone", lambda: "h3dgame" not in cl_clients(), 10, 0.2)
+    row = [r for r in tiled_row() if r != "hyprwalkgame"]
+    machine.execute("pkill -x hyprwalkgame; true")
+    cl_wait("the game gone", lambda: "hyprwalkgame" not in cl_clients(), 10, 0.2)
     s = cl_held(True, 2)
-    told = ctl("hypr3d", "log", "6")
+    told = ctl("hyprwalk", "log", "6")
     check("31b", "the game quits while played: its keys held back (playHeld), said so", s.get("playHeld") is True and s["playing"] is None and
-          "play mode ended (its window closed): the keys are held back. P plays h3dgame again, Super+Esc walks" in told, f"playHeld {s.get('playHeld')}; {told.strip()[-300:]}")
+          "play mode ended (its window closed): the keys are held back. P plays hyprwalkgame again, Super+Esc walks" in told, f"playHeld {s.get('playHeld')}; {told.strip()[-300:]}")
     before = set(cl_clients())
     got = []
     for k in ("b", "2", "8", "tab", "6", "2", "8", "x", "t", "esc"):
@@ -7098,7 +7098,7 @@ def s_closing():
           f"closed {closed}; menus {[g['menu'] for g in got]}; tiling {[g['tiling'] for g in got]}; mode {s['mode']}; row {row} -> {got[-1]['row']}; playHeld {s.get('playHeld')}")
     if st()["mode"] != "active" or not st()["tiling"]:  # undo what the keys did if not held back
         ensure_3d()
-        ctl("hypr3d", "tile", "on")
+        ctl("hyprwalk", "tile", "on")
         time.sleep(0.8)
     press("f9")  # a held-back key restarts the 4 s; W walks
     feet = st()["feet"]
@@ -7113,98 +7113,98 @@ def s_closing():
     s = st()
     press("b")
     m = menu()
-    said = [l for l in ctl("hypr3d", "log", "4").splitlines() if "walking again" in l]  # Super+Esc's line, not the 4 s timeout's
+    said = [l for l in ctl("hyprwalk", "log", "4").splitlines() if "walking again" in l]  # Super+Esc's line, not the 4 s timeout's
     check("31b", "Super+Esc: walking again, said so; B opens the Windows page again",
           s0.get("playHeld") is True and s.get("playHeld") is False and said and said[-1].endswith("INFO walking again") and m.get("path", "").endswith("windows"),
           f"playHeld {s0.get('playHeld')} -> {s.get('playHeld')}; menu {m.get('path')}; {said}")
     menu_closed()
 
     cl_game()
-    aim_row("h3dgame")
+    aim_row("hyprwalkgame")
     play_on()
-    machine.execute("pkill -x h3dgame; true")
-    cl_wait("the game gone", lambda: "h3dgame" not in cl_clients(), 10, 0.2)
+    machine.execute("pkill -x hyprwalkgame; true")
+    cl_wait("the game gone", lambda: "hyprwalkgame" not in cl_clients(), 10, 0.2)
     s0 = cl_held(True, 2)
     time.sleep(4.5)
     s = st()
     check("31b", "the game quit, no key for 4 s: walking again, said so", s0.get("playHeld") is True and s.get("playHeld") is False and
-          "walking again: the keys are hypr3d's" in ctl("hypr3d", "log", "6"), f"playHeld {s0.get('playHeld')} -> {s.get('playHeld')}")
+          "walking again: the keys are hyprwalk's" in ctl("hyprwalk", "log", "6"), f"playHeld {s0.get('playHeld')} -> {s.get('playHeld')}")
 
     # another window takes the keyboard
     cl_game()
-    aim_row("h3dgame")
+    aim_row("hyprwalkgame")
     play_on()
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3d-c1" })')
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalk-c1" })')
     s0 = cl_held(True, 3)
-    told = ctl("hypr3d", "log", "4")
+    told = ctl("hyprwalk", "log", "4")
     time.sleep(0.5)  # let the camera come back
-    ctl("hypr3d", "aim", "h3d-c2")
+    ctl("hyprwalk", "aim", "hyprwalk-c2")
     time.sleep(0.4)
     aimed = (st()["aimed"] or {}).get("class")
     press("p")
     s = cl_wait("playing", lambda: (lambda s: s if s["playing"] else None)(st()), 3) or st()
     check("31b", "another window takes the keyboard: play mode ends, the keys held back, said so",
           s0.get("playHeld") is True and "play mode ended (another window has the keyboard): the keys are held back" in told, f"playHeld {s0.get('playHeld')}; {told.strip()[-200:]}")
-    check("31b", "... P plays the game again, not the terminal under the crosshair", aimed == "h3d-c2" and (s["playing"] or {}).get("class") == "h3dgame",
+    check("31b", "... P plays the game again, not the terminal under the crosshair", aimed == "hyprwalk-c2" and (s["playing"] or {}).get("class") == "hyprwalkgame",
           f"the crosshair on {aimed}; playing {s['playing']}")
 
-    # ... and hyprctl hypr3d play on (shared with the hypr3d:play dispatcher and hl.plugin.hypr3d.play())
-    ctl("hypr3d", "play", "off")
-    aim_row("h3dgame")
+    # ... and hyprctl hyprwalk play on (shared with the hyprwalk:play dispatcher and hl.plugin.hyprwalk.play())
+    ctl("hyprwalk", "play", "off")
+    aim_row("hyprwalkgame")
     play_on()
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3d-c1" })')
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalk-c1" })')
     s0 = cl_held(True, 3)
     time.sleep(0.5)
-    ctl("hypr3d", "aim", "h3d-c2")
+    ctl("hyprwalk", "aim", "hyprwalk-c2")
     time.sleep(0.4)
     aimed = (st()["aimed"] or {}).get("class")
-    r = ctl("hypr3d", "play", "on")
+    r = ctl("hyprwalk", "play", "on")
     s = cl_wait("playing", lambda: (lambda s: s if s["playing"] else None)(st()), 3) or st()
-    check("31b", "... hyprctl hypr3d play on too (P's, as the hypr3d:play dispatcher and hl.plugin.hypr3d.play() are): the game, not the terminal under the crosshair",
-          s0.get("playHeld") is True and aimed == "h3d-c2" and r == "playing" and (s["playing"] or {}).get("class") == "h3dgame",
+    check("31b", "... hyprctl hyprwalk play on too (P's, as the hyprwalk:play dispatcher and hl.plugin.hyprwalk.play() are): the game, not the terminal under the crosshair",
+          s0.get("playHeld") is True and aimed == "hyprwalk-c2" and r == "playing" and (s["playing"] or {}).get("class") == "hyprwalkgame",
           f"playHeld {s0.get('playHeld')}; the crosshair on {aimed}; {r}; playing {s['playing']}")
 
     # ... a left click on the game
-    ctl("hypr3d", "play", "off")
-    aim_row("h3dgame")
+    ctl("hyprwalk", "play", "off")
+    aim_row("hyprwalkgame")
     play_on()
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3d-c1" })')
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalk-c1" })')
     s0 = cl_held(True, 3)
     time.sleep(0.5)
-    aim_row("h3dgame")
+    aim_row("hyprwalkgame")
     game_mark("held-click")
     click("left")
     s = cl_wait("playing", lambda: (lambda s: s if s["playing"] else None)(st()), 3) or st()
     time.sleep(0.3)
     got = [l for l in game_lines("held-click") if l.startswith("button")]
-    check("31b", "... a left click on the game plays it again, the click going nowhere", s0.get("playHeld") is True and (s["playing"] or {}).get("class") == "h3dgame" and not got,
+    check("31b", "... a left click on the game plays it again, the click going nowhere", s0.get("playHeld") is True and (s["playing"] or {}).get("class") == "hyprwalkgame" and not got,
           f"playHeld {s0.get('playHeld')}; playing {s['playing']}; the game got {got}")
 
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3d-c1" })')
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalk-c1" })')
     s0 = cl_held(True, 3)
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3dgame" })')
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalkgame" })')
     s = cl_wait("playing", lambda: (lambda s: s if s["playing"] else None)(st()), 3) or st()
-    check("31b", "... the game's window taking the keyboard back is played again, said so", s0.get("playHeld") is True and (s["playing"] or {}).get("class") == "h3dgame"
-          and "play mode: h3dgame has the keyboard again" in ctl("hypr3d", "log", "6"), f"playHeld {s0.get('playHeld')}; playing {s['playing']}")
-    ctl("hypr3d", "play", "off")
+    check("31b", "... the game's window taking the keyboard back is played again, said so", s0.get("playHeld") is True and (s["playing"] or {}).get("class") == "hyprwalkgame"
+          and "play mode: hyprwalkgame has the keyboard again" in ctl("hyprwalk", "log", "6"), f"playHeld {s0.get('playHeld')}; playing {s['playing']}")
+    ctl("hyprwalk", "play", "off")
 
     # a game's splash, then its real window (same class, another process)
-    machine.execute("pkill -x h3dgame; true")
-    cl_wait("the game gone", lambda: "h3dgame" not in cl_clients(), 10, 0.2)
+    machine.execute("pkill -x hyprwalkgame; true")
+    cl_wait("the game gone", lambda: "hyprwalkgame" not in cl_clients(), 10, 0.2)
     cl_game("--size 480x270", title="steamsplash", cls="steam_app_31")
-    hint = cl_wait("the hint", lambda: "steamsplash: P plays it (Super+Esc gives the keys back)" in ctl("hypr3d", "log", "8"), 4, 0.3)
-    told = ctl("hypr3d", "log", "8")
-    ctl("hypr3d", "aim", "steamsplash")
+    hint = cl_wait("the hint", lambda: "steamsplash: P plays it (Super+Esc gives the keys back)" in ctl("hyprwalk", "log", "8"), 4, 0.3)
+    told = ctl("hyprwalk", "log", "8")
+    ctl("hyprwalk", "aim", "steamsplash")
     time.sleep(0.4)
-    r = ctl("hypr3d", "play", "on")
+    r = ctl("hyprwalk", "play", "on")
     time.sleep(0.8)
     cl_game(title="steamgame", cls="steam_app_31", kill=False)
     s = cl_wait("the real window played", lambda: (lambda s: s if (s["playing"] or {}).get("title") == "steamgame" else None)(st()), 8) or st()
     check("31b", "a game's splash played, its real window (same class, another process) taking the keyboard: the real one played", r == "playing" and (s["playing"] or {}).get("title") == "steamgame",
           f"{r}; playing {s['playing']}; {cl_log_since(20, 'playing steamsplash').strip()[-300:]}")
     check("31b", "a Steam game's window (class steam_app_*) opening in 3D, not played a moment later: said how to play it", hint, told.strip()[-400:])
-    ctl("hypr3d", "play", "off")
-    machine.execute("pkill -x h3dgame; true")
+    ctl("hyprwalk", "play", "off")
+    machine.execute("pkill -x hyprwalkgame; true")
 
     # the Windows page: Close… asks first, so a game's keys (B, a digit, 8) close nothing
     cl_fresh(3)
@@ -7231,7 +7231,7 @@ def s_closing():
     press("5")
     time.sleep(1.0)
     closed = sorted(before - set(cl_clients()))
-    told = ctl("hypr3d", "log", "6")
+    told = ctl("hyprwalk", "log", "6")
     check("31b", "... Close…, then 5 (Close it): it closes, the menu closes, and the log says what the Action Menu closed",
           len(closed) == 1 and not menu().get("open") and f"the Action Menu: close {closed[0]} (" in told and f"closed: {closed[0]} (" in told, f"closed {closed}; {told.strip()[-300:]}")
     # the same by mouse: Tab, then clicks onto Windows, a window and Close…
@@ -7266,33 +7266,33 @@ def s_closing():
     closed = sorted(before - set(cl_clients()))
     check("31b", "... the mouse on the top left again (Keep it): back; Close… and the bottom (Close it): it closes",
           m3.get("path") == page.get("path") and h == 5 and len(closed) == 1 and not menu().get("open"), f"{m3.get('path')}; highlight {h}; closed {closed}")
-    left = sorted(c for c in cl_clients() if c.startswith("h3d-c")) or ["h3d-c3"]
+    left = sorted(c for c in cl_clients() if c.startswith("hyprwalk-c")) or ["hyprwalk-c3"]
     aim_row(left[0])
     press("x")
-    told = ctl("hypr3d", "log", "3")
+    told = ctl("hyprwalk", "log", "3")
     check("31b", "X sends the window under the crosshair to the wall, and the log says so", f"X: {left[0]} back to the wall" in told and left[0] not in tiled_row(),
           f"{told.strip()[-200:]}; row {tiled_row()}")
-    r = ctl("hypr3d", "window", left[0], "close")
+    r = ctl("hyprwalk", "window", left[0], "close")
     time.sleep(1.0)
-    check("31b", "hyprctl hypr3d window SEL close closes at once (no asking)", r == "closing" and not client(left[0]), r)
+    check("31b", "hyprctl hyprwalk window SEL close closes at once (no asking)", r == "closing" and not client(left[0]), r)
 
-    ctl("eval", 'h3dNoFocus = hl.window_rule({ name = "h3d-nofocus", match = { class = "h3d-c2" }, no_focus = true })')
+    ctl("eval", 'hyprwalkNoFocus = hl.window_rule({ name = "hyprwalk-nofocus", match = { class = "hyprwalk-c2" }, no_focus = true })')
     cl_fresh(3)
-    aim_row("h3d-c2")
-    b, a, closed = cl_press("the crosshair on h3d-c2, which won't take the keyboard (no_focus), Super+Q")
-    told = ctl("hypr3d", "log", "4")
+    aim_row("hyprwalk-c2")
+    b, a, closed = cl_press("the crosshair on hyprwalk-c2, which won't take the keyboard (no_focus), Super+Q")
+    told = ctl("hyprwalk", "log", "4")
     check("31b", "the crosshair on a window that won't take the keyboard (a no_focus rule): Super+Q closes nothing, not the one out of sight that has it; the log says why",
-          b["aimed"] == "h3d-c2" and b["active"] == "h3d-c3" and closed == [] and "a shortcut: the keyboard to none (h3d-c2 won't take it), was h3d-c3" in told,
+          b["aimed"] == "hyprwalk-c2" and b["active"] == "hyprwalk-c3" and closed == [] and "a shortcut: the keyboard to none (hyprwalk-c2 won't take it), was hyprwalk-c3" in told,
           f"aimed {b['aimed']}; the keyboard was on {b['active']}; closed {closed}; {told.strip()[-300:]}")
-    ctl("eval", "h3dNoFocus:set_enabled(false)")
+    ctl("eval", "hyprwalkNoFocus:set_enabled(false)")
 
     # a game's two windows (one class, two processes): when the played one closes, Hyprland focuses the other, which
     # isn't played for that, and a second Super+Q closes nothing
     cl_fresh(0)
     cl_game(title="gameB")
     cl_game(title="gameA", kill=False)
-    cl_wait("both in the row", lambda: tiled_row().count("h3dgame") == 2, 10, 0.2)
-    ctl("hypr3d", "aim", "gameA")
+    cl_wait("both in the row", lambda: tiled_row().count("hyprwalkgame") == 2, 10, 0.2)
+    ctl("hyprwalk", "aim", "gameA")
     time.sleep(0.6)
     play_on()
     before = cl_titles()
@@ -7306,10 +7306,10 @@ def s_closing():
     check("31b", "a game's two windows (one class), the one played closed by Super+Q: the other, given the keyboard by Hyprland, isn't played for that; Super+Q again at once closes nothing",
           before == ["gameA", "gameB"] and after == ["gameB"] and act1 == "gameB" and s1["playing"] is None and s1.get("playHeld") is True,
           f"{before} -> {after}; after the first: the keyboard on {act1}, playing {(s1['playing'] or {}).get('title')}, playHeld {s1.get('playHeld')}; {told.strip()[-700:]}")
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
     cl_game(title="gameA", kill=False)
-    cl_wait("both in the row", lambda: tiled_row().count("h3dgame") == 2, 10, 0.2)
-    ctl("hypr3d", "aim", "gameA")
+    cl_wait("both in the row", lambda: tiled_row().count("hyprwalkgame") == 2, 10, 0.2)
+    ctl("hyprwalk", "aim", "gameA")
     time.sleep(0.6)
     play_on()
     machine.execute("pkill -f 'title gameA'; true")
@@ -7319,42 +7319,42 @@ def s_closing():
     check("31b", "... the one played quitting by itself: the other, given the keyboard, isn't played either, the game's keys held back",
           act == "gameB" and s["playing"] is None and s.get("playHeld") is True,
           f"the keyboard on {act}; playing {(s['playing'] or {}).get('title')}; playHeld {s.get('playHeld')}; {cl_log_since(12, 'playing gameA').strip()[-500:]}")
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
 
     # a popup of another app (Discord's, Steam's) over the played game: Super+Q twice closes only the popup, since
     # Hyprland refocuses the game and the held-back second press must go to no window; turning ends the hold
-    ctl("eval", 'hl.window_rule({ name = "h3d-cl-popup", match = { class = "h3d-popup" }, float = true })')
-    popup = lambda: alice("setsid -f foot --app-id h3d-popup > /dev/null 2>&1")
+    ctl("eval", 'hl.window_rule({ name = "hyprwalk-cl-popup", match = { class = "hyprwalk-popup" }, float = true })')
+    popup = lambda: alice("setsid -f foot --app-id hyprwalk-popup > /dev/null 2>&1")
     cl_fresh(1)
     cl_game()
-    aim_row("h3dgame")
+    aim_row("hyprwalkgame")
     play_on()
     popup()
-    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "h3d-popup", 20, 0.2)
+    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "hyprwalk-popup", 20, 0.2)
     s0 = cl_held(True, 3)
-    ctl("hypr3d", "aim", "h3d-popup")
+    ctl("hyprwalk", "aim", "hyprwalk-popup")
     time.sleep(0.5)
     b, a, closed = cl_press("a game played, a popup over it took the keyboard, the crosshair on the popup: Super+Q twice, 0.8 s apart", times=2, every=0.8, wait=1.0)
     s1 = st()
     told = cl_log_since(30, "play mode ended (another window has the keyboard)")
     check("31b", "a game played, a popup of another app's taking the keyboard (the game's keys held back), the crosshair on the popup: Super+Q twice closes only the popup, "
           "not the game Hyprland gives the keyboard back to (the second is for no window)",
-          up and s0.get("playHeld") is True and b["aimed"] == "h3d-popup" and closed == ["h3d-popup"] and "h3dgame" in a["clients"] and s1["playing"] is None
-          and "a shortcut: the keyboard to none (a window with the keyboard closed: not turned or moved since), was h3dgame" in told,
+          up and s0.get("playHeld") is True and b["aimed"] == "hyprwalk-popup" and closed == ["hyprwalk-popup"] and "hyprwalkgame" in a["clients"] and s1["playing"] is None
+          and "a shortcut: the keyboard to none (a window with the keyboard closed: not turned or moved since), was hyprwalkgame" in told,
           f"the popup with the keyboard {bool(up)}, playHeld {s0.get('playHeld')}; aimed {b['aimed']}; closed {closed}; then playing {s1['playing']}, playHeld {s1.get('playHeld')}; "
           f"{told.strip()[-500:]}")
     rel(100, 0)  # turning ends the shortcut hold
     s3 = cl_wait("playing", lambda: (lambda s: s if s["playing"] else None)(st()), 3) or st()
     told = cl_log_since(30, "play mode ended (another window has the keyboard)")
     check("31b", "... as you turn (the hold on shortcuts over), the game gets the keyboard back and is played again, as after one press",
-          s1["playing"] is None and s1.get("playHeld") is True and (s3["playing"] or {}).get("class") == "h3dgame"
-          and "the keyboard back to h3dgame, shortcuts held no more" in told and "play mode: h3dgame has the keyboard again" in told,
+          s1["playing"] is None and s1.get("playHeld") is True and (s3["playing"] or {}).get("class") == "hyprwalkgame"
+          and "the keyboard back to hyprwalkgame, shortcuts held no more" in told and "play mode: hyprwalkgame has the keyboard again" in told,
           f"just after: playing {s1['playing']}, playHeld {s1.get('playHeld')}; turned: playing {s3['playing']}, the keyboard on {cl_active()}; {told.strip()[-400:]}")
     # ... with no key, turn or move after: held back past the usual 4 s, played when the 5 s hold ends
     popup()
-    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "h3d-popup", 20, 0.2)
+    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "hyprwalk-popup", 20, 0.2)
     cl_held(True, 3)
-    ctl("hypr3d", "aim", "h3d-popup")
+    ctl("hyprwalk", "aim", "hyprwalk-popup")
     time.sleep(0.5)
     t0 = time.time()
     b, a, closed = cl_press("the popup again, Super+Q twice, 0.8 s apart, then nothing", times=2, every=0.8, wait=0.3)
@@ -7363,18 +7363,18 @@ def s_closing():
     s5 = cl_wait("played by the hold's end", lambda: (lambda s: s if s["playing"] else None)(st()), 5, 0.2) or st()
     t5 = time.time() - t0
     check("31b", "... Super+Q twice on it again, then nothing: the game's keys still held back 3.8 s after (not walking), and it's played once the hold's over (5 s)",
-          up and closed == ["h3d-popup"] and s4["playing"] is None and s4.get("playHeld") is True and (s5["playing"] or {}).get("class") == "h3dgame" and 4.5 < t5 < 8,
+          up and closed == ["hyprwalk-popup"] and s4["playing"] is None and s4.get("playHeld") is True and (s5["playing"] or {}).get("class") == "hyprwalkgame" and 4.5 < t5 < 8,
           f"closed {closed}; 3.8 s after: playing {s4['playing']}, playHeld {s4.get('playHeld')}; played {(s5['playing'] or {}).get('class')} {t5:.1f} s after the first press")
-    if (st()["playing"] or {}).get("class") != "h3dgame":  # keep the next steps independent of a failure
-        ctl("hypr3d", "play", "off")
-        if "h3dgame" not in cl_clients():
+    if (st()["playing"] or {}).get("class") != "hyprwalkgame":  # keep the next steps independent of a failure
+        ctl("hyprwalk", "play", "off")
+        if "hyprwalkgame" not in cl_clients():
             cl_game()
-        aim_row("h3dgame")
+        aim_row("hyprwalkgame")
         play_on()
     popup()
-    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "h3d-popup", 20, 0.2)
+    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "hyprwalk-popup", 20, 0.2)
     cl_held(True, 3)
-    ctl("hypr3d", "aim", "h3d-popup")
+    ctl("hyprwalk", "aim", "hyprwalk-popup")
     time.sleep(0.5)
     b, a, closed = cl_press("the popup over the game played again, Super+Q once", wait=1.0)
     s1 = st()
@@ -7382,52 +7382,52 @@ def s_closing():
     s2 = cl_wait("played again", lambda: (lambda s: s if s["playing"] else None)(st()), 3) or st()
     told = cl_log_since(30, "play mode ended (another window has the keyboard)")
     check("31b", "... a popup again, Super+Q once: it closes, the keyboard back with the game, which isn't played till you turn (shortcuts held back), then played again",
-          up and closed == ["h3d-popup"] and a["active"] == "h3dgame" and s1["playing"] is None and (s2["playing"] or {}).get("class") == "h3dgame"
-          and "play mode: h3dgame has the keyboard again" in told, f"closed {closed}; the keyboard on {a['active']}; playing {s1['playing']}, turned: {s2['playing']}; {told.strip()[-400:]}")
-    ctl("hypr3d", "play", "off")
+          up and closed == ["hyprwalk-popup"] and a["active"] == "hyprwalkgame" and s1["playing"] is None and (s2["playing"] or {}).get("class") == "hyprwalkgame"
+          and "play mode: hyprwalkgame has the keyboard again" in told, f"closed {closed}; the keyboard on {a['active']}; playing {s1['playing']}, turned: {s2['playing']}; {told.strip()[-400:]}")
+    ctl("hyprwalk", "play", "off")
     # the popup closing by itself with no recent shortcut: replayed at once, and a key 0.5 s later reaches the game
-    if "h3dgame" not in cl_clients():
+    if "hyprwalkgame" not in cl_clients():
         cl_game()
-    aim_row("h3dgame")
+    aim_row("hyprwalkgame")
     play_on()
     time.sleep(3.2)  # the last Super+Q well before the popup goes
     popup()
-    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "h3d-popup", 20, 0.2)
+    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "hyprwalk-popup", 20, 0.2)
     s0 = cl_held(True, 3)
     game_mark("31b-popup-gone")
-    machine.execute("pkill -f 'app-id h3d-popup'; true")
-    cl_wait("the popup gone", lambda: "h3d-popup" not in cl_clients(), 10, 0.1)
+    machine.execute("pkill -f 'app-id hyprwalk-popup'; true")
+    cl_wait("the popup gone", lambda: "hyprwalk-popup" not in cl_clients(), 10, 0.1)
     time.sleep(0.5)
     press("1")  # a game's key, not a walking one
     s1 = cl_wait("played again", lambda: (lambda s: s if s["playing"] else None)(st()), 3, 0.1) or st()
     got = [l for l in game_lines("31b-popup-gone") if l.startswith("key") or l.startswith("focus")]
     told = cl_log_since(20, "play mode ended (another window has the keyboard)")
     check("31b", "... a popup over the game played closing by itself (no shortcut): the game played again at once, and a key typed half a second after reaches it",
-          up and s0.get("playHeld") is True and (s1["playing"] or {}).get("class") == "h3dgame" and "key down 1" in got,
+          up and s0.get("playHeld") is True and (s1["playing"] or {}).get("class") == "hyprwalkgame" and "key down 1" in got,
           f"the popup with the keyboard {bool(up)}, playHeld {s0.get('playHeld')}; playing {s1['playing']}; the game got {got[-6:]}; {told.strip()[-400:]}")
-    ctl("hypr3d", "play", "off")
-    if "h3dgame" not in cl_clients():
+    ctl("hyprwalk", "play", "off")
+    if "hyprwalkgame" not in cl_clients():
         cl_game()
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3dgame" })')
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalkgame" })')
     time.sleep(0.3)
-    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "set", mode = "fullscreen", window = "class:h3dgame" })')
+    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "set", mode = "fullscreen", window = "class:hyprwalkgame" })')
     p0 = cl_wait("the game played by itself, fullscreen", lambda: (lambda s: s["playing"] if s["playing"] else None)(st()), 5)
     popup()
-    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "h3d-popup", 20, 0.2)
+    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "hyprwalk-popup", 20, 0.2)
     s0 = cl_held(True, 3)
     s1 = cl_held(False, 8)  # 4 s without a key: walking again
-    ctl("hypr3d", "aim", "h3d-popup")
+    ctl("hyprwalk", "aim", "hyprwalk-popup")
     time.sleep(0.5)
     b, a, closed = cl_press("the game fullscreen, played by itself, the popup over it, its keys' hold run out: Super+Q twice, 0.8 s apart", times=2, every=0.8, wait=1.0)
-    s2, fs = st(), cl_fullscreen("h3dgame")
-    told = cl_log_since(20, "walking again: the keys are hypr3d's")
+    s2, fs = st(), cl_fullscreen("hyprwalkgame")
+    told = cl_log_since(20, "walking again: the keys are hyprwalk's")
     check("31b", "... the game fullscreen, played by itself, a popup over it, the game's keys' hold run out (walking): Super+Q twice on the popup closes only it, the game still "
           "fullscreen and not played (the second for no window, not the game Hyprland gave the keyboard back to)",
-          (p0 or {}).get("class") == "h3dgame" and up and s0.get("playHeld") is True and s1.get("playHeld") is False and b["aimed"] == "h3d-popup" and closed == ["h3d-popup"]
-          and fs == 2 and s2["playing"] is None and "a shortcut: the keyboard to none (a window with the keyboard closed: not turned or moved since), was h3dgame" in told,
+          (p0 or {}).get("class") == "hyprwalkgame" and up and s0.get("playHeld") is True and s1.get("playHeld") is False and b["aimed"] == "hyprwalk-popup" and closed == ["hyprwalk-popup"]
+          and fs == 2 and s2["playing"] is None and "a shortcut: the keyboard to none (a window with the keyboard closed: not turned or moved since), was hyprwalkgame" in told,
           f"played {p0}; playHeld {s0.get('playHeld')} -> {s1.get('playHeld')}; aimed {b['aimed']}; closed {closed}; fullscreen {fs}; playing {s2['playing']}; {told.strip()[-400:]}")
-    ctl("hypr3d", "play", "off")
-    machine.execute("pkill -x h3dgame; pkill -f 'app-id h3d-popup'; true")
+    ctl("hyprwalk", "play", "off")
+    machine.execute("pkill -x hyprwalkgame; pkill -f 'app-id hyprwalk-popup'; true")
 
     # Super+D's launcher open over the played game past 4 s, then Esc
     machine.execute(f"pkill -f 'quickshell -p'; rm -f {LAUNCHER_LOG}; true")
@@ -7437,7 +7437,7 @@ def s_closing():
     ctl("eval", f'hl.bind("SUPER + D", hl.dsp.exec_cmd("quickshell ipc -p {LAUNCHER} call launcher toggle"))')
     cl_fresh(1)
     cl_game()
-    aim_row("h3dgame")
+    aim_row("hyprwalkgame")
     play_on()
     press("meta_l", "d")
     up = cl_wait("the launcher over the view", lambda: shell_layer(), 10, 0.1)
@@ -7446,90 +7446,90 @@ def s_closing():
     press("esc")
     cl_wait("the launcher gone", lambda: not shell_layer(), 10, 0.1)
     s2 = cl_wait("played again", lambda: (lambda s: s if s["playing"] else None)(st()), 3) or st()
-    told = cl_log_since(14, "h3dgame: into the row")  # from before play, to see both lines
+    told = cl_log_since(14, "hyprwalkgame: into the row")  # from before play, to see both lines
     check("31b", "playing, Super+D's launcher over the view for 5 s, then Esc: the game's keys held back meanwhile, and it's played again with the keyboard back",
-          up and s1.get("playHeld") is True and s1["playing"] is None and (s2["playing"] or {}).get("class") == "h3dgame" and "play mode ended: a layer surface took the keyboard" in told
-          and "play mode: h3dgame has the keyboard again" in told,
+          up and s1.get("playHeld") is True and s1["playing"] is None and (s2["playing"] or {}).get("class") == "hyprwalkgame" and "play mode ended: a layer surface took the keyboard" in told
+          and "play mode: hyprwalkgame has the keyboard again" in told,
           f"the launcher {bool(up)}; in it: playing {s1['playing']}, playHeld {s1.get('playHeld')}; after Esc: playing {s2['playing']}; {told.strip()[-500:]}")
-    ctl("hypr3d", "play", "off")
-    machine.execute("pkill -f 'quickshell -p'; pkill -x h3dgame; true")
+    ctl("hyprwalk", "play", "off")
+    machine.execute("pkill -f 'quickshell -p'; pkill -x hyprwalkgame; true")
     ctl("eval", 'hl.unbind("SUPER + D")')
 
-    alice(f"SDL_APP_ID=steam_app_79 SDL_VIDEO_WAYLAND_WMCLASS=steam_app_79 setsid -f stdbuf -oL h3dgame --title hintmain >> {GAME_LOG} 2>&1; sleep 0.3; "
-          f"SDL_APP_ID=steam_app_79 SDL_VIDEO_WAYLAND_WMCLASS=steam_app_79 setsid -f stdbuf -oL h3dgame --size 200x150 --title hinthelper >> {GAME_LOG} 2>&1")
+    alice(f"SDL_APP_ID=steam_app_79 SDL_VIDEO_WAYLAND_WMCLASS=steam_app_79 setsid -f stdbuf -oL hyprwalkgame --title hintmain >> {GAME_LOG} 2>&1; sleep 0.3; "
+          f"SDL_APP_ID=steam_app_79 SDL_VIDEO_WAYLAND_WMCLASS=steam_app_79 setsid -f stdbuf -oL hyprwalkgame --size 200x150 --title hinthelper >> {GAME_LOG} 2>&1")
     both = cl_wait("both windows", lambda: (lambda t: t if "hintmain" in t and "hinthelper" in t else None)(cl_titles()), 15, 0.05)
     machine.execute("pkill -f 'title hinthelper'; true")
-    hint = cl_wait("the hint", lambda: "hintmain: P plays it (Super+Esc gives the keys back)" in ctl("hypr3d", "log", "12"), 5, 0.3)
+    hint = cl_wait("the hint", lambda: "hintmain: P plays it (Super+Esc gives the keys back)" in ctl("hyprwalk", "log", "12"), 5, 0.3)
     check("31b", "a Steam game's window, then a helper of its class that goes at once: the hint still names the first", both and hint,
-          f"{both}; {cl_log_since(12, 'playing h3dgame').strip()[-400:]}")
-    machine.execute("pkill -x h3dgame; true")
+          f"{both}; {cl_log_since(12, 'playing hyprwalkgame').strip()[-400:]}")
+    machine.execute("pkill -x hyprwalkgame; true")
 
     # aimed at a ring window under a fullscreen game: a shortcut focuses it, the game stays fullscreen
     cl_fresh(2)
     cl_game()
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3dgame" })')
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalkgame" })')
     time.sleep(0.3)
-    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "set", mode = "fullscreen", window = "class:h3dgame" })')
+    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "set", mode = "fullscreen", window = "class:hyprwalkgame" })')
     time.sleep(1.5)
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
     time.sleep(0.8)
-    fs0 = cl_fullscreen("h3dgame")
-    r = ctl("hypr3d", "aim", "h3d-c1")
+    fs0 = cl_fullscreen("hyprwalkgame")
+    r = ctl("hyprwalk", "aim", "hyprwalk-c1")
     time.sleep(0.4)
     s = st()
-    if fs0 != 2 or (s["aimed"] or {}).get("class") != "h3d-c1":  # collectPanels draws the ring under a fullscreen one
+    if fs0 != 2 or (s["aimed"] or {}).get("class") != "hyprwalk-c1":  # collectPanels draws the ring under a fullscreen one
         check("31b", "a game fullscreen in tiling mode's ring, walking: the ring's other windows drawn under it, and aimed at", False,
               f"fullscreen {fs0}; {r}; aimed {(s['aimed'] or {}).get('class')}")
     else:
         press("meta_l", "j")  # a shortcut bound to nothing, like a screenshot's
         time.sleep(1.0)
-        fs1, act = cl_fullscreen("h3dgame"), cl_active()
-        told = ctl("hypr3d", "log", "4")
+        fs1, act = cl_fullscreen("hyprwalkgame"), cl_active()
+        told = ctl("hyprwalk", "log", "4")
         check("31b", "a game fullscreen, walking, the crosshair on a window of the ring under it, a Super shortcut: that window has the keyboard, the game stays fullscreen",
-              fs1 == 2 and act == "h3d-c1" and "a shortcut: the keyboard to h3d-c1 (the crosshair's)" in told, f"fullscreen {fs0} -> {fs1}; the keyboard on {act}; {told.strip()[-300:]}")
-        b, a, closed = cl_press("the game fullscreen, the crosshair on h3d-c1, Super+Q")
-        fs2 = cl_fullscreen("h3dgame")
+              fs1 == 2 and act == "hyprwalk-c1" and "a shortcut: the keyboard to hyprwalk-c1 (the crosshair's)" in told, f"fullscreen {fs0} -> {fs1}; the keyboard on {act}; {told.strip()[-300:]}")
+        b, a, closed = cl_press("the game fullscreen, the crosshair on hyprwalk-c1, Super+Q")
+        fs2 = cl_fullscreen("hyprwalkgame")
         check("31b", "... and Super+Q closes that window, not the game, which stays fullscreen (the keyboard to no window, not the next one)",
-              closed == ["h3d-c1"] and fs2 == 2 and a["active"] is None, f"closed {closed}; the game's fullscreen then {fs2}; the keyboard on {a['active']}")
-    machine.execute("pkill -x h3dgame; true")
+              closed == ["hyprwalk-c1"] and fs2 == 2 and a["active"] is None, f"closed {closed}; the game's fullscreen then {fs2}; the keyboard on {a['active']}")
+    machine.execute("pkill -x hyprwalkgame; true")
 
     # aimed at a workspace 2 window from workspace 1: shortcuts switch no workspace and close nothing
     ensure_3d(False)
     clean_windows()
     machine.execute("pkill -u alice foot; true")
     cl_wait("no windows", lambda: not cl_clients(), 15, 0.3)
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "reset-windows", "forget")
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     ctl("dispatch", 'hl.dsp.focus({ workspace = "2" })')
     time.sleep(0.8)
-    alice("setsid -f foot --app-id h3d-ws2 > /dev/null 2>&1")
-    cl_wait("h3d-ws2 in front of you", lambda: placed("h3d-ws2"), 20, 0.3)
+    alice("setsid -f foot --app-id hyprwalk-ws2 > /dev/null 2>&1")
+    cl_wait("hyprwalk-ws2 in front of you", lambda: placed("hyprwalk-ws2"), 20, 0.3)
     time.sleep(0.5)
     ctl("dispatch", 'hl.dsp.focus({ workspace = "1" })')
     time.sleep(0.8)
-    ctl("hypr3d", "turn", "90", "0")
+    ctl("hyprwalk", "turn", "90", "0")
     time.sleep(0.5)
-    alice("setsid -f foot --app-id h3d-ws1 > /dev/null 2>&1")
-    cl_wait("h3d-ws1 in front of you", lambda: placed("h3d-ws1"), 20, 0.3)
+    alice("setsid -f foot --app-id hyprwalk-ws1 > /dev/null 2>&1")
+    cl_wait("hyprwalk-ws1 in front of you", lambda: placed("hyprwalk-ws1"), 20, 0.3)
     time.sleep(0.8)
-    ctl("hypr3d", "aim", "h3d-ws2")
+    ctl("hyprwalk", "aim", "hyprwalk-ws2")
     time.sleep(0.6)
     s = st()
     ws0, act0 = json.loads(ctl("-j", "activeworkspace"))["id"], cl_active()
     press("meta_l", "j")
     time.sleep(1.0)
     ws1 = json.loads(ctl("-j", "activeworkspace"))["id"]
-    told = ctl("hypr3d", "log", "4")
+    told = ctl("hyprwalk", "log", "4")
     check("31b", "the crosshair on a window from a workspace not shown (2), a Super shortcut: still on workspace 1, the log says why the keyboard went to none",
-          (s["aimed"] or {}).get("class") == "h3d-ws2" and act0 == "h3d-ws1" and ws0 == 1 and ws1 == 1 and "a shortcut: the keyboard to none (h3d-ws2 is on a workspace not shown), was h3d-ws1" in told,
+          (s["aimed"] or {}).get("class") == "hyprwalk-ws2" and act0 == "hyprwalk-ws1" and ws0 == 1 and ws1 == 1 and "a shortcut: the keyboard to none (hyprwalk-ws2 is on a workspace not shown), was hyprwalk-ws1" in told,
           f"aimed {(s['aimed'] or {}).get('class')}; the keyboard was on {act0}; workspace {ws0} -> {ws1}; {told.strip()[-300:]}")
-    b, a, closed = cl_press("the crosshair on h3d-ws2 (workspace 2), Super+Q")
-    check("31b", "... and Super+Q closes nothing (not h3d-ws1, turned away from)", closed == [] and json.loads(ctl("-j", "activeworkspace"))["id"] == 1, f"closed {closed}")
+    b, a, closed = cl_press("the crosshair on hyprwalk-ws2 (workspace 2), Super+Q")
+    check("31b", "... and Super+Q closes nothing (not hyprwalk-ws1, turned away from)", closed == [] and json.loads(ctl("-j", "activeworkspace"))["id"] == 1, f"closed {closed}")
     ctl("dispatch", 'hl.dsp.focus({ workspace = "1" })')
 
     # a scratchpad open, aimed at a window under it: Super+Space (toggle_special) must hide it for good; the shortcut
@@ -7538,46 +7538,46 @@ def s_closing():
     clean_windows()
     machine.execute("pkill -u alice foot; true")
     cl_wait("no windows", lambda: not cl_clients(), 15, 0.3)
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "reset-windows", "forget")
     ctl("eval", 'hl.bind("SUPER + SPACE", hl.dsp.workspace.toggle_special())')
     special = lambda: next((m["specialWorkspace"]["name"] for m in json.loads(ctl("-j", "monitors")) if m["focused"]), None)  # ("": none open)
     ctl("dispatch", "hl.dsp.workspace.toggle_special()")
-    alice("setsid -f foot --app-id h3d-scratch > /dev/null 2>&1")
-    sc = cl_wait("the scratchpad's terminal", lambda: (lambda c: c if c and c["workspace"]["name"].startswith("special") else None)(client("h3d-scratch")), 20, 0.3)
+    alice("setsid -f foot --app-id hyprwalk-scratch > /dev/null 2>&1")
+    sc = cl_wait("the scratchpad's terminal", lambda: (lambda c: c if c and c["workspace"]["name"].startswith("special") else None)(client("hyprwalk-scratch")), 20, 0.3)
     time.sleep(0.5)
     ctl("dispatch", "hl.dsp.workspace.toggle_special()")  # hidden, as a scratchpad usually is
     time.sleep(0.5)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
-    alice("setsid -f foot --app-id h3d-under > /dev/null 2>&1")
-    cl_wait("h3d-under in front of you", lambda: placed("h3d-under"), 20, 0.3)
+    alice("setsid -f foot --app-id hyprwalk-under > /dev/null 2>&1")
+    cl_wait("hyprwalk-under in front of you", lambda: placed("hyprwalk-under"), 20, 0.3)
     time.sleep(0.5)
     sp0 = special()
     ctl("dispatch", "hl.dsp.workspace.toggle_special()")  # open the scratchpad
     time.sleep(0.8)
-    ctl("hypr3d", "aim", "h3d-under")
+    ctl("hyprwalk", "aim", "hyprwalk-under")
     time.sleep(0.5)
     s, sp1, act1 = st(), special(), cl_active()
     frame("scratchpad-open")
     press("meta_l", "spc")
     time.sleep(1.5)
     sp2, act2 = special(), cl_active()
-    told = ctl("hypr3d", "log", "4")
+    told = ctl("hyprwalk", "log", "4")
     check("31b", "a scratchpad (a special workspace) open over the view, its terminal with the keyboard, the crosshair on a window under it: Super+Space (its toggle) hides it, "
           "and it stays hidden; the log says why the shortcut was for no window",
-          sc and sp0 == "" and (s["aimed"] or {}).get("class") == "h3d-under" and sp1 and act1 == "h3d-scratch" and sp2 == ""
-          and "a shortcut: the keyboard to none (h3d-under is under a special workspace), was h3d-scratch" in told,
+          sc and sp0 == "" and (s["aimed"] or {}).get("class") == "hyprwalk-under" and sp1 and act1 == "hyprwalk-scratch" and sp2 == ""
+          and "a shortcut: the keyboard to none (hyprwalk-under is under a special workspace), was hyprwalk-scratch" in told,
           f"the scratchpad {sp0!r} -> open {sp1!r} -> {sp2!r}; aimed {(s['aimed'] or {}).get('class')}; the keyboard {act1} -> {act2}; {told.strip()[-300:]}")
     ctl("eval", 'hl.unbind("SUPER + SPACE")')
 
-    note("31b", "the log", ctl("hypr3d", "log", "30").strip()[-2500:])
+    note("31b", "the log", ctl("hyprwalk", "log", "30").strip()[-2500:])
     ctl("eval", 'hl.unbind("SUPER + Q")')
-    ctl("hypr3d", "play", "off")
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "play", "off")
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "reset-windows", "forget")
     clean_windows()
     machine.execute("pkill -u alice foot; pkill -f slowclose[.]py; true")
     ensure_3d(False)
@@ -7632,44 +7632,44 @@ def hidpi_checks(scale):
     n2d = calm_frame(f"{item}-desktop").count(cursor_cyan, box)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1.2)
     img = frame(f"{item}-3d")
     check(item, "grim's frame is 1920x1200, and 3D", img.w == 1920 and img.h == 1200 and img.count(cursor_cyan, box) < 5, f"{img.w}x{img.h}")
     check(item, "Hyprland's cursor is hidden in 3D", n2d > 20 and img.count(cursor_cyan, box) < 5, f"cursor pixels: 2D {n2d}, 3D {img.count(cursor_cyan, box)}")
     # the crosshair against the sky: 22 logical px across, scaled
-    ctl("hypr3d", "turn", "0", "60")
+    ctl("hyprwalk", "turn", "0", "60")
     time.sleep(0.8)
     sky = frame(f"{item}-crosshair")
     green = lambda r, g, b: g > 200 and r < 140 and b < 150
     row = [x for x in range(sky.w // 2 - 80, sky.w // 2 + 80) if green(*sky.px[(sky.h // 2 * sky.w + x) * 3:(sky.h // 2 * sky.w + x) * 3 + 3])]
     span = row[-1] - row[0] + 1 if row else 0
     check(item, f"the crosshair is drawn at scale {scale:g}: {round(22 * scale)} px across", abs(span - 22 * scale) <= 2, f"{span} px")
-    ctl("hypr3d", "turn", "0", "0")
+    ctl("hyprwalk", "turn", "0", "0")
     aimed = None
     for _ in range(40):
         a = st()["aimed"]
-        if a and a.get("kind") == "window" and a.get("class") == "h3d-left":
+        if a and a.get("kind") == "window" and a.get("class") == "hyprwalk-left":
             aimed = a
             break
         rel(-15, 0, after=0.2)
     check(item, "the mouse turns the crosshair onto the left terminal", aimed, aimed)
     click("left")
-    check(item, "a left click focuses it", json.loads(ctl("-j", "activewindow")).get("class") == "h3d-left", json.loads(ctl("-j", "activewindow")).get("class"))
-    machine.execute("rm -f /tmp/h3d-hidpi")
+    check(item, "a left click focuses it", json.loads(ctl("-j", "activewindow")).get("class") == "hyprwalk-left", json.loads(ctl("-j", "activewindow")).get("class"))
+    machine.execute("rm -f /tmp/walk-hidpi")
     press("e")
-    type_text("touch /tmp/h3d-hidpi")
+    type_text("touch /tmp/walk-hidpi")
     press("ret")
     time.sleep(0.8)
-    check(item, "E: what's typed reaches it (it ran touch)", machine.execute("test -e /tmp/h3d-hidpi")[0] == 0)
+    check(item, "E: what's typed reaches it (it ran touch)", machine.execute("test -e /tmp/walk-hidpi")[0] == 0)
     frame(f"{item}-typed")
     press("meta_l", "esc")
     # the Action Menu: radius 28% of the screen's height; the mouse moves its cursor in logical px
-    ctl("hypr3d", "spawn")
-    ctl("hypr3d", "view", "third")
-    ctl("hypr3d", "turn", "0", "60")  # sky behind, so its dark ring stands out
-    ctl("hypr3d", "avatar", "parts", "reset")
+    ctl("hyprwalk", "spawn")
+    ctl("hyprwalk", "view", "third")
+    ctl("hyprwalk", "turn", "0", "60")  # sky behind, so its dark ring stands out
+    ctl("hyprwalk", "avatar", "parts", "reset")
     press("tab")
     for k in ("4", "8", "8", "1"):
         press(k)
@@ -7687,10 +7687,10 @@ def hidpi_checks(scale):
     press("backspace")
     press("esc")
     menu_closed()
-    ctl("hypr3d", "turn", "0", "0")
+    ctl("hyprwalk", "turn", "0", "0")
     # the lip sync badge: its size follows the scale
     mic_noise()  # silence would put a notification over the corner
-    ctl("hypr3d", "avatar", "lipsync", "on")
+    ctl("hyprwalk", "avatar", "lipsync", "on")
     wait_for("listening", lambda: lipsync()["listening"], 10)
     ctl("dismissnotify")
     time.sleep(1.2)
@@ -7699,7 +7699,7 @@ def hidpi_checks(scale):
     m = round(12 * scale)
     check(item, f"the badge: {round(32 * scale)} px tall, {m} px in from the top right corner", b and abs(b[3] - 32 * scale) <= 2 and b[1] == m and b[0] + b[2] == img.w - m, b)
     check(item, "... where the frame has it", b and img.count(red, box_of(b)) > 20 * scale * scale, b and img.count(red, box_of(b)))
-    ctl("hypr3d", "avatar", "lipsync", "off")
+    ctl("hyprwalk", "avatar", "lipsync", "off")
     ensure_3d(False)
     time.sleep(0.5)
     n = calm_frame(f"{item}-back").count(cursor_cyan, box)
@@ -7708,12 +7708,12 @@ def hidpi_checks(scale):
 
 # ------------------------------------------------------------------ play mode in place: the game where it is, the others round it
 
-PC_LOCK, PC_FREE = "h3dgame-pc-lock", "h3dgame-pc-free"  # opaque via the Lua config's h3dgame.* rule
+PC_LOCK, PC_FREE = "hyprwalkgame-pc-lock", "hyprwalkgame-pc-free"  # opaque via the Lua config's hyprwalkgame.* rule
 
 
 def pc_game(cls, args=""):
-    """starts h3dgame as alice, logging what it gets to /tmp/CLS.log; returns its window"""
-    alice(f"rm -f /tmp/{cls}.log; SDL_APP_ID={cls} SDL_VIDEO_WAYLAND_WMCLASS={cls} setsid -f h3dgame --title {cls} --log /tmp/{cls}.log {args} > /dev/null 2>&1")
+    """starts hyprwalkgame as alice, logging what it gets to /tmp/CLS.log; returns its window"""
+    alice(f"rm -f /tmp/{cls}.log; SDL_APP_ID={cls} SDL_VIDEO_WAYLAND_WMCLASS={cls} setsid -f hyprwalkgame --title {cls} --log /tmp/{cls}.log {args} > /dev/null 2>&1")
     return wait_for(f"{cls}'s window", lambda: client(cls), 30, 0.5)
 
 
@@ -7751,7 +7751,7 @@ def pc_playing(cls, facing=False):
 
 def pc_aim(cls):
     """the crosshair on the middle of that window"""
-    ctl("hypr3d", "aim", cls)
+    ctl("hyprwalk", "aim", cls)
     time.sleep(0.5)
     return aim_find(cls)
 
@@ -7769,10 +7769,10 @@ def pc_steady(timeout=6):
 
 
 def pc_cam():
-    """the drawn camera (hyprctl hypr3d camera: eye, yaw, pitch, up; the status's yaw and pitch are the player's, which
+    """the drawn camera (hyprctl hyprwalk camera: eye, yaw, pitch, up; the status's yaw and pitch are the player's, which
     play mode never turns); without that command, the status's eye, yaw and pitch, no up"""
     try:
-        return json.loads(ctl("hypr3d", "camera"))
+        return json.loads(ctl("hyprwalk", "camera"))
     except json.JSONDecodeError:
         s = st()
         return {"eye": s["eye"], "yaw": s["yaw"], "pitch": s["pitch"], "up": None}
@@ -7806,7 +7806,7 @@ def pc_others(cls):
 
 
 def pc_in_view(cls):
-    """the window's panel inView (hyprctl hypr3d panels); None if unknown"""
+    """the window's panel inView (hyprctl hyprwalk panels); None if unknown"""
     return next((p.get("inView") for p in panels() if p["kind"] == "window" and p["class"] == cls), None)
 
 
@@ -7843,28 +7843,28 @@ def pc_active():
     return json.loads(ctl("-j", "activewindow") or "{}").get("class")
 
 
-@section("31c", "play mode in place (P): the game played where it is, the view as it was and the other windows round it (first and third person, tiling mode's ring, the game moving in it), its keys, buttons, wheel and mouse (locked, and a pointer over it); Super+Esc walking on from there; Shift+P or play_view = fill filling the view; hyprctl hypr3d play here|fill and switching while playing, Lua's play(), the hypr3d:play dispatcher")
+@section("31c", "play mode in place (P): the game played where it is, the view as it was and the other windows round it (first and third person, tiling mode's ring, the game moving in it), its keys, buttons, wheel and mouse (locked, and a pointer over it); Super+Esc walking on from there; Shift+P or play_view = fill filling the view; hyprctl hyprwalk play here|fill and switching while playing, Lua's play(), the hyprwalk:play dispatcher")
 def s_play_here():
     lua_session()
     ensure_avatar(AV)
     ensure_3d(False)
     clean_windows()
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "tile", "follow", "on")
-    ctl("hypr3d", "reset-windows", "forget")
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { play_view = "here" } } })')  # the default; earlier sections may change it
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "tile", "follow", "on")
+    ctl("hyprwalk", "reset-windows", "forget")
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { play_view = "here" } } })')  # the default; earlier sections may change it
     machine.execute("pkill -u alice foot; true")
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
     # on the wall: two terminals, a game locking the pointer (SDL relative mode) and one that doesn't
-    alice("setsid -f foot --app-id h3d-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id h3d-right > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-left > /dev/null 2>&1; sleep 0.7; setsid -f foot --app-id hyprwalk-right > /dev/null 2>&1")
     wait_for("two terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 2, 20)
     pc_game(PC_LOCK, "--relative")
     pc_game(PC_FREE)
     time.sleep(1.5)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
 
     a = pc_aim(PC_LOCK)
@@ -7874,15 +7874,15 @@ def s_play_here():
     s0, c0 = st(), pc_cam()
     press("p")
     p = pc_playing(PC_LOCK)
-    told = ctl("hypr3d", "log", "4")
+    told = ctl("hyprwalk", "log", "4")
     check("31c", "P: playing it here (not filling the view), its pointer lock active (the keyboard focus on it)", p.get("fill") is False and p.get("locked") and pc_active() == PC_LOCK, p)
     check("31c", "... the notification says so, and how to fill the view instead", "here: Super+Esc gives the mouse and keyboard back (Shift+P fills the view)" in told,
           told.strip()[-240:])
     moved, turned, view = pc_still(c0)
-    check("31c", "... the camera doesn't move: over 2 s its eye, yaw, pitch and up as they were (hyprctl hypr3d camera), and it never goes to face the game", moved < 0.001 and turned < 0.01 and view == 0,
+    check("31c", "... the camera doesn't move: over 2 s its eye, yaw, pitch and up as they were (hyprctl hyprwalk camera), and it never goes to face the game", moved < 0.001 and turned < 0.01 and view == 0,
           f"eye {moved * 100:.1f} cm, {turned:.2f}°, view {view}")
     others = pc_others(PC_LOCK)
-    check("31c", "... the other windows still in the view round it (each one's middle in it, hyprctl hypr3d panels)", len(others) == 3 and all(v is True for v in others.values()), others)
+    check("31c", "... the other windows still in the view round it (each one's middle in it, hyprctl hyprwalk panels)", len(others) == 3 and all(v is True for v in others.values()), others)
     img = calm_frame("31c-here")
     d = before.differs(img)
     check("31c", "... and drawn as they were: the frame is the one before P (but for the crosshair and the aimed window's outline)", d < 0.05, f"{d:.1%} of the frame changed")
@@ -7951,8 +7951,8 @@ def s_play_here():
     check("31c", "... and the camera stays where it was all along", moved < 0.001 and turned < 0.01 and view == 0, f"eye {moved * 100:.1f} cm, {turned:.2f}°, view {view}")
     press("meta_l", "esc")
 
-    ctl("hypr3d", "view", "third")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "third")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
     a = pc_aim(PC_LOCK)
     pc_steady()
@@ -7974,9 +7974,9 @@ def s_play_here():
     s, c = st(), pc_cam()
     check("31c", "... Super+Esc: walking at once, the camera where it was", s["playing"] is None and math.dist(c["eye"], c0["eye"]) < 0.001 and pc_turned(c, c0) < 0.01,
           f"playing {s['playing']}, eye {math.dist(c['eye'], c0['eye']) * 100:.1f} cm, {pc_turned(c, c0):.2f}°")
-    ctl("hypr3d", "view", "first")
+    ctl("hyprwalk", "view", "first")
 
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     pc_aim(PC_LOCK)
     s0 = st()
@@ -7993,7 +7993,7 @@ def s_play_here():
     back = pc_wait("the camera back", lambda: math.dist(st()["eye"], s0["eye"]) < 0.001, 5)
     check("31c", "... Super+Esc: the camera comes back to you", back, math.dist(st()["eye"], s0["eye"]))
 
-    r = ctl("eval", 'hl.config({ plugin = { hypr3d = { play_view = "fill" } } })')
+    r = ctl("eval", 'hl.config({ plugin = { hyprwalk = { play_view = "fill" } } })')
     try:
         pc_aim(PC_LOCK)
         press("p")
@@ -8007,76 +8007,76 @@ def s_play_here():
         moved, turned, view = pc_still(c1, 1)
         press("meta_l", "esc")
     finally:
-        ctl("eval", 'hl.config({ plugin = { hypr3d = { play_view = "here" } } })')
-    check("31c", "plugin:hypr3d:play_view = fill (set at run time): P fills the view, Shift+P plays it here, the camera staying", r == "ok" and p1.get("fill") is True
+        ctl("eval", 'hl.config({ plugin = { hyprwalk = { play_view = "here" } } })')
+    check("31c", "plugin:hyprwalk:play_view = fill (set at run time): P fills the view, Shift+P plays it here, the camera staying", r == "ok" and p1.get("fill") is True
           and p2.get("fill") is False and moved < 0.001 and view == 0, f"{r}; P {p1}; Shift+P {p2}, eye {moved * 100:.1f} cm, view {view}")
 
     pc_wait("the camera back", lambda: math.dist(st()["eye"], s1["eye"]) < 0.001, 5)
     pc_aim(PC_LOCK)
     s0 = st()
-    r1 = ctl("hypr3d", "play", "on", "here")
+    r1 = ctl("hyprwalk", "play", "on", "here")
     p1 = st()["playing"] or {}
-    r2 = ctl("hypr3d", "play", "fill")
+    r2 = ctl("hyprwalk", "play", "fill")
     p2 = pc_playing(PC_LOCK, facing=True)
-    r3 = ctl("hypr3d", "play", "here")
+    r3 = ctl("hyprwalk", "play", "here")
     # wait for the eye, not view 0: the play view runs a frame ahead of the status's eye
     s3 = pc_wait("the camera back", lambda: (lambda s: s if s["playing"] and math.dist(s["eye"], s0["eye"]) < 0.001 else None)(st()), 5) or st()
     p3 = s3["playing"] or {}
-    check("31c", "hyprctl hypr3d play on here: played here; play fill while playing switches: the camera goes to face it; play here: back where it was, still played",
+    check("31c", "hyprctl hyprwalk play on here: played here; play fill while playing switches: the camera goes to face it; play here: back where it was, still played",
           r1 == r2 == r3 == "playing" and p1.get("fill") is False and p1.get("view") == 0 and p2.get("fill") is True and p3.get("fill") is False and p3.get("view") == 0
           and p3.get("class") == PC_LOCK and math.dist(s3["eye"], s0["eye"]) < 0.001, f"{r1} {p1}; {r2} {p2}; {r3} {p3}, eye {math.dist(s3['eye'], s0['eye']) * 100:.1f} cm")
-    r4 = ctl("hypr3d", "play", "off")
-    r5 = ctl("hypr3d", "play", "on", "fill")
+    r4 = ctl("hyprwalk", "play", "off")
+    r5 = ctl("hyprwalk", "play", "on", "fill")
     p5 = pc_playing(PC_LOCK, facing=True)
-    r6 = ctl("hypr3d", "play", "toggle")
-    r7 = ctl("hypr3d", "play", "sideways")
+    r6 = ctl("hyprwalk", "play", "toggle")
+    r7 = ctl("hyprwalk", "play", "sideways")
     check("31c", "... play off; play on fill: playing, filling the view; play toggle: off; a word it doesn't know: an error, saying which it takes",
           r4 == r6 == "walking" and r5 == "playing" and p5.get("fill") is True and "[here|fill]" in r7 and r7.startswith("error") and st()["playing"] is None, f"{r4}; {r5} {p5}; {r6}; {r7}")
 
     pc_wait("the camera back", lambda: math.dist(st()["eye"], s0["eye"]) < 0.001, 5)
     pc_aim(PC_LOCK)
-    r1 = ctl("eval", 'local r = hl.plugin.hypr3d.play("fill"); if r ~= "playing" then error("gave " .. tostring(r)) end')
+    r1 = ctl("eval", 'local r = hl.plugin.hyprwalk.play("fill"); if r ~= "playing" then error("gave " .. tostring(r)) end')
     p1 = pc_playing(PC_LOCK, facing=True)
-    r2 = ctl("eval", 'local r = hl.plugin.hypr3d.play("here"); if r ~= "playing" then error("gave " .. tostring(r)) end')
+    r2 = ctl("eval", 'local r = hl.plugin.hyprwalk.play("here"); if r ~= "playing" then error("gave " .. tostring(r)) end')
     p2 = st()["playing"] or {}
-    r3 = ctl("eval", 'local r = hl.plugin.hypr3d.play(); if r ~= "walking" then error("gave " .. tostring(r)) end')
-    check("31c", 'hl.plugin.hypr3d.play("fill"): played filling the view; play("here"): switched to here; play(): stopped (each saying so)',
+    r3 = ctl("eval", 'local r = hl.plugin.hyprwalk.play(); if r ~= "walking" then error("gave " .. tostring(r)) end')
+    check("31c", 'hl.plugin.hyprwalk.play("fill"): played filling the view; play("here"): switched to here; play(): stopped (each saying so)',
           r1 == r2 == r3 == "ok" and p1.get("fill") is True and p2.get("fill") is False and st()["playing"] is None, f"{r1} {p1}; {r2} {p2}; {r3}")
 
     # play off, then at once another window played here: the camera returns the way it went, never veering to the second
     pc_wait("the camera back", lambda: math.dist(st()["eye"], s0["eye"]) < 0.001, 5)
     pc_aim(PC_LOCK)
     c0 = pc_cam()
-    r1 = ctl("hypr3d", "play", "on", "fill")
+    r1 = ctl("hyprwalk", "play", "on", "fill")
     pc_playing(PC_LOCK, facing=True)
     time.sleep(0.5)
     e1 = pc_cam()["eye"]
-    out = as_alice("hyprctl -i 0 hypr3d play off; hyprctl -i 0 hypr3d window h3d-left play; "
-                   "for i in $(seq 50); do hyprctl -i 0 hypr3d status; echo; sleep 0.01; done")[1]
+    out = as_alice("hyprctl -i 0 hyprwalk play off; hyprctl -i 0 hyprwalk window hyprwalk-left play; "
+                   "for i in $(seq 50); do hyprctl -i 0 hyprwalk status; echo; sleep 0.01; done")[1]
     ss = [json.loads(l) for l in out.splitlines() if l.startswith("{")]
     off = max((pc_off_line(x["eye"], c0["eye"], e1) for x in ss), default=9.0)
     last = ss[-1] if ss else {"eye": [9, 9, 9], "playing": None}
     p = last["playing"] or {}
     check("31c", "a window played here (window SEL play) the moment one played filling the view stops (play off): the camera comes back from the first the way it went, "
           "never off towards the second, and ends where it was", r1 == "playing" and len(ss) > 20 and off < 0.05 and math.dist(last["eye"], c0["eye"]) < 0.001
-          and p.get("class") == "h3d-left" and p.get("fill") is False,
+          and p.get("class") == "hyprwalk-left" and p.get("fill") is False,
           f"{len(ss)} samples, at most {off * 100:.1f} cm off the way back; the last eye {last['eye']}, where it was {c0['eye']}; playing {p}")
-    out = as_alice("hyprctl -i 0 hypr3d play fill; for i in $(seq 50); do hyprctl -i 0 hypr3d status; echo; sleep 0.01; done")[1]
+    out = as_alice("hyprctl -i 0 hyprwalk play fill; for i in $(seq 50); do hyprctl -i 0 hyprwalk status; echo; sleep 0.01; done")[1]
     ss = [json.loads(l) for l in out.splitlines() if l.startswith("{")]
     time.sleep(0.5)
     e2 = pc_cam()["eye"]
     off = max((pc_off_line(x["eye"], c0["eye"], e2) for x in ss), default=9.0)
     p = st()["playing"] or {}
     check("31c", "... then play fill, the camera all the way back meanwhile: it goes straight to that window, not by way of the first one",
-          len(ss) > 20 and off < 0.02 and p.get("class") == "h3d-left" and p.get("fill") is True and p.get("view", 0) >= 1,
+          len(ss) > 20 and off < 0.02 and p.get("class") == "hyprwalk-left" and p.get("fill") is True and p.get("view", 0) >= 1,
           f"{len(ss)} samples, at most {off * 100:.1f} cm off the way there ({c0['eye']} -> {e2}); playing {p}")
     press("meta_l", "esc")
 
     # Play on the Windows page on a game behind you: you turn to face it, the eye stays put
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     pc_aim(PC_LOCK)
-    ctl("hypr3d", "turn", f"{st()['yaw'] + 180:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{st()['yaw'] + 180:.1f}", "0")
     time.sleep(0.8)
     c0 = pc_cam()
     seen0 = pc_in_view(PC_LOCK)
@@ -8091,7 +8091,7 @@ def s_play_here():
     moved, _, view = pc_still(c0, 1)
     c1 = pc_cam()
     seen1 = pc_in_view(PC_LOCK)
-    told = ctl("hypr3d", "log", "6")
+    told = ctl("hyprwalk", "log", "6")
     img = frame("31c-play-behind")
     check("31c", "Play on the Windows page (B, the game, Play) on a game behind you: played here, and you turn to face it: its middle in the view, the eye where it was, "
           "the camera never going to face it", slot and act and p.get("fill") is False and seen0 is False and seen1 is True and pc_turned(c1, c0) > 90 and moved < 0.001
@@ -8103,11 +8103,11 @@ def s_play_here():
           f"{pc_turned(c2, c1):.2f}°, eye {math.dist(c2['eye'], c1['eye']) * 100:.1f} cm")
 
     # a game typed into (E) going fullscreen behind you: auto-played here, turning you to face it
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     pc_aim(PC_FREE)
     press("e")
-    ctl("hypr3d", "turn", f"{st()['yaw'] + 180:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{st()['yaw'] + 180:.1f}", "0")
     time.sleep(0.8)
     c0 = pc_cam()
     typing = st()["typing"]
@@ -8143,28 +8143,28 @@ def s_play_here():
 
     # a pinned window played: here in its corner; play fill faces it there without it running ahead of the camera;
     # Super+Esc: back in its corner
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
-    r0 = ctl("hypr3d", "window", "h3d-right", "pin")
+    r0 = ctl("hyprwalk", "window", "hyprwalk-right", "pin")
     time.sleep(1)
     c0 = pc_cam()
-    g0 = placed("h3d-right") or {}
-    r1 = ctl("hypr3d", "window", "h3d-right", "play")
-    p1 = pc_playing("h3d-right")
+    g0 = placed("hyprwalk-right") or {}
+    r1 = ctl("hyprwalk", "window", "hyprwalk-right", "play")
+    p1 = pc_playing("hyprwalk-right")
     moved, turned, view = pc_still(c0, 1)
-    g1 = placed("h3d-right") or {}
-    seen1 = pc_in_view("h3d-right")
+    g1 = placed("hyprwalk-right") or {}
+    seen1 = pc_in_view("hyprwalk-right")
     went = math.dist(g1["center"], g0["center"]) if g0 and g1 else 9.0
-    check("31c", "a window pinned to the view, Play (hyprctl hypr3d window SEL play): played here, in its corner as it was, the camera staying",
+    check("31c", "a window pinned to the view, Play (hyprctl hyprwalk window SEL play): played here, in its corner as it was, the camera staying",
           r0 == "pinned" and r1 == "playing" and p1.get("fill") is False and g1.get("pinned") and went < 0.01 and seen1 is True and moved < 0.001 and turned < 0.01 and view == 0,
           f"{r0} {r1}; {p1}; pinned {g1.get('pinned')}, it moved {went:.3f} m, its middle in the view {seen1}; eye {moved * 100:.1f} cm, {turned:.2f}°, view {view}")
-    r2 = ctl("hypr3d", "play", "fill")
+    r2 = ctl("hyprwalk", "play", "fill")
     eyes = []
     for _ in range(8):
         time.sleep(0.25)
         eyes.append(pc_cam()["eye"])
     p2 = st()["playing"] or {}
-    seen2 = pc_in_view("h3d-right")
+    seen2 = pc_in_view("hyprwalk-right")
     frame("31c-pinned-fill")
     far = max(math.dist(e, c0["eye"]) for e in eyes)
     check("31c", "... play fill: the camera goes to face it in the corner and stays there (the window doesn't go on ahead of it)",
@@ -8172,37 +8172,37 @@ def s_play_here():
           f"{r2}; {p2}; its middle in the view {seen2}; the eye over 2 s: {[[round(v, 2) for v in e] for e in eyes]}")
     press("meta_l", "esc")
     back = pc_wait("the camera back", lambda: math.dist(pc_cam()["eye"], c0["eye"]) < 0.001, 5)
-    g3 = placed("h3d-right") or {}
+    g3 = placed("hyprwalk-right") or {}
     went = math.dist(g3["center"], g0["center"]) if g0 and g3 else 9.0
     check("31c", "... Super+Esc: the camera back where it was, the window pinned in its corner again", back and g3.get("pinned") and went < 0.01,
           f"camera back {bool(back)}; pinned {g3.get('pinned')}, {went:.3f} m from where it was")
-    ctl("hypr3d", "window", "h3d-right", "unpin")
-    ctl("hypr3d", "window", "h3d-right", "wall")
+    ctl("hyprwalk", "window", "hyprwalk-right", "unpin")
+    ctl("hyprwalk", "window", "hyprwalk-right", "wall")
     time.sleep(1)
 
-    r = ctl("eval", 'hl.config({ plugin = { hypr3d = { play_view = "full" } } })')
+    r = ctl("eval", 'hl.config({ plugin = { hyprwalk = { play_view = "full" } } })')
     try:
-        told = pc_wait("the value said", lambda: (lambda l: l if "not full" in l else None)(ctl("hypr3d", "log", "8")), 5)
+        told = pc_wait("the value said", lambda: (lambda l: l if "not full" in l else None)(ctl("hyprwalk", "log", "8")), 5)
         pc_aim(PC_LOCK)
         press("p")
         p = pc_playing(PC_LOCK)
         press("meta_l", "esc")
         time.sleep(1.5)
-        times = ctl("hypr3d", "log", "40").count("not full")
+        times = ctl("hyprwalk", "log", "40").count("not full")
     finally:
-        ctl("eval", 'hl.config({ plugin = { hypr3d = { play_view = "here" } } })')
-    check("31c", "plugin:hypr3d:play_view = full (neither here nor fill): a notification says so, once, and P plays here", r == "ok" and told and times == 1 and p.get("fill") is False,
+        ctl("eval", 'hl.config({ plugin = { hyprwalk = { play_view = "here" } } })')
+    check("31c", "plugin:hyprwalk:play_view = full (neither here nor fill): a notification says so, once, and P plays here", r == "ok" and told and times == 1 and p.get("fill") is False,
           f"{r}; said {times} time(s): {(told or '').strip()[-160:]}; {p}")
 
     # third person: Play on a game behind you turns you to face it past the avatar
-    ctl("hypr3d", "view", "third")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "third")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
     pc_aim(PC_FREE)
-    ctl("hypr3d", "turn", f"{st()['yaw'] + 180:.1f}", "0")
+    ctl("hyprwalk", "turn", f"{st()['yaw'] + 180:.1f}", "0")
     pc_steady()
     seen0 = pc_in_view(PC_FREE)
-    r = ctl("hypr3d", "window", PC_FREE, "play")
+    r = ctl("hyprwalk", "window", PC_FREE, "play")
     p = pc_playing(PC_FREE)
     pc_steady()
     _, turned, view = pc_still(pc_cam(), 0.5)
@@ -8212,16 +8212,16 @@ def s_play_here():
           r == "playing" and p.get("fill") is False and seen0 is False and seen1 is True and turned < 0.01 and view == 0 and st()["view"] == "third" and pc_mid_game(img) > 0.8,
           f"{r}; {p}; its middle in the view {seen0} -> {seen1}; then {turned:.2f}°, view {view}; the game's background {pc_mid_game(img):.0%} of the middle of the frame")
     press("meta_l", "esc")
-    ctl("hypr3d", "view", "first")
+    ctl("hyprwalk", "view", "first")
 
     # the ring: the game played with its neighbours in view; a new window joins beside it, the game and view staying put
     pc_wait("the camera back", lambda: math.dist(st()["eye"], s0["eye"]) < 0.001, 5)
     # sizes small enough that the neighbours' middles stay in view beside the game at half the view: under a quarter
     # wide
-    for cls, size in (("h3d-left", "280 240"), ("h3d-right", "280 240"), (PC_LOCK, "400 250"), (PC_FREE, "280 240")):
-        ctl("hypr3d", "window", cls, "size", *size.split())
+    for cls, size in (("hyprwalk-left", "280 240"), ("hyprwalk-right", "280 240"), (PC_LOCK, "400 250"), (PC_FREE, "280 240")):
+        ctl("hyprwalk", "window", cls, "size", *size.split())
     time.sleep(1)
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "spawn")
     time.sleep(0.8)
     press("t")
     w = settled(10)
@@ -8246,40 +8246,40 @@ def s_play_here():
     check("31c", "... its keys reach it", "key down S" in got, got)
     pc_wait("the row settled", lambda: all(q["settled"] for q in windows3d()["placed"]), 10, 0.3)
     g0 = (placed(PC_LOCK) or {}).get("center")  # played: half the view, where you look
-    alice("setsid -f foot --app-id h3d-pc-new > /dev/null 2>&1")
-    pc_wait("the new terminal in the row", lambda: "h3d-pc-new" in tiled_row(), 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-pc-new > /dev/null 2>&1")
+    pc_wait("the new terminal in the row", lambda: "hyprwalk-pc-new" in tiled_row(), 20, 0.5)
     pc_wait("the row settled", lambda: all(q["settled"] for q in windows3d()["placed"]), 10, 0.3)
     s, c, row = st(), pc_cam(), tiled_row()
     g1 = (placed(PC_LOCK) or {}).get("center")
     check("31c", "... a window opening meanwhile goes into the row beside it: the game stays where it is (the row turning round it), still played (its lock keeps the "
-          "keyboard), and the view stays where it was", s["playing"] and s["playing"]["class"] == PC_LOCK and "h3d-pc-new" in row and g0 and g1 and math.dist(g0, g1) < 0.02
+          "keyboard), and the view stays where it was", s["playing"] and s["playing"]["class"] == PC_LOCK and "hyprwalk-pc-new" in row and g0 and g1 and math.dist(g0, g1) < 0.02
           and math.dist(c["eye"], c0["eye"]) < 0.001 and pc_turned(c, c0) < 0.01,
           f"row {row}; the game {g0} -> {g1}; eye {math.dist(c['eye'], c0['eye']) * 100:.1f} cm, {pc_turned(c, c0):.2f}°; playing {s['playing']}")
     frame("31c-ring-moved")
     press("meta_l", "esc")
-    ctl("hypr3d", "window", "h3d-pc-new", "close")
-    ctl("hypr3d", "tile", "off")
+    ctl("hyprwalk", "window", "hyprwalk-pc-new", "close")
+    ctl("hyprwalk", "tile", "off")
     ensure_3d(False)
-    machine.execute("pkill -f 'h3dgame --title h3dgame-pc'; true")
+    machine.execute("pkill -f 'hyprwalkgame --title hyprwalkgame-pc'; true")
 
-    # the hypr3d:play dispatcher with an argument, from hyprland.conf (Lua uses play())
+    # the hyprwalk:play dispatcher with an argument, from hyprland.conf (Lua uses play())
     start_hyprland("hyprland.conf", conf_config({"avatar": AV}))
     ensure_avatar(AV)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
-    a = pc_aim("h3d-left")
-    r1 = ctl("dispatch", "hypr3d:play", "fill")
-    p1 = pc_playing("h3d-left", facing=True)
-    r2 = ctl("dispatch", "hypr3d:play", "here")
+    a = pc_aim("hyprwalk-left")
+    r1 = ctl("dispatch", "hyprwalk:play", "fill")
+    p1 = pc_playing("hyprwalk-left", facing=True)
+    r2 = ctl("dispatch", "hyprwalk:play", "here")
     p2 = st()["playing"] or {}
-    r3 = ctl("dispatch", "hypr3d:play")
+    r3 = ctl("dispatch", "hyprwalk:play")
     s3 = st()
-    r4 = ctl("dispatch", "hypr3d:play", "sideways")
-    check("31c", "the hypr3d:play dispatcher (hyprland.conf): fill plays filling the view, here switches to here, none stops; a word it doesn't know fails, saying which it takes",
-          a and r1 == r2 == r3 == "ok" and p1.get("fill") is True and p2.get("fill") is False and p2.get("class") == "h3d-left" and s3["playing"] is None and r4 != "ok"
+    r4 = ctl("dispatch", "hyprwalk:play", "sideways")
+    check("31c", "the hyprwalk:play dispatcher (hyprland.conf): fill plays filling the view, here switches to here, none stops; a word it doesn't know fails, saying which it takes",
+          a and r1 == r2 == r3 == "ok" and p1.get("fill") is True and p2.get("fill") is False and p2.get("class") == "hyprwalk-left" and s3["playing"] is None and r4 != "ok"
           and "[here|fill]" in r4, f"{r1} {p1}; {r2} {p2}; {r3} {s3['playing']}; {r4}")
     ensure_3d(False)
     lua_session()
@@ -8311,7 +8311,7 @@ def ps_up(cls):
 
 
 def ps_box(img):
-    """h3dgame's window at the frame's middle: (width, height, right, up) as frame fractions, (0, 0, 9, 9) if absent;
+    """hyprwalkgame's window at the frame's middle: (width, height, right, up) as frame fractions, (0, 0, 9, 9) if absent;
     its colour is the commonest game-blue near the middle (world greys can match), and the height adds the top band
     (an eighth)"""
     cx, cy = img.w // 2, img.h // 2
@@ -8370,7 +8370,7 @@ def ps_near(size, want, tol=1e-3):
 
 
 def ps_config(v):
-    return ctl("eval", "hl.config({ plugin = { hypr3d = { play_size = %s } } })" % v)
+    return ctl("eval", "hl.config({ plugin = { hyprwalk = { play_size = %s } } })" % v)
 
 
 @section("31d", "a game played here in tiling mode's ring (P, first and third person): just play_size of the view (25% to 94%, bigger than on your screen too), in the middle of your view left and right and up and down (looking up or down too; the camera still), the windows beside it in the view; Super+wheel bigger and smaller, 5% of the view a notch, up to 94% and down to 25% (a high-resolution wheel's half notches too), never the game's; the wheel alone the game's; Super+Esc its size back, the row where it is; Shift+P as ever; play_size set at run time (used at once, and out of range); a crowded ring (the others smaller round it, not the game); a ring that stays (Y); a window opening while playing goes right of it; played out in the world and on the wall")
@@ -8379,34 +8379,34 @@ def s_play_size():
     ensure_avatar(AV)
     ensure_3d(False)
     clean_windows()
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "tile", "follow", "on")
-    ctl("hypr3d", "reset-windows", "forget")
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { play_view = "here", play_size = 0.5 } } })')
-    machine.execute("pkill -u alice foot; pkill -f 'h3dgame --title'; true")
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "tile", "follow", "on")
+    ctl("hyprwalk", "reset-windows", "forget")
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { play_view = "here", play_size = 0.5 } } })')
+    machine.execute("pkill -u alice foot; pkill -f 'hyprwalkgame --title'; true")
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
     # four small terminals and a game nearly monitor-sized (1280x800) in the ring
     for i in range(4):
-        alice(f"setsid -f foot --app-id h3d-d{i} > /dev/null 2>&1")
+        alice(f"setsid -f foot --app-id hyprwalk-d{i} > /dev/null 2>&1")
         time.sleep(0.6)
     wait_for("four terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 4, 20)
     pc_game(PC_FREE)
     time.sleep(1.5)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
     for i in range(4):
-        ctl("hypr3d", "window", f"h3d-d{i}", "size", "280", "240")
-    ctl("hypr3d", "window", PC_FREE, "size", "1200", "750")
+        ctl("hyprwalk", "window", f"hyprwalk-d{i}", "size", "280", "240")
+    ctl("hyprwalk", "window", PC_FREE, "size", "1200", "750")
     time.sleep(1.5)
     press("t")
     w = settled(10)
     row = [x["class"] for x in ring_view(w)]
     # P aimed 12 degrees right of the game's middle: its middle reaching the view's shows the row turned
     a = aim_row(PC_FREE)
-    ctl("hypr3d", "turn", f"{st()['yaw'] + 12:.2f}", "0")
+    ctl("hyprwalk", "turn", f"{st()['yaw'] + 12:.2f}", "0")
     time.sleep(0.8)
     aimed = (st().get("aimed") or {}).get("class")
     off0, share0 = ps_view(PC_FREE)
@@ -8421,15 +8421,15 @@ def s_play_size():
     i = row.index(PC_FREE) if PC_FREE in row else -1
     near = [row[j] for j in (i - 1, i + 1) if 0 <= j < len(row)] if i >= 0 else []
     img = frame("31d-played")
-    told = ctl("hypr3d", "log", "10")
+    told = ctl("hyprwalk", "log", "10")
     check("31d", "tiling mode's ring, four terminals and a 1200x750 game (85% of the view, as big as the ring has one), P with the crosshair 12 deg right of its middle: "
           "played here", a and aimed == PC_FREE and p.get("fill") is False and abs(share0 - FRONT_FIT) < 0.03, f"row {row}; aimed {aimed}; share {share0:.3f}; {p}")
-    check("31d", "... it takes play_size (0.5) of the view (hyprctl hypr3d windows and camera; the status's size, the tile JSON's played)",
+    check("31d", "... it takes play_size (0.5) of the view (hyprctl hyprwalk windows and camera; the status's size, the tile JSON's played)",
           abs(share1 - 0.5) < 0.03 and ps_near(p.get("size"), 0.5) and abs(pl1.get("share", 0) - 0.5) < 0.01, f"share {share0:.3f} -> {share1:.3f}; size {p.get('size')}; played {pl1}")
     check("31d", "... and so in the frame: the game's background across half of it, through its middle", abs(pc_span(img) - 0.5) < 0.06, f"{pc_span(img):.3f}")
     check("31d", "... the row turned so its middle is the view's (within 2 deg), up and down too (0.5 deg)", abs(off1) < 2 and abs(off0 + 12) < 2 and abs(up1) < 0.5,
           f"{off0:.2f} -> {off1:.2f} deg, up {up1:.2f} deg; the ring's yaw {yaw0} -> {windows3d()['tiling']['yaw']}")
-    check("31d", "... the camera still over 2 s (hyprctl hypr3d camera: its eye, yaw, pitch, up), never going to face it", moved < 0.001 and turned < 0.01 and view == 0,
+    check("31d", "... the camera still over 2 s (hyprctl hyprwalk camera: its eye, yaw, pitch, up), never going to face it", moved < 0.001 and turned < 0.01 and view == 0,
           f"eye {moved * 100:.2f} cm, {turned:.3f} deg, view {view}")
     check("31d", "... the windows beside it in the row in the view (their middles, panels' inView)", near and all(others.get(n) is True for n in near), f"{near}: {others}")
     check("31d", "... the notification says Super+wheel sizes it", "Super+wheel makes it bigger or smaller" in told, told.strip()[-200:])
@@ -8438,7 +8438,7 @@ def s_play_size():
     ps_wheel(-2)
     time.sleep(0.8)
     s2, (off2, share2) = ps_size(), ps_view(PC_FREE)
-    log2 = ctl("hypr3d", "log", "12")
+    log2 = ctl("hyprwalk", "log", "12")
     ps_wheel(4)
     time.sleep(0.8)
     s3, (off3, share3) = ps_size(), ps_view(PC_FREE)
@@ -8460,11 +8460,11 @@ def s_play_size():
     ps_wheel(-12)
     time.sleep(4.5)
     s4, (off4, share4), up4, pl4 = ps_size(), ps_view(PC_FREE), ps_up(PC_FREE), ps_played()
-    told4 = ctl("hypr3d", "log", "4")
+    told4 = ctl("hyprwalk", "log", "4")
     bw, bh, bx, by = ps_box(frame("31d-most"))
     ps_wheel(1)
     s5, share5 = ps_size(), ps_view(PC_FREE)[1]
-    check("31d", "Super+wheel up x12: the most, 94% of the view, more than the ring gives a window (the size stops there; hyprctl hypr3d windows and camera, the tile "
+    check("31d", "Super+wheel up x12: the most, 94% of the view, more than the ring gives a window (the size stops there; hyprctl hyprwalk windows and camera, the tile "
           "JSON's played), in the middle of the view left and right (2 deg) and up and down (0.5 deg), said so",
           ps_near(s4, 0.94) and abs(share4 - 0.94) < 0.03 and abs(pl4.get("share", 0) - 0.94) < 0.005 and abs(off4) < 2 and abs(up4) < 0.5 and "(the most)" in told4,
           f"size {s4}, share {share4:.3f}, off {off4:.2f} deg, up {up4:.2f} deg; played {pl4}; {told4.strip()[-160:]}")
@@ -8474,7 +8474,7 @@ def s_play_size():
     ps_wheel(20)
     time.sleep(0.8)
     s6, (off6, share6) = ps_size(), ps_view(PC_FREE)
-    told6 = ctl("hypr3d", "log", "4")
+    told6 = ctl("hyprwalk", "log", "4")
     check("31d", "... down x20: the least, a quarter of the view, still in the middle, said so", ps_near(s6, 0.25) and abs(share6 - 0.25) < 0.03 and abs(off6) < 2 and "(the least)" in told6,
           f"size {s6}, share {share6:.3f}, off {off6:.2f}; {told6.strip()[-120:]}")
     # a high-resolution wheel: half notches, two make one
@@ -8528,7 +8528,7 @@ def s_play_size():
     check("31d", "play_size set at run time (hyprctl eval), P at once: the play takes it from the start (size, share)",
           all(r == "ok" and ps_near(f, v) and abs(sh - v) < 0.03 for v, r, f, sh in seen), f"(set, eval, size at P, share) {seen}")
     r = ps_config(1.5)
-    told = pc_wait("the value said", lambda: (lambda l: l if "not 1.5" in l else None)(ctl("hypr3d", "log", "8")), 5) or ""
+    told = pc_wait("the value said", lambda: (lambda l: l if "not 1.5" in l else None)(ctl("hyprwalk", "log", "8")), 5) or ""
     aim_row(PC_FREE)
     press("p")
     sA, shareA = ps_size(), ps_view(PC_FREE)[1]
@@ -8536,7 +8536,7 @@ def s_play_size():
     sB, shareB = ps_size(), ps_view(PC_FREE)[1]
     press("meta_l", "esc")
     time.sleep(1.5)
-    times = ctl("hypr3d", "log", "40").count("not 1.5")
+    times = ctl("hyprwalk", "log", "40").count("not 1.5")
     check("31d", "play_size = 1.5: said once, taken as 0.94 (the game 94% of the view); Super+wheel down: 0.89",
           r == "ok" and times == 1 and "0.94 then" in told and ps_near(sA, 0.94) and abs(shareA - 0.94) < 0.03 and ps_near(sB, 0.89) and abs(shareB - 0.89) < 0.03,
           f"{r}; said {times} time(s): {told.strip()[-150:]}; size {sA} (share {shareA:.3f}) -> {sB} (share {shareB:.3f})")
@@ -8562,7 +8562,7 @@ def s_play_size():
     got, ok = [], True
     for pitch in (8.0, -10.0):
         aim_row(PC_FREE)
-        ctl("hypr3d", "turn", f"{st()['yaw'] - 5:.2f}", f"{pitch:.1f}")
+        ctl("hyprwalk", "turn", f"{st()['yaw'] - 5:.2f}", f"{pitch:.1f}")
         time.sleep(0.8)
         aimed = (st().get("aimed") or {}).get("class")
         press("p")
@@ -8579,20 +8579,20 @@ def s_play_size():
                    f"{max(bw, bh):.3f}, its middle {bx:+.3f}, {by:+.3f}; walking, {back * 100:.1f} cm from the ring's middle up and down")
         ok = ok and aimed == PC_FREE and p.get("fill") is False and abs(off) < 2 and abs(up) < 0.5 and abs(pl.get("share", 0) - 0.5) < 0.005 and abs(bx) < 0.03 and abs(by) < 0.03 \
             and back < 0.01
-    ctl("hypr3d", "turn", f"{st()['yaw']:.2f}", "0")
+    ctl("hyprwalk", "turn", f"{st()['yaw']:.2f}", "0")
     time.sleep(0.5)
     check("31d", "looking 8 deg up, then 10 down, P: the game's middle where you look (within 0.5 deg up and down, 2 left and right; in the frame too), half the view; "
           "Super+Esc: level with the ring's middle again", ok, "; ".join(got))
 
     # a staying ring (Y), you 0.8 m off its middle: the game turns to your view from your eye
-    ctl("hypr3d", "tile", "follow", "off")
+    ctl("hyprwalk", "tile", "follow", "off")
     time.sleep(0.5)
     s = st()
     yaw = math.radians(s["yaw"])
-    ctl("hypr3d", "tp", f"{s['feet'][0] + 0.8 * math.cos(yaw):.3f}", f"{s['feet'][1]:.3f}", f"{s['feet'][2] + 0.8 * math.sin(yaw):.3f}")
+    ctl("hyprwalk", "tp", f"{s['feet'][0] + 0.8 * math.cos(yaw):.3f}", f"{s['feet'][1]:.3f}", f"{s['feet'][2] + 0.8 * math.sin(yaw):.3f}")
     time.sleep(1.0)
     aim_row(PC_FREE)
-    ctl("hypr3d", "turn", f"{st()['yaw'] - 8:.2f}", "0")
+    ctl("hyprwalk", "turn", f"{st()['yaw'] - 8:.2f}", "0")
     time.sleep(0.8)
     offY0 = ps_view(PC_FREE)[0]
     c1 = pc_cam()
@@ -8609,8 +8609,8 @@ def s_play_size():
           and abs(plY.get("share", 0) - 0.5) < 0.005 and movedY < 0.001 and turnedY < 0.01, f"atRing {t['atRing']}, follow {t['follow']}; off {offY0:.2f} -> {offY1:.2f} deg, "
           f"up {upY:.2f} deg; played {plY}, from your eye {shareY:.3f}; eye {movedY * 100:.2f} cm, {turnedY:.3f} deg")
     press("meta_l", "esc")
-    ctl("hypr3d", "tile", "follow", "on")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "tile", "follow", "on")
+    ctl("hyprwalk", "spawn")
     time.sleep(1.0)
     ps_settle()
 
@@ -8618,18 +8618,18 @@ def s_play_size():
     # game, which stays mid-view
     pc_game(PC_LOCK, "--relative")
     time.sleep(1.0)
-    ctl("hypr3d", "window", PC_LOCK, "size", "1200", "750")
+    ctl("hyprwalk", "window", PC_LOCK, "size", "1200", "750")
     time.sleep(1.5)
     ps_settle()
     aim_row(PC_LOCK)
-    ctl("hypr3d", "turn", f"{st()['yaw'] + 5:.2f}", "0")
+    ctl("hyprwalk", "turn", f"{st()['yaw'] + 5:.2f}", "0")
     time.sleep(0.6)
     press("p")
     pc_playing(PC_LOCK)
     ps_settle()
     offA = ps_view(PC_LOCK)[0]
-    alice("setsid -f foot --app-id h3d-dnew > /dev/null 2>&1")
-    pc_wait("the new terminal in the row", lambda: "h3d-dnew" in tiled_row(), 20, 0.5)
+    alice("setsid -f foot --app-id hyprwalk-dnew > /dev/null 2>&1")
+    pc_wait("the new terminal in the row", lambda: "hyprwalk-dnew" in tiled_row(), 20, 0.5)
     time.sleep(1.0)
     ps_settle()
     offB, rowB, sB = ps_view(PC_LOCK)[0], tiled_row(), st()
@@ -8637,25 +8637,25 @@ def s_play_size():
     offC, sC = ps_view(PC_LOCK)[0], st()
     k = rowB.index(PC_LOCK) if PC_LOCK in rowB else -9
     check("31d", "a window opening while playing here goes right of the game (in the middle of your view), the game staying there (the row turning round it), still played",
-          k >= 0 and k + 1 < len(rowB) and rowB[k + 1] == "h3d-dnew" and abs(offA) < 2 and abs(offB) < 2 and (sB["playing"] or {}).get("class") == PC_LOCK,
+          k >= 0 and k + 1 < len(rowB) and rowB[k + 1] == "hyprwalk-dnew" and abs(offA) < 2 and abs(offB) < 2 and (sB["playing"] or {}).get("class") == PC_LOCK,
           f"row {rowB}; the game {offA:.2f} -> {offB:.2f} deg; playing {(sB['playing'] or {}).get('class')}")
     check("31d", "... Super+wheel then: still in the middle", abs(offC) < 2 and (sC["playing"] or {}).get("class") == PC_LOCK, f"{offB:.2f} -> {offC:.2f} deg")
     ps_wheel(-1)  # back to play_size's half, for what follows
     press("meta_l", "esc")
-    ctl("hypr3d", "window", "h3d-dnew", "close")
-    machine.execute("pkill -f 'h3dgame --title h3dgame-pc-lock'; true")
+    ctl("hyprwalk", "window", "hyprwalk-dnew", "close")
+    machine.execute("pkill -f 'hyprwalkgame --title hyprwalkgame-pc-lock'; true")
     time.sleep(1.0)
 
     # a crowded ring (seven terminals as big as the game, shrunk alike to fit): P still gives the game play_size
     # mid-view; the others shrink alike by ring angle (kept by pulled-in windows), the row spanning as far as before
     for i in range(4):
-        ctl("hypr3d", "window", f"h3d-d{i}", "size", "1200", "750")
+        ctl("hyprwalk", "window", f"hyprwalk-d{i}", "size", "1200", "750")
     for i in range(4, 7):
-        alice(f"setsid -f foot --app-id h3d-d{i} > /dev/null 2>&1")
+        alice(f"setsid -f foot --app-id hyprwalk-d{i} > /dev/null 2>&1")
         time.sleep(0.6)
-    pc_wait("seven terminals in the row", lambda: sum(c.startswith("h3d-d") for c in tiled_row()) >= 7, 20, 0.5)
+    pc_wait("seven terminals in the row", lambda: sum(c.startswith("hyprwalk-d") for c in tiled_row()) >= 7, 20, 0.5)
     for i in range(4, 7):
-        ctl("hypr3d", "window", f"h3d-d{i}", "size", "1200", "750")
+        ctl("hyprwalk", "window", f"hyprwalk-d{i}", "size", "1200", "750")
     time.sleep(1.5)
     ps_settle()
     v0 = ring_view()
@@ -8682,22 +8682,22 @@ def s_play_size():
           + "; ".join(f"{c} {deg(before.get(c, 0))} -> {deg(after[c])}" for c in others))
     press("meta_l", "esc")
     for i in range(4, 7):
-        ctl("hypr3d", "window", f"h3d-d{i}", "close")
+        ctl("hyprwalk", "window", f"hyprwalk-d{i}", "close")
     for i in range(4):
-        ctl("hypr3d", "window", f"h3d-d{i}", "size", "280", "240")
+        ctl("hyprwalk", "window", f"hyprwalk-d{i}", "size", "280", "240")
     time.sleep(1.5)
     ps_settle()
 
     # third person: P at play_size 0.5 takes half the view mid-view; Super+wheel up x6: 0.8. Its frame middle sits a
     # little right: it faces the avatar's head, not the camera, and its nearer edge looks bigger (about 0.56 x share^2 x
     # sin 7 deg of the frame's width)
-    ctl("hypr3d", "view", "third")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "third")
+    ctl("hyprwalk", "spawn")
     time.sleep(1.2)
     pc_steady()
     ps_settle()
     aim_row(PC_FREE)
-    ctl("hypr3d", "turn", f"{st()['yaw'] + 6:.2f}", "0")
+    ctl("hyprwalk", "turn", f"{st()['yaw'] + 6:.2f}", "0")
     pc_steady()
     aimed = (st().get("aimed") or {}).get("class")
     offT0, shareT0 = ps_view(PC_FREE)
@@ -8727,7 +8727,7 @@ def s_play_size():
     time.sleep(1.0)
     ps_settle()
     aim_row(PC_FREE)
-    ctl("hypr3d", "turn", f"{st()['yaw']:.2f}", "-8")
+    ctl("hyprwalk", "turn", f"{st()['yaw']:.2f}", "-8")
     pc_steady()
     aimed = (st().get("aimed") or {}).get("class")
     press("p")
@@ -8738,18 +8738,18 @@ def s_play_size():
           and abs(offT3) < 2, f"aimed {aimed}; off {offT3:.2f}, up {upT3:.2f} deg; pitch {pc_cam()['pitch']:.1f}")
     press("meta_l", "esc")
     ps_config(0.5)
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
-    ctl("hypr3d", "turn", f"{st()['yaw']:.2f}", "0")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
+    ctl("hyprwalk", "turn", f"{st()['yaw']:.2f}", "0")
     time.sleep(1)
-    ctl("hypr3d", "tile", "off")
+    ctl("hyprwalk", "tile", "off")
     time.sleep(1.5)
 
     # tiling off: brought out and played, Super+wheel scales it in place
-    r = ctl("hypr3d", "window", PC_FREE, "bring")
+    r = ctl("hyprwalk", "window", PC_FREE, "bring")
     time.sleep(1.5)
     ps_settle()
-    r2 = ctl("hypr3d", "window", PC_FREE, "play")
+    r2 = ctl("hyprwalk", "window", PC_FREE, "play")
     pc_playing(PC_FREE)
     g0 = placed(PC_FREE) or {}
     pc_mark(PC_FREE, "world")
@@ -8764,7 +8764,7 @@ def s_play_size():
           and not got, f"{r} {r2}; size {g0.get('size')} -> {g1.get('size')} ({up:.4f}) -> {g2.get('size')} ({down:.4f}); center {g0.get('center')} -> {g2.get('center')}; {got}")
     press("meta_l", "esc")
     # on the wall it stays screen-sized: Super+wheel does nothing, logged once
-    ctl("hypr3d", "window", PC_FREE, "wall")
+    ctl("hyprwalk", "window", PC_FREE, "wall")
     time.sleep(1.5)
     pc_aim(PC_FREE)
     press("p")
@@ -8772,11 +8772,11 @@ def s_play_size():
     pc_mark(PC_FREE, "wall")
     ps_wheel(-3)
     got = [l for l in pc_lines(PC_FREE, "wall") if l.startswith("wheel")]
-    n = ctl("hypr3d", "log", "40").count("on the desktop wall, as big as it goes")
+    n = ctl("hyprwalk", "log", "40").count("on the desktop wall, as big as it goes")
     check("31d", "on the desktop wall: Super+wheel nothing (the game none of it), logged once", p.get("fill") is False and not got and n == 1 and placed(PC_FREE) is None,
           f"{p}; {got}; logged {n} time(s)")
     press("meta_l", "esc")
-    machine.execute("pkill -f 'h3dgame --title h3dgame-pc'; pkill -u alice foot; true")
+    machine.execute("pkill -f 'hyprwalkgame --title hyprwalkgame-pc'; pkill -u alice foot; true")
     ensure_3d(False)
 
 
@@ -8834,30 +8834,30 @@ def s_play_seen():
     ensure_avatar(AV)
     ensure_3d(False)
     clean_windows()
-    ctl("hypr3d", "tile", "off")
-    ctl("hypr3d", "tile", "follow", "on")
-    ctl("hypr3d", "reset-windows", "forget")
+    ctl("hyprwalk", "tile", "off")
+    ctl("hyprwalk", "tile", "follow", "on")
+    ctl("hyprwalk", "reset-windows", "forget")
     # only a play_size change resets the play's size (31d's Super+wheel left 0.8); the plugin reads it once a second
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { play_view = "here", play_size = 0.55 } } })')
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { play_view = "here", play_size = 0.55 } } })')
     time.sleep(1.5)
-    ctl("eval", 'hl.config({ plugin = { hypr3d = { play_view = "here", play_size = 0.5 } } })')
+    ctl("eval", 'hl.config({ plugin = { hyprwalk = { play_view = "here", play_size = 0.5 } } })')
     time.sleep(1.5)
-    machine.execute("pkill -u alice foot; pkill -f 'h3dgame --title'; true")
+    machine.execute("pkill -u alice foot; pkill -f 'hyprwalkgame --title'; true")
     wait_for("no windows", lambda: not json.loads(ctl("-j", "clients")), 10, 0.3)
     for i in range(4):
-        alice(f"setsid -f foot --app-id h3d-e{i} > /dev/null 2>&1")
+        alice(f"setsid -f foot --app-id hyprwalk-e{i} > /dev/null 2>&1")
         time.sleep(0.6)
     wait_for("four terminals", lambda: len(json.loads(ctl("-j", "clients"))) >= 4, 20)
     pc_game(PC_FREE)
     time.sleep(1.5)
     ensure_3d()
     menu_closed()
-    ctl("hypr3d", "view", "first")
-    ctl("hypr3d", "spawn")
+    ctl("hyprwalk", "view", "first")
+    ctl("hyprwalk", "spawn")
     time.sleep(1)
     for i in range(4):
-        ctl("hypr3d", "window", f"h3d-e{i}", "size", "280", "240")
-    ctl("hypr3d", "window", PC_FREE, "size", "1200", "750")
+        ctl("hyprwalk", "window", f"hyprwalk-e{i}", "size", "280", "240")
+    ctl("hyprwalk", "window", PC_FREE, "size", "1200", "750")
     time.sleep(1.5)
     press("t")
     settled(10)
@@ -8866,7 +8866,7 @@ def s_play_seen():
     def level_then_pitched():
         for pitch in (0.0, 25.0, -25.0):
             aim_row(PC_FREE)
-            ctl("hypr3d", "turn", f"{st()['yaw']:.2f}", f"{pitch:.1f}")
+            ctl("hyprwalk", "turn", f"{st()['yaw']:.2f}", f"{pitch:.1f}")
             time.sleep(0.6)
             aimed = (st().get("aimed") or {}).get("class")
             press("p")
@@ -8880,23 +8880,23 @@ def s_play_seen():
             press("meta_l", "esc")
             time.sleep(1.0)
             ps_settle()
-        ctl("hypr3d", "turn", f"{st()['yaw']:.2f}", "0")
+        ctl("hyprwalk", "turn", f"{st()['yaw']:.2f}", "0")
         time.sleep(0.4)
     ps_part("looking level, up and down", level_then_pitched)
 
     def staying():
         # a staying ring, you 1 m nearer the game: it's shrunk to play_size of your view
         aim_row(PC_FREE)
-        ctl("hypr3d", "turn", f"{st()['yaw']:.2f}", "0")
+        ctl("hyprwalk", "turn", f"{st()['yaw']:.2f}", "0")
         time.sleep(0.4)
-        ctl("hypr3d", "tile", "follow", "off")
+        ctl("hyprwalk", "tile", "follow", "off")
         time.sleep(0.6)
         s = st()
         yaw = math.radians(s["yaw"])
-        ctl("hypr3d", "tp", f"{s['feet'][0] + math.sin(yaw):.3f}", f"{s['feet'][1]:.3f}", f"{s['feet'][2] - math.cos(yaw):.3f}")
+        ctl("hyprwalk", "tp", f"{s['feet'][0] + math.sin(yaw):.3f}", f"{s['feet'][1]:.3f}", f"{s['feet'][2] - math.cos(yaw):.3f}")
         time.sleep(1.0)
         aim_row(PC_FREE)
-        ctl("hypr3d", "turn", f"{st()['yaw']:.2f}", "0")
+        ctl("hyprwalk", "turn", f"{st()['yaw']:.2f}", "0")
         time.sleep(0.5)
         g0 = ps_proj(PC_FREE)
         press("p")
@@ -8910,8 +8910,8 @@ def s_play_seen():
               f"at the ring {t1['atRing']}; before P {g0}; played {g1}; in the frame {bw:.3f} x {bh:.3f}; the plugin's played {t1.get('played')}")
         press("meta_l", "esc")
         time.sleep(1.0)
-        ctl("hypr3d", "tile", "follow", "on")
-        ctl("hypr3d", "spawn")
+        ctl("hyprwalk", "tile", "follow", "on")
+        ctl("hyprwalk", "spawn")
         time.sleep(1.2)
         ps_settle()
     ps_part("a ring that stays, off its middle", staying)
@@ -8919,13 +8919,13 @@ def s_play_seen():
     def away():
         # 3.5 m behind a staying ring's middle: the game is played as the ring has it
         aim_row(PC_FREE)
-        ctl("hypr3d", "turn", f"{st()['yaw']:.2f}", "0")
+        ctl("hyprwalk", "turn", f"{st()['yaw']:.2f}", "0")
         time.sleep(0.4)
-        ctl("hypr3d", "tile", "follow", "off")
+        ctl("hyprwalk", "tile", "follow", "off")
         time.sleep(0.6)
         s = st()
         yaw = math.radians(s["yaw"])
-        ctl("hypr3d", "tp", f"{s['feet'][0] - 3.5 * math.sin(yaw):.3f}", f"{s['feet'][1]:.3f}", f"{s['feet'][2] + 3.5 * math.cos(yaw):.3f}")
+        ctl("hyprwalk", "tp", f"{s['feet'][0] - 3.5 * math.sin(yaw):.3f}", f"{s['feet'][1]:.3f}", f"{s['feet'][2] + 3.5 * math.cos(yaw):.3f}")
         time.sleep(1.0)
         aim_row(PC_FREE)
         time.sleep(0.5)
@@ -8936,7 +8936,7 @@ def s_play_seen():
         t1, pl1, g1 = windows3d()["tiling"], placed(PC_FREE) or {}, ps_proj(PC_FREE)
         ps_wheel(-2)
         time.sleep(0.8)
-        g2, told, size = ps_proj(PC_FREE), ctl("hypr3d", "log", "8"), (st()["playing"] or {}).get("size")
+        g2, told, size = ps_proj(PC_FREE), ctl("hyprwalk", "log", "8"), (st()["playing"] or {}).get("size")
         check("31e", "away from a ring that stays (3.5 m behind its middle), P on the game in the row: played as the ring has it, as big as it was, where it was",
               p.get("fill") is False and not t1["atRing"] and t1.get("played") is None and abs(g1["share"] - g0["share"]) < 0.02
               and math.dist(pl0.get("center", [0, 0, 0]), pl1.get("center", [9, 9, 9])) < 0.02,
@@ -8945,8 +8945,8 @@ def s_play_seen():
               f"{g1['share']} -> {g2['share']}; the play's size {size}; {told.strip()[-240:]}")
         press("meta_l", "esc")
         time.sleep(1.0)
-        ctl("hypr3d", "tile", "follow", "on")
-        ctl("hypr3d", "spawn")
+        ctl("hyprwalk", "tile", "follow", "on")
+        ctl("hyprwalk", "spawn")
         time.sleep(1.2)
         ps_settle()
     ps_part("away from a ring that stays", away)
@@ -8955,23 +8955,23 @@ def s_play_seen():
         # a terminal opening ends play and joins the row beside the game, which keeps its size and place; once it's gone
         # the game is played again, half the view
         aim_row(PC_FREE)
-        ctl("hypr3d", "turn", f"{st()['yaw']:.2f}", "0")
+        ctl("hyprwalk", "turn", f"{st()['yaw']:.2f}", "0")
         time.sleep(0.5)
         press("p")
         pc_playing(PC_FREE)
         ps_settle()
         g0, pl0 = ps_proj(PC_FREE), ps_played()
-        alice("setsid -f foot --app-id h3d-epop > /dev/null 2>&1")
+        alice("setsid -f foot --app-id hyprwalk-epop > /dev/null 2>&1")
         s1 = pc_wait("play ended by itself", lambda: (lambda s: s if s["playing"] is None and s.get("playHeld") else None)(st()), 15, 0.2)
-        pc_wait("the terminal in the row", lambda: "h3d-epop" in tiled_row(), 10, 0.3)
+        pc_wait("the terminal in the row", lambda: "hyprwalk-epop" in tiled_row(), 10, 0.3)
         time.sleep(0.5)
         ps_settle()
         g1, row = ps_proj(PC_FREE), tiled_row()
         check("31e", "play ending by itself (a terminal opening takes the keyboard, the game's keys held back): the game keeps its size and its place, the terminal beside it",
-              s1 and abs(g1["share"] - g0["share"]) < 0.03 and abs(g1["x"] - g0["x"]) < 0.03 and abs(g1["y"] - g0["y"]) < 0.03 and "h3d-epop" in row,
+              s1 and abs(g1["share"] - g0["share"]) < 0.03 and abs(g1["x"] - g0["x"]) < 0.03 and abs(g1["y"] - g0["y"]) < 0.03 and "hyprwalk-epop" in row,
               f"held {bool(s1)}; played {g0} ({pl0}) -> held back {g1}; row {row}")
-        machine.execute("pkill -f 'app-id h3d-epop'; true")
-        wait_for("the terminal gone", lambda: not client("h3d-epop"), 10, 0.3)
+        machine.execute("pkill -f 'app-id hyprwalk-epop'; true")
+        wait_for("the terminal gone", lambda: not client("hyprwalk-epop"), 10, 0.3)
         time.sleep(0.8)
         if fs_active().get("class") != PC_FREE:
             ctl("dispatch", f'hl.dsp.focus({{ window = "class:{PC_FREE}" }})')
@@ -8983,38 +8983,38 @@ def s_play_seen():
         if st()["playing"]:
             press("meta_l", "esc")
         time.sleep(1.0)
-        ctl("hypr3d", "spawn")
+        ctl("hyprwalk", "spawn")
         time.sleep(1.0)
         ps_settle()
     ps_part("play ending by itself", ended)
 
     def v_switch():
         aim_row(PC_FREE)
-        ctl("hypr3d", "turn", f"{st()['yaw']:.2f}", "0")
+        ctl("hyprwalk", "turn", f"{st()['yaw']:.2f}", "0")
         time.sleep(0.5)
         press("p")
         pc_playing(PC_FREE)
         ps_settle()
         g0 = ps_proj(PC_FREE)
-        ctl("hypr3d", "view", "third")
+        ctl("hyprwalk", "view", "third")
         pc_steady()
         ps_settle()
         g1 = ps_proj(PC_FREE)
         bw, bh, bx, by = ps_box(frame("31e-v-third"))
-        check("31e", "V (hyprctl hypr3d view third) while playing here: still half the view, in its middle (the row turned to it from the camera behind the avatar)",
+        check("31e", "V (hyprctl hyprwalk view third) while playing here: still half the view, in its middle (the row turned to it from the camera behind the avatar)",
               abs(g1["share"] - 0.5) < 0.03 and abs(g1["x"]) < 0.05 and abs(g1["y"]) < 0.05, f"first {g0} -> third {g1}; in the frame {bw:.3f} x {bh:.3f} (middle {bx:+.3f}, {by:+.3f})")
         press("meta_l", "esc")
         time.sleep(1.0)
-        ctl("hypr3d", "view", "first")
-        ctl("hypr3d", "spawn")
+        ctl("hyprwalk", "view", "first")
+        ctl("hyprwalk", "spawn")
         time.sleep(1.0)
         ps_settle()
     ps_part("V while playing", v_switch)
 
     def wall():
         # third person, the avatar's back to the courtyard's south wall: the boom is pulled in
-        ctl("hypr3d", "view", "third")
-        ctl("hypr3d", "tp", "0.3", "0", "20.9")
+        ctl("hyprwalk", "view", "third")
+        ctl("hyprwalk", "tp", "0.3", "0", "20.9")
         time.sleep(1.2)
         aim_row(PC_FREE)
         pc_steady()
@@ -9038,13 +9038,13 @@ def s_play_seen():
         ps_wheel(9)
         press("meta_l", "esc")
         time.sleep(1.0)
-        ctl("hypr3d", "view", "first")
-        ctl("hypr3d", "spawn")
+        ctl("hyprwalk", "view", "first")
+        ctl("hyprwalk", "spawn")
         time.sleep(1.0)
     ps_part("third person by a wall", wall)
 
     ps_config(0.5)
-    machine.execute("pkill -f 'h3dgame --title h3dgame-pc'; pkill -u alice foot; true")
+    machine.execute("pkill -f 'hyprwalkgame --title hyprwalkgame-pc'; pkill -u alice foot; true")
     ensure_3d(False)
 
 
@@ -9053,9 +9053,9 @@ CL_SLOW36 = CL_SLOW.replace("root.after(1300", "root.after(3600")  # 3.6 s to cl
 
 def sh_slow_window():
     """a Tk window that closes 3.6 s after it's asked to, into the row; its class"""
-    machine.succeed(f"cat > {H}/slowclose36.py << 'H3D_EOF'\n{CL_SLOW36}\nH3D_EOF\nchown alice:users {H}/slowclose36.py")
-    alice(f"DISPLAY={x_display()} setsid -f python3 -u {H}/slowclose36.py h3dslow > /tmp/slowclose36.log 2>&1")
-    return cl_wait("the slow window in the row", lambda: next((c for c in cl_clients() if c.lower() == "h3dslow" and c in tiled_row()), None), 30, 0.5)
+    machine.succeed(f"cat > {H}/slowclose36.py << 'HYPRWALK_EOF'\n{CL_SLOW36}\nHYPRWALK_EOF\nchown alice:users {H}/slowclose36.py")
+    alice(f"DISPLAY={x_display()} setsid -f python3 -u {H}/slowclose36.py hyprwalkslow > /tmp/slowclose36.log 2>&1")
+    return cl_wait("the slow window in the row", lambda: next((c for c in cl_clients() if c.lower() == "hyprwalkslow" and c in tiled_row()), None), 30, 0.5)
 
 
 def sh_ws():
@@ -9066,19 +9066,19 @@ def sh_ws():
 
 
 def sh_popup():
-    alice("setsid -f foot --app-id h3d-popup > /dev/null 2>&1")
+    alice("setsid -f foot --app-id hyprwalk-popup > /dev/null 2>&1")
 
 
 def sh_popup_held():
     """plays the game in the row, then a popup takes the keyboard; True if the keys are held back"""
     cl_fresh(1)
     cl_game()
-    aim_row("h3dgame")
+    aim_row("hyprwalkgame")
     play_on()
     sh_popup()
-    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "h3d-popup", 20, 0.2)
+    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "hyprwalk-popup", 20, 0.2)
     s0 = cl_held(True, 3)
-    ctl("hypr3d", "aim", "h3d-popup")
+    ctl("hyprwalk", "aim", "hyprwalk-popup")
     time.sleep(0.5)
     return up and s0.get("playHeld") is True
 
@@ -9103,25 +9103,25 @@ def sh_slow(played):
     time.sleep(1.5)
     after = cl_snap(f"31f {tag}: after the second Super+Q")
     closed = sorted(before["clients"] - after["clients"])
-    told = ctl("hypr3d", "log", "14").strip()
+    told = ctl("hyprwalk", "log", "14").strip()
     check("31f", f"{tag}: a window slow to close (3.6 s), Super+Q, then again just after it went: only it closes, the second for no window",
           bool(gone) and closed == [c] and "a shortcut: the keyboard to none (a window with the keyboard closed" in told.split("closed: " + c)[-1],
           f"closed {closed}; it went {t1 - t0:.1f} s after Super+Q; then the crosshair on {mid['aimed']}, the keyboard on {mid['active']}; {told[-300:]}")
     machine.execute("pkill -f slowclose36[.]py; true")
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
 
 
 def sh_slow_over_game():
     """a slow window over the played game: Super+Q twice, game keys meanwhile, once more after it went"""
     cl_fresh(2)
     cl_game()
-    aim_row("h3dgame")
+    aim_row("hyprwalkgame")
     play_on()
-    machine.succeed(f"cat > {H}/slowclose36.py << 'H3D_EOF'\n{CL_SLOW36}\nH3D_EOF\nchown alice:users {H}/slowclose36.py")
-    alice(f"DISPLAY={x_display()} setsid -f python3 -u {H}/slowclose36.py h3dslow > /tmp/slowclose36.log 2>&1")
-    up = cl_wait("the slow window with the keyboard", lambda: (cl_active() or "").lower() == "h3dslow", 30, 0.1)
-    c = next((k for k in cl_clients() if k.lower() == "h3dslow"), None)
-    ctl("hypr3d", "aim", c)
+    machine.succeed(f"cat > {H}/slowclose36.py << 'HYPRWALK_EOF'\n{CL_SLOW36}\nHYPRWALK_EOF\nchown alice:users {H}/slowclose36.py")
+    alice(f"DISPLAY={x_display()} setsid -f python3 -u {H}/slowclose36.py hyprwalkslow > /tmp/slowclose36.log 2>&1")
+    up = cl_wait("the slow window with the keyboard", lambda: (cl_active() or "").lower() == "hyprwalkslow", 30, 0.1)
+    c = next((k for k in cl_clients() if k.lower() == "hyprwalkslow"), None)
+    ctl("hyprwalk", "aim", c)
     time.sleep(0.3)
     before = cl_snap("31f over a game: before")
     press("meta_l", "q", after=0.0)
@@ -9138,9 +9138,9 @@ def sh_slow_over_game():
     after = cl_snap("31f over a game: after the third Super+Q")
     closed = sorted(before["clients"] - after["clients"])
     check("31f", "a game played, a window slow to close (3.6 s) over it: Super+Q twice on it, the game's keys pressed meanwhile, and once more just after it went: the game isn't closed",
-          up and c not in after["clients"] and "h3dgame" not in closed, f"closed {closed}; then playing {mid['playing']}, the keyboard on {mid['active']}")
+          up and c not in after["clients"] and "hyprwalkgame" not in closed, f"closed {closed}; then playing {mid['playing']}, the keyboard on {mid['active']}")
     machine.execute("pkill -f slowclose36[.]py; true")
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
 
 
 def sh_workspace():
@@ -9154,63 +9154,63 @@ def sh_workspace():
     time.sleep(1.5)
     s2, ws2, act2 = st(), sh_ws(), cl_active()
     check("31f", "Super+Q twice on a popup over the game, then an empty workspace 2 (the game still drawn in the ring), then a turn: the monitor stays on workspace 2, the game not given the keyboard",
-          held and closed == ["h3d-popup"] and ws1 == 2 and ws2 == 2 and act2 is None and s2["playing"] is None,
+          held and closed == ["hyprwalk-popup"] and ws1 == 2 and ws2 == 2 and act2 is None and s2["playing"] is None,
           f"closed {closed}; ws {ws1} -> {ws2}; the keyboard {act1} -> {act2}; playing {(s2['playing'] or {}).get('class')}")
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
     ctl("dispatch", 'hl.dsp.focus({ workspace = "1" })')
     time.sleep(0.5)
 
 
 def sh_alt_held():
     """a popup over the played game, Alt+1 held back, then the popup closes by itself"""
-    if "h3dgame" not in cl_clients():
+    if "hyprwalkgame" not in cl_clients():
         cl_fresh(1)
         cl_game()
-    aim_row("h3dgame")
+    aim_row("hyprwalkgame")
     play_on()
     sh_popup()
-    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "h3d-popup", 20, 0.2)
+    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "hyprwalk-popup", 20, 0.2)
     s0 = cl_held(True, 3)
     game_mark("31f-alt")
     press("alt", "1", after=0.0)  # a game's Alt chord, held back: reaches nothing
-    machine.execute("pkill -f 'app-id h3d-popup'; true")
-    cl_wait("the popup gone", lambda: "h3d-popup" not in cl_clients(), 10, 0.05)
+    machine.execute("pkill -f 'app-id hyprwalk-popup'; true")
+    cl_wait("the popup gone", lambda: "hyprwalk-popup" not in cl_clients(), 10, 0.05)
     time.sleep(0.5)
     press("1", after=0.0)
     s1 = cl_wait("played again", lambda: (lambda s: s if s["playing"] else None)(st()), 1.5, 0.1) or st()
     got = [l for l in game_lines("31f-alt") if l.startswith("key") or l.startswith("focus")]
     check("31f", "a popup over the game played, Alt+1 pressed (a game's key, held back), then the popup closes by itself: the game played again at once, a key typed 0.5 s after reaching it",
-          up and s0.get("playHeld") is True and (s1["playing"] or {}).get("class") == "h3dgame" and "key down 1" in got,
+          up and s0.get("playHeld") is True and (s1["playing"] or {}).get("class") == "hyprwalkgame" and "key down 1" in got,
           f"playing {(s1['playing'] or {}).get('class')}; playHeld {s1.get('playHeld')}; the game got {got[-6:]}")
-    ctl("hypr3d", "play", "off")
+    ctl("hyprwalk", "play", "off")
 
 
 def sh_resized(args, tag, off_middle=False):
     """a played game toggles fullscreen twice with the mouse still (or moved right first): no leave or enter"""
     cl_fresh(1)
     cl_game(args)
-    aim_row("h3dgame")
+    aim_row("hyprwalkgame")
     play_on()
     time.sleep(0.5)
     game_mark(f"31f-{tag}-in")
     press("f")
-    fs = cl_wait("fullscreen", lambda: cl_fullscreen("h3dgame") == 2, 10, 0.2)
+    fs = cl_wait("fullscreen", lambda: cl_fullscreen("hyprwalkgame") == 2, 10, 0.2)
     time.sleep(1.5)
     if off_middle:
         rel(300, 0)  # outside the window's smaller size
         time.sleep(0.5)
     game_mark(f"31f-{tag}-out")
     press("f")
-    out = cl_wait("out of fullscreen", lambda: cl_fullscreen("h3dgame") == 0, 10, 0.2)
+    out = cl_wait("out of fullscreen", lambda: cl_fullscreen("hyprwalkgame") == 0, 10, 0.2)
     time.sleep(1.5)
     s2 = st()
     lin, lout = game_lines(f"31f-{tag}-in"), game_lines(f"31f-{tag}-out")
-    ptr, size = (s2["playing"] or {}).get("pointer"), (cl_clients().get("h3dgame") or {}).get("size")
+    ptr, size = (s2["playing"] or {}).get("pointer"), (cl_clients().get("hyprwalkgame") or {}).get("size")
     check("31f", f"a game played ({tag}), in and out of fullscreen with the mouse still: no mouse leave or enter for it either way, the pointer on it after",
           fs and out and not any(l in ("mouse leave", "mouse enter") for l in lin + lout) and bool(ptr and size and 0 <= ptr[0] < size[0] and 0 <= ptr[1] < size[1]),
           f"in: {[l for l in lin if not l.startswith('frames')][-6:]}; out: {[l for l in lout if not l.startswith('frames')][-6:]}; pointer {ptr}, the window {size}")
-    ctl("hypr3d", "play", "off")
-    machine.execute("pkill -x h3dgame; true")
+    ctl("hyprwalk", "play", "off")
+    machine.execute("pkill -x hyprwalkgame; true")
 
 
 def sh_launcher(kind):
@@ -9235,14 +9235,14 @@ def sh_launcher(kind):
     lg = launcher_log()
     got = [l for l in game_lines(f"31f-{kind}") if l.startswith("key")]
     check("31f", f"Super+Q twice on a popup over the game, then a launcher ({kind}) open past the hold's end: it keeps the keyboard (a letter typed goes to it, not the game)",
-          held and closed == ["h3d-popup"] and s1["playing"] is None and "key down B" not in got and any("text" in l and "b" in l for l in lg),
+          held and closed == ["hyprwalk-popup"] and s1["playing"] is None and "key down B" not in got and any("text" in l and "b" in l for l in lg),
           f"the keyboard on {act1}; playing {(s1['playing'] or {}).get('class')}; the launcher said {lg[-6:]}; the game got {got[-4:]}")
     press("esc")
     s2 = cl_wait("played again", lambda: (lambda s: s if s["playing"] else None)(st()), 4) or st()
-    told = ctl("hypr3d", "log", "10").strip()
-    check("31f", f"... Esc (the launcher gone): the game gets the keyboard back and is played again", (s2["playing"] or {}).get("class") == "h3dgame"
-          and ("the keyboard back to h3dgame" in told or "h3dgame has the keyboard again" in told), f"playing {(s2['playing'] or {}).get('class')}, the keyboard on {cl_active()}; {told[-300:]}")
-    ctl("hypr3d", "play", "off")
+    told = ctl("hyprwalk", "log", "10").strip()
+    check("31f", f"... Esc (the launcher gone): the game gets the keyboard back and is played again", (s2["playing"] or {}).get("class") == "hyprwalkgame"
+          and ("the keyboard back to hyprwalkgame" in told or "hyprwalkgame has the keyboard again" in told), f"playing {(s2['playing'] or {}).get('class')}, the keyboard on {cl_active()}; {told[-300:]}")
+    ctl("hyprwalk", "play", "off")
     machine.execute("pkill -f 'quickshell -p'; true")
     ctl("eval", 'hl.unbind("SUPER + D")')
 
@@ -9251,27 +9251,27 @@ def sh_fullscreen_twice():
     """fullscreen auto-played game, a popup over it, the key hold run out: Super+Q twice on the popup, then a turn"""
     cl_fresh(1)
     cl_game()
-    ctl("dispatch", 'hl.dsp.focus({ window = "class:h3dgame" })')
+    ctl("dispatch", 'hl.dsp.focus({ window = "class:hyprwalkgame" })')
     time.sleep(0.3)
-    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "set", mode = "fullscreen", window = "class:h3dgame" })')
+    ctl("dispatch", 'hl.dsp.window.fullscreen({ action = "set", mode = "fullscreen", window = "class:hyprwalkgame" })')
     p0 = cl_wait("the game played by itself, fullscreen", lambda: (lambda s: s["playing"] if s["playing"] else None)(st()), 5)
     sh_popup()
-    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "h3d-popup", 20, 0.2)
+    up = cl_wait("the popup with the keyboard", lambda: cl_active() == "hyprwalk-popup", 20, 0.2)
     cl_held(True, 3)
     s1 = cl_held(False, 8)  # 4 s without a key: walking again
-    ctl("hypr3d", "aim", "h3d-popup")
+    ctl("hyprwalk", "aim", "hyprwalk-popup")
     time.sleep(0.5)
     b, a, closed = cl_press("31f: the game fullscreen, its keys' hold run out, Super+Q twice on the popup", times=2, every=0.8, wait=1.0)
     s2 = st()
     rel(100, 0)  # turning ends the shortcut hold
     s3 = cl_wait("played again", lambda: (lambda s: s if s["playing"] else None)(st()), 3) or st()
-    fs = cl_fullscreen("h3dgame")
+    fs = cl_fullscreen("hyprwalkgame")
     check("31f", "the game fullscreen (played by itself, its keys' hold run out), Super+Q twice on a popup over it, then a turn: only the popup closed, the game played again (as after one press)",
-          (p0 or {}).get("class") == "h3dgame" and up and s1.get("playHeld") is False and closed == ["h3d-popup"] and fs == 2 and s2["playing"] is None
-          and (s3["playing"] or {}).get("class") == "h3dgame", f"closed {closed}; before the turn: playing {(s2['playing'] or {}).get('class')}; after: playing "
+          (p0 or {}).get("class") == "hyprwalkgame" and up and s1.get("playHeld") is False and closed == ["hyprwalk-popup"] and fs == 2 and s2["playing"] is None
+          and (s3["playing"] or {}).get("class") == "hyprwalkgame", f"closed {closed}; before the turn: playing {(s2['playing'] or {}).get('class')}; after: playing "
           f"{(s3['playing'] or {}).get('class')}, the keyboard on {cl_active()}; fullscreen {fs}")
-    ctl("hypr3d", "play", "off")
-    machine.execute("pkill -x h3dgame; pkill -f 'app-id h3d-popup'; true")
+    ctl("hyprwalk", "play", "off")
+    machine.execute("pkill -x hyprwalkgame; pkill -f 'app-id hyprwalk-popup'; true")
 
 
 @section("31f", "the hold on shortcuts after a close, and the game's keyboard given back: a window slow to close (3.6 s), walking and with a game played, Super+Q pressed again after it went; the game's keys pressed meanwhile; Super+Q twice on a popup over the game, then an empty workspace, or a launcher (on demand and exclusive) past the hold's end; Alt+1 as a game's key; the game fullscreen with its keys' hold run out; a game played in and out of fullscreen with the mouse still (a pointer lock too, off its middle, Hyprland's animations on)")
@@ -9279,7 +9279,7 @@ def s_shortcut_hold():
     lua_session()
     ensure_plugin()
     ctl("eval", CL_BIND)
-    ctl("eval", 'hl.window_rule({ name = "h3d-cl-popup", match = { class = "h3d-popup" }, float = true })')
+    ctl("eval", 'hl.window_rule({ name = "hyprwalk-cl-popup", match = { class = "hyprwalk-popup" }, float = true })')
     parts = (("slow, walking", lambda: sh_slow(False)), ("slow, a game played", lambda: sh_slow(True)), ("slow, over a game", sh_slow_over_game),
              ("a workspace", sh_workspace), ("Alt+1", sh_alt_held), ("resized", lambda: sh_resized("", "free")),
              ("resized, locked", lambda: sh_resized("--relative", "locked")), ("a launcher", lambda: sh_launcher("toggle")),
@@ -9291,7 +9291,7 @@ def s_shortcut_hold():
             traceback.print_exc()
             check("31f", f"{name}: ran to the end", False, f"{type(e).__name__}: {e}"[:600])
             try:
-                ctl("hypr3d", "play", "off")
+                ctl("hyprwalk", "play", "off")
                 ctl("dispatch", 'hl.dsp.focus({ workspace = "1" })')
             except Exception:  # noqa: BLE001
                 pass
@@ -9306,13 +9306,13 @@ def s_shortcut_hold():
                 traceback.print_exc()
                 check("31f", f"{name}: ran to the end", False, f"{type(e).__name__}: {e}"[:600])
                 try:
-                    ctl("hypr3d", "play", "off")
+                    ctl("hyprwalk", "play", "off")
                 except Exception:  # noqa: BLE001
                     pass
     finally:
         ctl("eval", 'hl.config({ animations = { enabled = false } })')
     ctl("eval", 'hl.unbind("SUPER + Q")')
-    machine.execute("pkill -x h3dgame; pkill -u alice foot; pkill -f slowclose36[.]py; pkill -f 'quickshell -p'; true")
+    machine.execute("pkill -x hyprwalkgame; pkill -u alice foot; pkill -f slowclose36[.]py; pkill -f 'quickshell -p'; true")
 
 
 @section("34", "an X11 game the way CS2 runs (SDL3's x11 driver through XWayland, fullscreen, its menu's pointer, then mouse-look in a match), opened in 3D after a move of Hyprland's that no frame followed was left on an X11 window on the 2D desktop: every move of the mouse reaches its mouse-look, played here and filling the view; and the cursor on a window's edge (resize_on_border's arrow) as 3D comes in: an app's own cursor drawn on its panel, not the arrow")
@@ -9326,10 +9326,10 @@ def s_x11_look():
     # delivers it, as absolute, on the next frame over its windows (the game's). The xterm stays till the edge check: if
     # closed now, the game reuses its X ids, which Hyprland 0.55.2's XWM still records, and never maps
     ctl("dispatch", "hl.dsp.workspace.toggle_special()")
-    alice(f"DISPLAY={x_display()} setsid -f xterm -class h3dstale > /dev/null 2>&1")
-    wait_for("xterm on the scratchpad", lambda: (lambda c: c if c and c["workspace"]["name"].startswith("special") else None)(client("h3dstale")), 20)
+    alice(f"DISPLAY={x_display()} setsid -f xterm -class hyprwalkstale > /dev/null 2>&1")
+    wait_for("xterm on the scratchpad", lambda: (lambda c: c if c and c["workspace"]["name"].startswith("special") else None)(client("hyprwalkstale")), 20)
     time.sleep(1)
-    x = client("h3dstale")
+    x = client("hyprwalkstale")
     ctl("dispatch", f'hl.dsp.cursor.move({{ x = {x["at"][0] + x["size"][0] // 3}, y = {x["at"][1] + x["size"][1] // 3} }})')
     time.sleep(0.3)
     ctl("dispatch", "hl.dsp.workspace.toggle_special()")  # hides the scratchpad and the xterm
@@ -9338,18 +9338,18 @@ def s_x11_look():
     # those moves from its absolute device, SDL3 reads later relative moves as positions (mouse-look sees only
     # differences)
     ensure_3d()
-    game_start("", env=f"DISPLAY={x_display()} SDL_VIDEODRIVER=x11", cls="h3dgame-x11")
+    game_start("", env=f"DISPLAY={x_display()} SDL_VIDEODRIVER=x11", cls="hyprwalkgame-x11")
     # fullscreen after map, as CS2 does (Hyprland 0.55.2 ignores an X11 fullscreen state set before map)
-    ctl("dispatch", 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set", window = "class:h3dgame-x11" })')
+    ctl("dispatch", 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set", window = "class:hyprwalkgame-x11" })')
     p = wait_for("the game played by itself", lambda: st()["playing"], 15, 0.2)
-    g = client("h3dgame-x11")
-    check("34", "h3dgame through XWayland (SDL's x11 driver), fullscreen, played by itself", g and g["xwayland"] and g["fullscreen"] == 2 and p["class"] == "h3dgame-x11",
+    g = client("hyprwalkgame-x11")
+    check("34", "hyprwalkgame through XWayland (SDL's x11 driver), fullscreen, played by itself", g and g["xwayland"] and g["fullscreen"] == 2 and p["class"] == "hyprwalkgame-x11",
           f"{g and (g['xwayland'], g['fullscreen'])}; {p}")
     for view in ("here", "fill"):
         if view == "fill":
             press("meta_l", "esc")
             time.sleep(0.8)
-            aim_find("h3dgame-x11")
+            aim_find("hyprwalkgame-x11")
             press("shift", "p")
             wait_for("filling the view", lambda: play_settled(st()), 10, 0.2)
         game_mark(f"{view} menu")
@@ -9378,22 +9378,22 @@ def s_x11_look():
         press("r")
         time.sleep(0.5)
     press("meta_l", "esc")
-    machine.execute("pkill -x h3dgame; true")
+    machine.execute("pkill -x hyprwalkgame; true")
     ensure_3d(False)
     # 3D entered with the cursor on a window's border gap (Hyprland's resize arrow): apps' own cursors drawn, not the
     # arrow
     machine.execute("pkill -u alice foot; pkill -x xterm; true")
     ctl("eval", 'hl.config({ general = { resize_on_border = true, extend_border_grab_area = 30 } })')
-    alice(f"DISPLAY={x_display()} setsid -f xterm -class h3dxterm > /dev/null 2>&1")
-    wait_for("xterm", lambda: client("h3dxterm"), 20)
+    alice(f"DISPLAY={x_display()} setsid -f xterm -class hyprwalkxterm > /dev/null 2>&1")
+    wait_for("xterm", lambda: client("hyprwalkxterm"), 20)
     time.sleep(1.5)
-    x = client("h3dxterm")
+    x = client("hyprwalkxterm")
     m = json.loads(ctl("-j", "monitors"))[0]
     tablet((x["at"][0] - 12) * 32767 / m["width"], (x["at"][1] + x["size"][1] // 2) * 32767 / m["height"])
     rel(0, 2)
     time.sleep(0.5)
     ensure_3d()
-    aim_find("h3dxterm")
+    aim_find("hyprwalkxterm")
     time.sleep(0.8)
     s = st()
     frame("34-edge-cursor")
@@ -9409,7 +9409,7 @@ def emote_sound_node():
     """the plugin's emote sound stream, and the nodes it's linked to; None = there's none"""
     dump = json.loads(alice("pw-dump"))
     nodes = {o["id"]: (o.get("info") or {}).get("props") or {} for o in dump if o.get("type") == "PipeWire:Interface:Node"}
-    ours = [i for i, p in nodes.items() if p.get("node.name") == "hypr3d-emote-sound"]
+    ours = [i for i, p in nodes.items() if p.get("node.name") == "hyprwalk-emote-sound"]
     if not ours:
         return None
     links = [o for o in dump if o.get("type") == "PipeWire:Interface:Link" and (o.get("info") or {}).get("output-node-id") == ours[0]]
@@ -9444,17 +9444,17 @@ def rms(x):
     return math.sqrt(sum(v * v for v in x) / max(1, len(x)))
 
 
-@section("35", "an emote's sound (the settings file's \"sound\", a dance's song): played through PipeWire as \"hypr3d emote sound\" while the emote plays, to the default output (WirePlumber links it), round as it loops without a gap, at emote_volume (0.5 unless set, 1 twice as loud, 0 none), stopping with the emote (after a fade) and at once out of 3D; the dance where its song is heard; played again it starts again, and 3D back in the middle of it carries on from where the dance is")
+@section("35", "an emote's sound (the settings file's \"sound\", a dance's song): played through PipeWire as \"hyprwalk emote sound\" while the emote plays, to the default output (WirePlumber links it), round as it loops without a gap, at emote_volume (0.5 unless set, 1 twice as loud, 0 none), stopping with the emote (after a fade) and at once out of 3D; the dance where its song is heard; played again it starts again, and 3D back in the middle of it carries on from where the dance is")
 def s_emote_sound():
     ensure_avatar(AV)
     ensure_3d()
-    ctl("hypr3d", "avatar", "lipsync", "off")
+    ctl("hyprwalk", "avatar", "lipsync", "off")
     mic_noise(False)
-    ctl("hypr3d", "avatar", "emote", "stop")
+    ctl("hyprwalk", "avatar", "emote", "stop")
     time.sleep(0.5)
 
     def emotes():
-        return ctlj("hypr3d", "avatar", "emote")
+        return ctlj("hyprwalk", "avatar", "emote")
 
     em = emotes()
     song = next((e for e in em["emotes"] if e["name"] == "Hands Song"), {})
@@ -9468,11 +9468,11 @@ def s_emote_sound():
 
     # records the default output, the test microphone's (mono) sink
     def record(name):
-        alice(f"setsid -f pw-record --target test_mic --rate 48000 --channels 1 --format f32 -P node.name=h3d-rec35 /tmp/{name}.wav > /dev/null 2>&1")
+        alice(f"setsid -f pw-record --target test_mic --rate 48000 --channels 1 --format f32 -P node.name=hyprwalk-rec35 /tmp/{name}.wav > /dev/null 2>&1")
         time.sleep(0.6)
 
     def recorded(name):
-        machine.execute("pkill -INT -f 'node.name=h3d-rec[3]5'; true")
+        machine.execute("pkill -INT -f 'node.name=hyprwalk-rec[3]5'; true")
         time.sleep(0.6)
         copy_out(f"/tmp/{name}.wav", "raw")
         return wav_floats(RAW / f"{name}.wav")
@@ -9487,12 +9487,12 @@ def s_emote_sound():
         return (loud[0], loud[-1], win) if loud else (0, -1, win)
 
     record("35-half")
-    ctl("hypr3d", "avatar", "emote", "Hands Song")
+    ctl("hyprwalk", "avatar", "emote", "Hands Song")
     e = heard()
     n = emote_sound_node()
     props = {k: (n or {}).get("props", {}).get(k) for k in ("node.description", "media.name", "application.name", "media.role")}
-    check("35", "played: a PipeWire stream, \"hypr3d emote sound\", named in the mixer for the emote, linked to the default output",
-          n is not None and props["media.name"] == "Hands Song" and props["application.name"] == "hypr3d" and "test_mic_in" in n["to"],
+    check("35", "played: a PipeWire stream, \"hyprwalk emote sound\", named in the mixer for the emote, linked to the default output",
+          n is not None and props["media.name"] == "Hands Song" and props["application.name"] == "hyprwalk" and "test_mic_in" in n["to"],
           {**props, "to": (n or {}).get("to")})
     check("35", "... streaming, round as the emote loops, from the start (where the dance was when it was first heard)",
           e["sound"]["stream"] == "streaming" and e["sound"]["loop"] is True and e["sound"]["file"] == "HandsSong.ogg" and 0 <= e["sound"]["start"] < 1.0,
@@ -9512,7 +9512,7 @@ def s_emote_sound():
     time.sleep(2.0)
     t2, a2 = time.time(), emotes()["sound"]["at"]
     check("35", "its clock goes at the rate time does", abs((a2 - a1) - (t2 - t1)) < 0.2, f"{a2 - a1:.3f} s heard in {t2 - t1:.3f} s")
-    ctl("hypr3d", "avatar", "emote", "stop")
+    ctl("hyprwalk", "avatar", "emote", "stop")
     ts = time.time()
     wait_for("the stream gone", lambda: emote_sound_node() is None, 5, 0.05)
     took = time.time() - ts
@@ -9531,11 +9531,11 @@ def s_emote_sound():
           l440 > 0.01 and 0.7 < l440 / max(l660, 1e-9) < 1.4 and l1000 < 0.05 * l440, f"440 Hz {l440:.4f}, 660 Hz {l660:.4f}, 1000 Hz {l1000:.5f}")
     half = rms(mid)
 
-    ctl("eval", "hl.config({ plugin = { hypr3d = { emote_volume = 1 } } })")
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { emote_volume = 1 } } })")
     record("35-full")
-    ctl("hypr3d", "avatar", "emote", "Hands Song")
+    ctl("hyprwalk", "avatar", "emote", "Hands Song")
     heard(1.6)
-    ctl("hypr3d", "avatar", "emote", "stop")
+    ctl("hyprwalk", "avatar", "emote", "stop")
     wait_for("the stream gone", lambda: emote_sound_node() is None, 5, 0.05)
     x = recorded("35-full")
     a, b, _ = played(x)
@@ -9543,19 +9543,19 @@ def s_emote_sound():
     db = 20 * math.log10(max(full, 1e-9) / max(half, 1e-9))
     check("35", "emote_volume = 1: twice as loud as 0.5 (6 dB)", abs(db - 6.02) < 0.5, f"{db:+.2f} dB ({half:.4f} -> {full:.4f})")
 
-    ctl("eval", "hl.config({ plugin = { hypr3d = { emote_volume = 0 } } })")
-    ctl("hypr3d", "avatar", "emote", "Hands Song")
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { emote_volume = 0 } } })")
+    ctl("hyprwalk", "avatar", "emote", "Hands Song")
     time.sleep(1.5)
     e = emotes()
     check("35", "emote_volume = 0: the emote plays, with no sound and no stream", e["playing"] == "Hands Song" and e["sound"]["on"] is False and emote_sound_node() is None,
           e["sound"])
-    ctl("hypr3d", "avatar", "emote", "stop")
-    ctl("eval", "hl.config({ plugin = { hypr3d = { emote_volume = 0.5 } } })")
+    ctl("hyprwalk", "avatar", "emote", "stop")
+    ctl("eval", "hl.config({ plugin = { hyprwalk = { emote_volume = 0.5 } } })")
     time.sleep(0.6)
 
-    ctl("hypr3d", "avatar", "emote", "Hands Song")
+    ctl("hyprwalk", "avatar", "emote", "Hands Song")
     first = heard(1.2)["sound"]
-    ctl("hypr3d", "avatar", "emote", "Hands Song")
+    ctl("hyprwalk", "avatar", "emote", "Hands Song")
     time.sleep(0.4)
     again = heard(0.1)["sound"]
     check("35", "played again while it plays: the song starts again with it", again["start"] < 1.0 and again["at"] < first["at"],
@@ -9569,7 +9569,7 @@ def s_emote_sound():
     e = heard(0)
     check("35", "back in 3D in the middle of it: the song again, from where the dance is", e["playing"] == "Hands Song" and e["sound"]["start"] > 0.5,
           f"the dance at {e['time']:.2f} s, the song came in at {e['sound']['start']:.2f} s")
-    ctl("hypr3d", "avatar", "emote", "stop")
+    ctl("hyprwalk", "avatar", "emote", "stop")
     wait_for("the stream gone", lambda: emote_sound_node() is None, 5, 0.05)
 
 
@@ -9648,7 +9648,7 @@ def boot(vm):
 (OUT / "results.txt").write_text("")
 t_start = time.time()
 current = None
-ONLY = [i for i in os.environ.get("H3D_ONLY", "").split(",") if i]  # run.sh --only: these sections, after "0"
+ONLY = [i for i in os.environ.get("HYPRWALK_ONLY", "").split(",") if i]  # run.sh --only: these sections, after "0"
 for item, title, fn, vm in SECTIONS:
     if ONLY and item not in ONLY and not (item == "0" and vm == "machine"):
         continue

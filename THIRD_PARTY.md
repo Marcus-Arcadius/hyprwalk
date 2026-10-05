@@ -8,9 +8,9 @@
   stb 0-unstable-2026-04-15 has it): by Sean Barrett and contributors (stb_dxt originally by Fabian
   "ryg" Giesen), public domain or MIT, at your choice. The licenses are at the end of each file.
 
-## The bone-name table in tools/unity2hypr3d.py
+## The bone-name table in tools/unity2hyprwalk.py
 
-`BONE_NAMES` in `tools/unity2hypr3d.py` is the bone-name table of Modular Avatar's
+`BONE_NAMES` in `tools/unity2hyprwalk.py` is the bone-name table of Modular Avatar's
 `HeuristicBoneMapper` (https://github.com/bdunderscore/modular-avatar, version 1.18.7). Modular
 Avatar's code is under the MIT License below. Its source credits the table's origins, which are MIT
 too:
@@ -47,7 +47,7 @@ SOFTWARE.
 The rest of the converter's Modular Avatar support reimplements MA's behaviour in Python. It was
 written from reading MA's source, and the notice above covers it too.
 
-## The shader tables in tools/unity2hypr3d.py
+## The shader tables in tools/unity2hyprwalk.py
 
 `UNLITWF_SHADERS` lists the GUIDs of UnlitWF's stencil mask and outline shaders, from the `.meta` files of
 whiteflare's Unlit_WF_ShaderSuite (https://github.com/whiteflare/Unlit_WF_ShaderSuite), so that a material whose
@@ -139,7 +139,7 @@ https://github.com/hyprwm/Hyprland, BSD 3-Clause License, Copyright (c) 2022-202
 nixpkgs (MIT License) when you run the test, and nothing of it is in this repo; its QEMU (with `--gpu virgl`, the
 full one, with virglrenderer), fonts, PipeWire, foot, grim, wev and Python keep their own licenses, as do the apps
 added for play mode and the everyday apps: XWayland, xterm and xev (MIT/X11), Tk (Tcl/Tk license) through Python,
-SDL2 (sdl2-compat and SDL3, zlib) for `h3dgame.c`, weston's demo clients (MIT), swayidle and mako (MIT), Chocolate
+SDL2 (sdl2-compat and SDL3, zlib) for `hyprwalkgame.c`, weston's demo clients (MIT), swayidle and mako (MIT), Chocolate
 Doom (GNU GPL v2) with Freedoom's levels (BSD 3-Clause), SuperTux (GNU GPL v3), Chromium (BSD 3-Clause and
 others), Firefox (MPL 2.0), Electron (MIT), OBS Studio (GNU GPL v2), xdg-desktop-portal (LGPL 2.1),
 xdg-desktop-portal-hyprland (BSD 3-Clause), xdg-desktop-portal-gtk (LGPL 2.1), fcitx5 (LGPL 2.1),
@@ -178,14 +178,14 @@ aquamarine's `src/backend/Headless.cpp` and `src/backend/Backend.cpp` (https://g
 
 ## VRCFury
 
-`tools/unity2hypr3d.py` reads VRCFury components (https://github.com/VRCFury/VRCFury, (c) 2022 Senky) and
+`tools/unity2hyprwalk.py` reads VRCFury components (https://github.com/VRCFury/VRCFury, (c) 2022 Senky) and
 reimplements what VRCFury does with them when an avatar is built. It was written after reading VRCFury's source
 for its save format and behaviour. It contains none of VRCFury's code or tables, and no part of VRCFury is
 distributed here.
 
-## The humanoid muscle maths in tools/unity2hypr3d.py
+## The humanoid muscle maths in tools/unity2hyprwalk.py
 
-The part of `tools/unity2hypr3d.py` that turns Unity's humanoid clips into bone rotations follows lox9973's work on
+The part of `tools/unity2hyprwalk.py` that turns Unity's humanoid clips into bone rotations follows lox9973's work on
 Unity's humanoid (the "Unity's humanoid clips, as VRM animations" section: `MUSCLES`, `MUSCLE_FALLBACK`,
 `MUSCLE_SIGN`, `BONE_MASS`, `swing_twist` and `HumanAxes`). Its muscle table, axis signs, body masses, twist sharing
 and fallbacks for missing bones are taken from these two projects and rewritten in Python:

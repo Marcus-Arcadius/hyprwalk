@@ -4,7 +4,7 @@
 
 #include <vector>
 
-namespace h3d {
+namespace hyprwalk {
 
     // Tiling mode's ring (T): windows side by side round the view, upright and facing its center, each as big as on the
     // monitor but shrunk to fit the view. The row is centred where you looked and shrinks evenly past `most`; a window

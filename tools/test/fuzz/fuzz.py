@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# fuzz.py: feeds hypr3d's loaders broken maps and avatars and keeps whatever crashes them, trips a sanitizer, hangs or
+# fuzz.py: feeds hyprwalk's loaders broken maps and avatars and keeps whatever crashes them, trips a sanitizer, hangs or
 # runs away with memory (inside Hyprland any of that takes the compositor down). Plain python3.
 #
 #   fuzz.py map OUTDIR [-n N] [--seed S] [--jobs J] [--timeout T] [--harness BIN]
@@ -109,10 +109,10 @@ def avatar_seeds(out, avatars):
     os.makedirs(out, exist_ok=True)
     src = os.path.join(avatars, 'BoothAccessories.glb')
     shutil.copy(src, os.path.join(out, 'plain.glb'))
-    settings = json.load(open(os.path.join(avatars, 'BoothAccessories.hypr3d.json'), encoding='utf-8'))
+    settings = json.load(open(os.path.join(avatars, 'BoothAccessories.hyprwalk.json'), encoding='utf-8'))
     # a settings emote too, playing the dance.vrma every case has
     settings['emotes'] = settings.get('emotes', []) + [{'name': 'Fuzz', 'file': 'dance.vrma', 'speed': 1.5, 'loop': True}]
-    json.dump(settings, open(os.path.join(out, 'plain.hypr3d.json'), 'w', encoding='utf-8'), ensure_ascii=False)
+    json.dump(settings, open(os.path.join(out, 'plain.hyprwalk.json'), 'w', encoding='utf-8'), ensure_ascii=False)
     emote = os.path.join(out, 'dance.vrma')
     shutil.copy(os.path.join(avatars, 'BoothGimmicks.hands.vrma'), emote)
     js, bin_ = read_glb(src)
@@ -128,7 +128,7 @@ def avatar_seeds(out, avatars):
     v0 = copy.deepcopy(js)
     v0.setdefault('extensionsUsed', []).append('VRM')
     v0.setdefault('extensions', {})['VRM'] = {
-        'exporterVersion': 'hypr3d fuzz', 'specVersion': '0.0', 'meta': {'title': 'fuzz', 'version': '1', 'author': 'fuzz'},
+        'exporterVersion': 'hyprwalk fuzz', 'specVersion': '0.0', 'meta': {'title': 'fuzz', 'version': '1', 'author': 'fuzz'},
         'humanoid': {'humanBones': [{'bone': b, 'node': n, 'useDefaultValues': True} for b, n in human.items()]},
         'firstPerson': {'firstPersonBone': head, 'firstPersonBoneOffset': {'x': 0, 'y': 0.06, 'z': 0},
                         'meshAnnotations': [{'mesh': body, 'firstPersonFlag': 'Auto'}], 'lookAtTypeName': 'Bone',
@@ -203,14 +203,14 @@ def avatar_seeds(out, avatars):
     # the VRMs' own humanoid, faces and springs: the settings file's would take precedence
     mine = {k: v for k, v in settings.items() if k not in ('humanoid', 'expressions', 'springs', 'colliders', 'gestures')}
     for name in ('vrm0', 'vrm1'):
-        json.dump(mine, open(os.path.join(out, f'{name}.hypr3d.json'), 'w', encoding='utf-8'), ensure_ascii=False)
-    json.dump({'emotes': settings['emotes'][-1:]}, open(os.path.join(out, 'toon.hypr3d.json'), 'w', encoding='utf-8'))
+        json.dump(mine, open(os.path.join(out, f'{name}.hyprwalk.json'), 'w', encoding='utf-8'), ensure_ascii=False)
+    json.dump({'emotes': settings['emotes'][-1:]}, open(os.path.join(out, 'toon.hyprwalk.json'), 'w', encoding='utf-8'))
     shutil.move(os.path.join(out, 'ToonTest.glb'), os.path.join(out, 'toon.glb'))
     os.remove(os.path.join(out, 'TestRoom.glb'))
     subprocess.run([sys.executable, os.path.join(REPO, 'tools', 'test', 'harness', 'toonballs.py'), out], check=True, stdout=subprocess.DEVNULL)
     shutil.move(os.path.join(out, 'ToonBalls.glb'), os.path.join(out, 'balls.glb'))
-    json.dump({'emotes': settings['emotes'][-1:]}, open(os.path.join(out, 'balls.hypr3d.json'), 'w', encoding='utf-8'))
-    return {n: (os.path.join(out, n + '.glb'), os.path.join(out, n + '.hypr3d.json'), emote)
+    json.dump({'emotes': settings['emotes'][-1:]}, open(os.path.join(out, 'balls.hyprwalk.json'), 'w', encoding='utf-8'))
+    return {n: (os.path.join(out, n + '.glb'), os.path.join(out, n + '.hyprwalk.json'), emote)
             for n in ('plain', 'vrm0', 'vrm1', 'toon', 'balls')}
 
 
@@ -430,7 +430,7 @@ def raw_json_cut(js, rng, desc):
     return text[:at] + junk + text[at:]
 
 
-MAP_ROOTS = [('extensions', 'HYPR3D_lighting')] * 6 + [('materials',)] * 3 + [('accessors',), ('bufferViews',), ('images',), ('textures',),
+MAP_ROOTS = [('extensions', 'HYPRWALK_lighting')] * 6 + [('materials',)] * 3 + [('accessors',), ('bufferViews',), ('images',), ('textures',),
                                                                                 ('samplers',), ('buffers',), ('meshes',), ('nodes',), ('scenes',), ()]
 
 
@@ -443,7 +443,7 @@ def mutate_map(seed_js, seed_bin, rng):
             if rng.random() < 0.3:
                 # the material extensions and texture transforms, and the backdrop's node
                 roots = [('materials', i, 'extensions') for i, m in enumerate(js.get('materials', [])) if isinstance(m, dict) and m.get('extensions')]
-                roots += [('nodes', i) for i, n in enumerate(js.get('nodes', [])) if isinstance(n, dict) and n.get('name') in ('hypr3d_backdrop', 'hypr3d_spawn', 'hypr3d_desktop')]
+                roots += [('nodes', i) for i, n in enumerate(js.get('nodes', [])) if isinstance(n, dict) and n.get('name') in ('hyprwalk_backdrop', 'hyprwalk_spawn', 'hyprwalk_desktop')]
                 roots = roots or MAP_ROOTS
             mutate_json(js, rng, roots, desc)
         elif r < 0.95:
@@ -461,7 +461,7 @@ AVATAR_ROOTS = [('extensions',)] * 4 + [('nodes',)] * 2 + [('skins',), ('meshes'
 
 
 def mutate_avatar(seed, rng, case_dir):
-    """writes avatar.glb, avatar.hypr3d.json and dance.vrma into case_dir"""
+    """writes avatar.glb, avatar.hyprwalk.json and dance.vrma into case_dir"""
     glb, settings, emote = seed
     js, bin_ = read_glb(glb)
     sjs = json.load(open(settings, encoding='utf-8'))
@@ -493,7 +493,7 @@ def mutate_avatar(seed, rng, case_dir):
             desc += ['emote: ' + x for x in d]
     os.makedirs(case_dir, exist_ok=True)
     open(os.path.join(case_dir, 'avatar.glb'), 'wb').write(raw if raw is not None else glb_bytes(js, bin_))
-    with open(os.path.join(case_dir, 'avatar.hypr3d.json'), 'w', encoding='utf-8') as f:
+    with open(os.path.join(case_dir, 'avatar.hyprwalk.json'), 'w', encoding='utf-8') as f:
         f.write(sraw if sraw is not None else json.dumps(sjs, ensure_ascii=False, allow_nan=True))
     open(os.path.join(case_dir, 'dance.vrma'), 'wb').write(eraw if eraw is not None else glb_bytes(ejs, ebin))
     return desc
@@ -563,7 +563,7 @@ def fuzz(args):
                        stdout=subprocess.DEVNULL)
     if avatar:
         if not args.avatars:
-            sys.exit('fuzz.py avatar needs --avatars DIR (BoothAccessories.glb, its .hypr3d.json and BoothGimmicks.hands.vrma)')
+            sys.exit('fuzz.py avatar needs --avatars DIR (BoothAccessories.glb, its .hyprwalk.json and BoothGimmicks.hands.vrma)')
         seeds = avatar_seeds(os.path.join(out, 'seeds'), args.avatars)
     else:
         seeds = {k: read_glb(v) for k, v in map_seeds(os.path.join(out, 'seeds')).items()}
@@ -575,7 +575,7 @@ def fuzz(args):
         if avatar:
             d = os.path.join(out, 'seeds', 'case-' + n)
             os.makedirs(d, exist_ok=True)
-            for src, dst in ((seeds[n][0], 'avatar.glb'), (seeds[n][1], 'avatar.hypr3d.json'), (seeds[n][2], 'dance.vrma')):
+            for src, dst in ((seeds[n][0], 'avatar.glb'), (seeds[n][1], 'avatar.hyprwalk.json'), (seeds[n][2], 'dance.vrma')):
                 shutil.copy(src, os.path.join(d, dst))
             case = d
         res, secs, text = run_one(args.harness, case, avatar, args.timeout * 2, wav, os.path.join(out, 'seeds', n + '.log'))
@@ -640,15 +640,15 @@ def replay(args):
 
 
 def main():
-    ap = argparse.ArgumentParser(description='fuzz hypr3d\'s map and avatar loaders (see the top of this file)')
+    ap = argparse.ArgumentParser(description='fuzz hyprwalk\'s map and avatar loaders (see the top of this file)')
     ap.add_argument('what', choices=['map', 'avatar', 'replay'])
     ap.add_argument('out', help='OUTDIR, or the case to replay')
     ap.add_argument('-n', type=int, default=300, help='cases (300)')
     ap.add_argument('--start', type=int, default=0, help='the first case number (cases are numbered, each from its own seed)')
-    ap.add_argument('--seed', default='hypr3d')
+    ap.add_argument('--seed', default='hyprwalk')
     ap.add_argument('--jobs', type=int, default=max(1, (os.cpu_count() or 2) // 3))
     ap.add_argument('--timeout', type=float, default=90.0, help='seconds a case may take (90)')
-    ap.add_argument('--avatars', help='BoothAccessories.glb, BoothAccessories.hypr3d.json and BoothGimmicks.hands.vrma (run.sh --avatars)')
+    ap.add_argument('--avatars', help='BoothAccessories.glb, BoothAccessories.hyprwalk.json and BoothGimmicks.hands.vrma (run.sh --avatars)')
     ap.add_argument('--harness', default=HARNESS)
     ap.add_argument('--tail', type=int, default=6000, help='replay: the last this many characters of the output (0: all)')
     args = ap.parse_args()

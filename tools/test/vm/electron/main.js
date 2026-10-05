@@ -1,12 +1,12 @@
 // main.js: tools/test/vm's Electron app (Discord's stack): a window with page.html, a notification at start, its own
-// native context menu (Electron has none by default), and with H3D_DIALOG a message box dialog after 2 s. It prints
+// native context menu (Electron has none by default), and with HYPRWALK_DIALOG a message box dialog after 2 s. It prints
 // what happens, a line each.
 const { app, BrowserWindow, Menu, Notification, dialog } = require("electron");
 const path = require("path");
 
 app.whenReady().then(() => {
-    const w = new BrowserWindow({ width: 900, height: 600, title: "h3d electron", autoHideMenuBar: true });
-    w.loadFile(process.env.H3D_PAGE || path.join(__dirname, "page.html"));
+    const w = new BrowserWindow({ width: 900, height: 600, title: "hyprwalk electron", autoHideMenuBar: true });
+    w.loadFile(process.env.HYPRWALK_PAGE || path.join(__dirname, "page.html"));
     w.webContents.on("page-title-updated", (e, title) => console.log("title " + title));
     w.webContents.on("context-menu", () => {
         const pick = (item) => () => console.log("menu " + item);
@@ -18,11 +18,11 @@ app.whenReady().then(() => {
         console.log("menu shown");
     });
     console.log("ozone " + (app.commandLine.getSwitchValue("ozone-platform") || "default"));
-    const n = new Notification({ title: "h3d electron", body: "a notification from Electron" });
+    const n = new Notification({ title: "hyprwalk electron", body: "a notification from Electron" });
     n.on("show", () => console.log("notification shown"));
     n.on("failed", (e, err) => console.log("notification failed " + err));
     n.show();
-    if (process.env.H3D_DIALOG)
+    if (process.env.HYPRWALK_DIALOG)
         setTimeout(() => dialog.showMessageBox(w, { message: "a dialog from Electron", buttons: ["OK"] }).then((r) => console.log("dialog " + r.response)), 2000);
 });
 app.on("window-all-closed", () => app.quit());

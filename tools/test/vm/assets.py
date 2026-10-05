@@ -1,14 +1,14 @@
 # assets.py OUTDIR: two small glTF files for tools/test/vm, built from boxes and quads:
 #   ToonTest.glb  no skeleton; cyan eyes write the stencil (UnlitWF's way, queue 2448) and show through the magenta
 #                 fringe (queue 2449, stencil notequal) on both faces; body with a green inverted-hull outline
-#   TestRoom.glb  a 20 m square room with walls, a pillar, hypr3d_spawn and hypr3d_desktop (on the north wall)
+#   TestRoom.glb  a 20 m square room with walls, a pillar, hyprwalk_spawn and hyprwalk_desktop (on the north wall)
 import json, math, os, struct, sys
 
 
 class GLB:
     def __init__(self):
         self.bin = bytearray()
-        self.js = {'asset': {'version': '2.0', 'generator': 'hypr3d tools/test/vm/assets.py'}, 'scene': 0,
+        self.js = {'asset': {'version': '2.0', 'generator': 'hyprwalk tools/test/vm/assets.py'}, 'scene': 0,
                    'scenes': [{'nodes': []}], 'nodes': [], 'meshes': [], 'materials': [], 'accessors': [],
                    'bufferViews': []}
 
@@ -111,15 +111,15 @@ def quad_z(x0, y0, x1, y1, z, facing):
 def toon(path):
     g = GLB()
     body = g.material('Body', (1.0, 0.45, 0.08, 1), extras={
-        'hypr3d_outline': {'width': 0.02, 'space': 'world', 'color': [0.0, 1.0, 0.0, 1.0], 'lit': 0.0}})
+        'hyprwalk_outline': {'width': 0.02, 'space': 'world', 'color': [0.0, 1.0, 0.0, 1.0], 'lit': 0.0}})
     skin = g.material('Skin', (0.95, 0.8, 0.7, 1))
     eye = g.material('Eye', (0.0, 1.0, 1.0, 1), emissive=(0.0, 1.0, 1.0), extras={
-        'hypr3d_queue': 2448,
-        'hypr3d_stencil': {'ref': 10, 'read': 255, 'write': 10, 'comp': 'always', 'pass': 'replace', 'fail': 'keep',
+        'hyprwalk_queue': 2448,
+        'hyprwalk_stencil': {'ref': 10, 'read': 255, 'write': 10, 'comp': 'always', 'pass': 'replace', 'fail': 'keep',
                            'zfail': 'keep'}})
     fringe = g.material('Fringe', (0.55, 0.0, 0.45, 1), extras={
-        'hypr3d_queue': 2449,
-        'hypr3d_stencil': {'ref': 10, 'read': 255, 'write': 255, 'comp': 'notequal', 'pass': 'keep', 'fail': 'keep',
+        'hyprwalk_queue': 2449,
+        'hyprwalk_stencil': {'ref': 10, 'read': 255, 'write': 255, 'comp': 'notequal', 'pass': 'keep', 'fail': 'keep',
                            'zfail': 'keep'}})
     g.mesh('Body', [(body, box(-0.25, 0.0, -0.15, 0.25, 1.0, 0.15))])
     g.mesh('Head', [(skin, box(-0.2, 1.05, -0.15, 0.2, 1.45, 0.15))])
@@ -148,8 +148,8 @@ def room(path):
     ]
     g.mesh('Walls', [(wall, walls)])
     g.mesh('Pillar', [(pillar, box(3.0, 0.0, -2.0, 3.8, H, -1.2))])
-    g.node('hypr3d_spawn', translation=(0, 0, 4.0))           # facing -Z, the north wall
-    g.node('hypr3d_desktop', translation=(0, 1.7, -S + 0.01))  # front faces +Z
+    g.node('hyprwalk_spawn', translation=(0, 0, 4.0))           # facing -Z, the north wall
+    g.node('hyprwalk_desktop', translation=(0, 1.7, -S + 0.01))  # front faces +Z
     g.write(path)
 
 

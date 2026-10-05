@@ -72,7 +72,7 @@ def main(args):
     recv(sock)  # Hello
     send(sock, json.dumps({"op": 1, "d": {"rpcVersion": 1, "eventSubscriptions": 0}}))
     recv(sock)  # Identified
-    send(sock, json.dumps({"op": 6, "d": {"requestType": request, "requestId": "h3d", "requestData": data}}))
+    send(sock, json.dumps({"op": 6, "d": {"requestType": request, "requestId": "hyprwalk", "requestData": data}}))
     while True:
         m = recv(sock)
         if m.get("op") == 7:

@@ -8,8 +8,8 @@ def say(*words):
     print(*words, flush=True)
 
 
-root = tk.Tk(className="h3dtk")
-root.title("h3dtk")
+root = tk.Tk(className="hyprwalktk")
+root.title("hyprwalktk")
 root.geometry("600x400")
 
 bar = tk.Menu(root)

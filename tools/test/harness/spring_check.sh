@@ -6,7 +6,7 @@
 #
 #   tools/test/harness/spring_check.sh AVATAR [DIR] [KIND...]
 #                                      (DIR: where the logs go, a temporary one by default; "" too)
-#   e.g. spring_check.sh ~/.local/share/hypr3d/avatars/Miku/Miku.glb "" Necktie
+#   e.g. spring_check.sh ~/.local/share/hyprwalk/avatars/Miku/Miku.glb "" Necktie
 #
 # Needs build/test/shot (tools/test/harness/build.sh).
 set -uo pipefail

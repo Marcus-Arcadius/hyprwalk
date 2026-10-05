@@ -1,5 +1,5 @@
-"""h3d_hook: the attack, a right hook at 60 frames a second, as h3d_rig key poses: third person's at frames 0-45, first
-person's at 100-130 (CLIPS); h3d_export writes them for the plugin. See README.md here.
+"""hyprwalk_hook: the attack, a right hook at 60 frames a second, as hyprwalk_rig key poses: third person's at frames 0-45, first
+person's at 100-130 (CLIPS); hyprwalk_export writes them for the plugin. See README.md here.
 
 She winds up to her right, the fist wide at shoulder height ahead of her twin tails (so both cameras see it), then the
 trunk turns left and the fist sweeps round in front of her face, elbow up, palm down, and back to the guard. The arms
@@ -9,8 +9,8 @@ import math
 
 import bpy
 
-import h3d_rig as R
-from h3d_rig import mix
+import hyprwalk_rig as R
+from hyprwalk_rig import mix
 
 W = "world"
 

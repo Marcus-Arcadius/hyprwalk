@@ -1,5 +1,5 @@
 # NixOS VMs for tools/test/vm/run.sh, set up as Hyprland's own CI tests Hyprland (nix/tests/default.nix): QEMU with
-# KVM and a virtio GPU, the very Hyprland hypr3d.so was built for as alice's tty1 login session, and PipeWire with a
+# KVM and a virtio GPU, the very Hyprland hyprwalk.so was built for as alice's tty1 login session, and PipeWire with a
 # virtual microphone. No window opens (-nographic, or egl-headless with gpu = "virgl").
 #
 #   nix-build tools/test/vm/vm.nix -A driver --argstr hyprland /nix/store/...-hyprland-...
@@ -20,13 +20,13 @@ let
   # the installed one with its closure (impure: fine with nix-build, not in pure evaluation)
   hypr = builtins.storePath hyprland;
 
-  # h3dgame.c: a tiny SDL2 game that prints the input it gets
-  h3dgame = pkgs.runCommandCC "h3dgame" {
+  # hyprwalkgame.c: a tiny SDL2 game that prints the input it gets
+  hyprwalkgame = pkgs.runCommandCC "hyprwalkgame" {
     nativeBuildInputs = [ pkgs.pkg-config ];
     buildInputs = [ pkgs.SDL2 ];
   } ''
     mkdir -p $out/bin
-    $CC -O2 -Wall ${./h3dgame.c} -o $out/bin/h3dgame $(pkg-config --cflags --libs sdl2)
+    $CC -O2 -Wall ${./hyprwalkgame.c} -o $out/bin/hyprwalkgame $(pkg-config --cflags --libs sdl2)
   '';
 
   # a VM with a screen of that size
@@ -71,7 +71,7 @@ let
       users.users.alice = {
         isNormalUser = true;
         uid = 1000;
-        password = "h3d"; # for swaylock (play mode must yield the keyboard)
+        password = "hyprwalk"; # for swaylock (play mode must yield the keyboard)
         extraGroups = [
           "video"
           "audio"
@@ -81,7 +81,7 @@ let
 
       environment.systemPackages = [
         hypr
-        h3dgame
+        hyprwalkgame
       ]
       ++ (with pkgs; [
         foot
@@ -134,7 +134,7 @@ let
         _STDBUF_O = "L";
       };
       # Freedoom's levels, for Chocolate Doom
-      environment.etc."h3d/freedoom2.wad".source = "${pkgs.freedoom}/share/games/doom/freedoom2.wad";
+      environment.etc."hyprwalk/freedoom2.wad".source = "${pkgs.freedoom}/share/games/doom/freedoom2.wad";
       # file dialogs and screen capture through the portals, as a Hyprland desktop has them
       xdg.portal = {
         enable = true;
@@ -171,7 +171,7 @@ let
         serviceConfig = {
           # the checks write the config and put its path (.lua or .conf) in /run/hyprland-test.env
           EnvironmentFile = "/run/hyprland-test.env";
-          ExecStart = "${hypr}/bin/start-hyprland --path ${hypr}/bin/Hyprland -- --config \${H3D_CONFIG}";
+          ExecStart = "${hypr}/bin/start-hyprland --path ${hypr}/bin/Hyprland -- --config \${HYPRWALK_CONFIG}";
           User = "alice";
           WorkingDirectory = "/home/alice";
           IgnoreSIGPIPE = "no";
@@ -233,7 +233,7 @@ let
     };
 in
 pkgs.testers.runNixOSTest {
-  name = "hypr3d-vm";
+  name = "hyprwalk-vm";
   testScript = "raise Exception('run tools/test/vm/run.sh: it gives the driver the test script')";
   skipLint = true;
   skipTypeCheck = true;

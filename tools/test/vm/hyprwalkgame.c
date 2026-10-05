@@ -1,7 +1,7 @@
-// h3dgame: a tiny SDL2 "game" for tools/test/vm. It prints a line for every input event SDL gives it and draws them, so
+// hyprwalkgame: a tiny SDL2 "game" for tools/test/vm. It prints a line for every input event SDL gives it and draws them, so
 // frames change with input. Built by vm.nix; checks.py runs it on Wayland and on XWayland (SDL_VIDEODRIVER=x11).
 //
-//   h3dgame [--relative] [--grab] [--fullscreen] [--size WxH] [--title T] [--no-vsync] [--log FILE]
+//   hyprwalkgame [--relative] [--grab] [--fullscreen] [--size WxH] [--title T] [--no-vsync] [--log FILE]
 //
 //   --relative  SDL relative mouse mode (Wayland pointer lock + relative pointer; X11 grab + XInput2 raw motion)
 //   --grab      confine the mouse to the window
@@ -25,7 +25,7 @@ static void say(const char* fmt, ...) {
 
 int main(int argc, char** argv) {
     int         relative = 0, grab = 0, fullscreen = 0, vsync = 1, w = 640, h = 400;
-    const char* title    = "h3dgame";
+    const char* title    = "hyprwalkgame";
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--relative"))
             relative = 1;

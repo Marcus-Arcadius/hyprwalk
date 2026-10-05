@@ -1,4 +1,4 @@
-# make.py: a synthetic VRChat avatar project, to test unity2hypr3d on what the robot sample lacks
+# make.py: a synthetic VRChat avatar project, to test unity2hyprwalk on what the robot sample lacks
 #   blender -b --factory-startup --python-exit-code 1 -P make.py -- PROJ
 # SynthAvatar.prefab: unpacked (every object written out); SynthVariant.prefab: a variant of the FBX
 import bpy, bmesh, sys, os, math, hashlib, shutil, struct, json
@@ -7,7 +7,7 @@ from mathutils import Matrix, Vector, Quaternion
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import unity2hypr3d as u
+import unity2hyprwalk as u
 import unitygen
 from unitygen import F, R, V, Q, C, emit, HEAD, doc, base, native, write_psd
 

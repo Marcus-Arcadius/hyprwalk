@@ -90,7 +90,7 @@ for song in "${SONGS[@]}"; do
 done
 
 # a private PipeWire; its socket in a short dir (socket paths are limited)
-RUN="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/h3d-sound.XXXXXX")"
+RUN="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/hyprwalk-sound.XXXXXX")"
 DAEMON=""
 cleanup() {
     local p
@@ -103,14 +103,14 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' INT TERM
 # clients read PIPEWIRE_CONFIG_DIR's client.conf, so their streams set up their own ports
-export PIPEWIRE_RUNTIME_DIR="$RUN" PIPEWIRE_REMOTE=h3d-sound-test PIPEWIRE_CONFIG_DIR="$HERE/pipewire"
+export PIPEWIRE_RUNTIME_DIR="$RUN" PIPEWIRE_REMOTE=hyprwalk-sound-test PIPEWIRE_CONFIG_DIR="$HERE/pipewire"
 pipewire -c pipewire.conf > "$WORK/pipewire.log" 2>&1 &
 DAEMON=$!
 for _ in $(seq 50); do
-    [[ -S "$RUN/h3d-sound-test" ]] && break
+    [[ -S "$RUN/hyprwalk-sound-test" ]] && break
     sleep 0.1
 done
-[[ -S "$RUN/h3d-sound-test" ]] || { cat "$WORK/pipewire.log"; echo "sound_check.sh: its PipeWire didn't start" >&2; exit 1; }
+[[ -S "$RUN/hyprwalk-sound-test" ]] || { cat "$WORK/pipewire.log"; echo "sound_check.sh: its PipeWire didn't start" >&2; exit 1; }
 
 port() { # -o|-i NAME: wait up to 5 s for the port
     for _ in $(seq 100); do
@@ -128,7 +128,7 @@ play() {
     local rec="$WORK/$name.f32" log="$WORK/$name.log" out="$WORK/$name.out" pr="" ports
     [[ "$ch" == 1 ]] && ports=(MONO) || ports=(FL FR)
     if [[ "$kind" != unlinked ]]; then
-        pw-record --raw --format f32 --rate 48000 --channels "$ch" -P '{ node.name = h3d-rec }' "$rec" > "$WORK/$name.rec.log" 2>&1 &
+        pw-record --raw --format f32 --rate 48000 --channels "$ch" -P '{ node.name = hyprwalk-rec }' "$rec" > "$WORK/$name.rec.log" 2>&1 &
         pr=$!
     fi
     "$T" play "$file" --log "$log" "$@" > "$out" 2>&1 &
@@ -137,9 +137,9 @@ play() {
         # link all ports at once by node name: a channel linked first would start alone
         local there=1
         for p in "${ports[@]}"; do
-            port -o "hypr3d-emote-sound:output_$p" && port -i "h3d-rec:input_$p" || { there=0; fail "$name: no ports to link ($p)"; }
+            port -o "hyprwalk-emote-sound:output_$p" && port -i "hyprwalk-rec:input_$p" || { there=0; fail "$name: no ports to link ($p)"; }
         done
-        ((there)) && { timeout 5 pw-link hypr3d-emote-sound h3d-rec || fail "$name: couldn't link them"; }
+        ((there)) && { timeout 5 pw-link hyprwalk-emote-sound hyprwalk-rec || fail "$name: couldn't link them"; }
     fi
     wait "$st"
     local status=$?

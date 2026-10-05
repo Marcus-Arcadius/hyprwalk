@@ -1,11 +1,11 @@
-# human_unit.py: tools/unity2hypr3d.py's humanoid muscle maths (Unity muscle clips as bone turns) on a small T-posed
+# human_unit.py: tools/unity2hyprwalk.py's humanoid muscle maths (Unity muscle clips as bone turns) on a small T-posed
 # skeleton: swing-twist, muscle signs, the arm's twist shared with the forearm, RootT/RootQ, Unity curves with weighted
 # keys, Foot IK to goals and a clip read. Given Unity T pose clips (VRChat's SDK has proxy_tpose.anim), it also poses the
 # skeleton with their muscle values.
 #   blender -b --factory-startup --python-exit-code 1 -P human_unit.py [-- T_POSE.anim...]
 import sys, os, math
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
-import unity2hypr3d as u
+import unity2hyprwalk as u
 from mathutils import Matrix, Vector, Quaternion
 
 FAILS = []

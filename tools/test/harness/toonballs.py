@@ -1,5 +1,5 @@
 # toonballs.py OUTDIR: ToonBalls.glb for toon_check.sh: six 0.3 m balls in a row along +X, no skeleton: Plain, MToon
-# (VRMC_materials_mtoon), Toon (unity2hypr3d's hypr3d_toon extras), Matcap (Toon plus an added hypr3d_matcap),
+# (VRMC_materials_mtoon), Toon (unity2hyprwalk's hyprwalk_toon extras), Matcap (Toon plus an added hyprwalk_matcap),
 # PlainMatcap and MToon0 (VRM 0.x MToon). The base color is dark enough for the tone curve.
 import math, os, struct, sys, zlib
 
@@ -55,7 +55,7 @@ def image(g, data):
 
 def main(out):
     g = GLB()
-    g.js['asset']['generator'] = 'hypr3d tools/test/harness/toonballs.py'
+    g.js['asset']['generator'] = 'hyprwalk tools/test/harness/toonballs.py'
     cap = image(g, matcap_png())
     step = {'shade': [0.3, 0.3, 0.3], 'base': True, 'lo': -0.05, 'hi': 0.05, 'strength': 1.0}
     mats = [g.material('Plain', BASE)]
@@ -63,11 +63,11 @@ def main(out):
     g.js['materials'][-1]['extensions'] = {'VRMC_materials_mtoon': {
         'specVersion': '1.0', 'shadeColorFactor': [0.1, 0.03, 0.01], 'shadingToonyFactor': 0.95, 'shadingShiftFactor': 0.0}}
     g.js['extensionsUsed'] = ['VRMC_materials_mtoon']
-    mats.append(g.material('Toon', BASE, extras={'hypr3d_toon': step}))
+    mats.append(g.material('Toon', BASE, extras={'hyprwalk_toon': step}))
     mats.append(g.material('Matcap', BASE, extras={
-        'hypr3d_toon': step, 'hypr3d_matcap': {'index': cap, 'color': [1, 1, 1, 1], 'mode': 'add', 'lit': 0}}))
+        'hyprwalk_toon': step, 'hyprwalk_matcap': {'index': cap, 'color': [1, 1, 1, 1], 'mode': 'add', 'lit': 0}}))
     mats.append(g.material('PlainMatcap', BASE, extras={
-        'hypr3d_matcap': {'index': cap, 'color': [1, 1, 1, 1], 'mode': 'add', 'lit': 0}}))
+        'hyprwalk_matcap': {'index': cap, 'color': [1, 1, 1, 1], 'mode': 'add', 'lit': 0}}))
     mats.append(g.material('MToon0', BASE))
     props = [{'name': m['name'], 'shader': 'VRM_USE_GLTFSHADER', 'floatProperties': {}, 'vectorProperties': {},
               'textureProperties': {}} for m in g.js['materials']]

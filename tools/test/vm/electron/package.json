@@ -1,5 +1,5 @@
 {
-  "name": "h3d-electron",
+  "name": "hyprwalk-electron",
   "version": "1.0.0",
   "description": "tools/test/vm: an Electron app (Discord's stack) with page.html, a notification and a dialog",
   "main": "main.js"

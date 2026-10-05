@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace h3d {
+namespace hyprwalk {
 
     struct SPicture; // menu.hpp
 
@@ -36,7 +36,7 @@ namespace h3d {
     std::shared_ptr<const SPicture> appIcon(const std::string& icon, int size, bool load = true);
 
     // where a window launched in 3D opens, facing you: metres ahead, height (0 = auto: its screen size, shrunk to fit
-    // the view) and side offset (> 0 right). plugin:hypr3d:app_rules is "CLASS: DISTANCE [HEIGHT|auto]
+    // the view) and side offset (> 0 right). plugin:hyprwalk:app_rules is "CLASS: DISTANCE [HEIGHT|auto]
     // [left|right|SIDE]", comma separated (CLASS a whole-match regex, any case), then built-in rules: games and videos
     // further, chat apps to the side
     struct SAppRule {

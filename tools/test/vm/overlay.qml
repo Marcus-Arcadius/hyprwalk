@@ -14,7 +14,7 @@ ShellRoot {
                 required property var modelData
                 screen: modelData
 
-                WlrLayershell.namespace: "h3d-overlay"
+                WlrLayershell.namespace: "hyprwalk-overlay"
                 WlrLayershell.layer: WlrLayer.Overlay
                 exclusionMode: ExclusionMode.Ignore
                 color: "transparent"

@@ -1,4 +1,4 @@
-# cs2mats.py OUTDIR: Cs2Mats.glb, a map for cs2mat_check.sh with the HYPR3D_materials_source2 details tools/cs2map.py
+# cs2mats.py OUTDIR: Cs2Mats.glb, a map for cs2mat_check.sh with the HYPRWALK_materials_source2 details tools/cs2map.py
 # writes for CS2. Panels 1.2 m wide before a grey wall 4.5 m north of the eye, split down the middle by 2x1 nearest-filtered
 # textures; one uniform lightmap and a black sun, so the halves differ by their textures alone:
 #   A  tint mask on uv 0: red tint on the left half only
@@ -44,18 +44,18 @@ def cs2mats(path):
         return source2(specular=[False, False], vertexColor='none', **kw)
 
     def unlit(**kw):
-        return {'KHR_materials_unlit': {}, 'HYPR3D_materials_source2': source2(specular=[False, False], **kw)}
+        return {'KHR_materials_unlit': {}, 'HYPRWALK_materials_source2': source2(specular=[False, False], **kw)}
 
     white = {'baseColorTexture': tex['white'], 'metallicFactor': 0.0, 'roughnessFactor': 1.0}
     wall = g.mat({'name': 'wall', 'pbrMetallicRoughness': dict(white, baseColorFactor=[0.5, 0.5, 0.5, 1.0]),
-                  'extensions': {'HYPR3D_materials_source2': lit()}})
+                  'extensions': {'HYPRWALK_materials_source2': lit()}})
     mats = {
         'A': g.mat({'name': 'tinted', 'pbrMetallicRoughness': dict(white, baseColorFactor=[0.8, 0.08, 0.08, 1.0]),
-                    'extensions': {'HYPR3D_materials_source2': lit(tintMask={'texture': tex['mask'], 'uv': 0})}}),
+                    'extensions': {'HYPRWALK_materials_source2': lit(tintMask={'texture': tex['mask'], 'uv': 0})}}),
         'B': g.mat({'name': 'decal_multiplied', 'pbrMetallicRoughness': white,
-                    'extensions': {'HYPR3D_materials_source2': lit(decal={'texture': tex['dark'], 'uv': 1, 'mode': 'multiply'})}}),
+                    'extensions': {'HYPRWALK_materials_source2': lit(decal={'texture': tex['dark'], 'uv': 1, 'mode': 'multiply'})}}),
         'C': g.mat({'name': 'decal_mixed', 'pbrMetallicRoughness': white,
-                    'extensions': {'HYPR3D_materials_source2': lit(decal={'texture': tex['blue'], 'uv': 0, 'mode': 'mix'})}}),
+                    'extensions': {'HYPRWALK_materials_source2': lit(decal={'texture': tex['blue'], 'uv': 0, 'mode': 'mix'})}}),
         'D': g.mat({'name': 'unlit_two', 'pbrMetallicRoughness': white,
                     'extensions': unlit(texture2={'texture': tex['green'], 'transform': [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]})}),
         'E': g.mat({'name': 'unlit_added', 'alphaMode': 'BLEND', 'pbrMetallicRoughness': dict(white, baseColorFactor=[0.3, 0.3, 0.3, 1.0]),
@@ -65,10 +65,10 @@ def cs2mats(path):
         'G': g.mat({'name': 'far_fogged', 'pbrMetallicRoughness': dict(white, baseColorFactor=[0.9, 0.05, 0.05, 1.0]),
                     'extensions': unlit()}),
         'H': g.mat({'name': 'painted', 'pbrMetallicRoughness': white,
-                    'extensions': {'HYPR3D_materials_source2': source2(specular=[False, False], vertexColor='tint',
+                    'extensions': {'HYPRWALK_materials_source2': source2(specular=[False, False], vertexColor='tint',
                                                                        tintMask={'texture': tex['mask'], 'uv': 0})}}),
         'I': g.mat({'name': 'unpainted', 'pbrMetallicRoughness': white,
-                    'extensions': {'HYPR3D_materials_source2': source2(specular=[False, False], vertexColor='tint')}}),
+                    'extensions': {'HYPRWALK_materials_source2': source2(specular=[False, False], vertexColor='tint')}}),
         'J': g.mat({'name': 'mod2x_linear', 'alphaMode': 'BLEND', 'pbrMetallicRoughness': dict(white, baseColorTexture=tex['mod2x']),
                     'extensions': unlit(blendMode='mod2x', mod2xLinear=True)}),
         'L': g.mat({'name': 'unlit_added_far', 'alphaMode': 'BLEND', 'pbrMetallicRoughness': dict(white, baseColorFactor=[0.5, 0.5, 0.5, 1.0]),
@@ -93,17 +93,17 @@ def cs2mats(path):
     quad(-1.3, -0.1, 2.3, 3.3, -4.4, mats['I'], 'node005_panel_I', color=(0.0, 0.0, 0.0, 0.0))
     quad(0.1, 1.3, 2.3, 3.3, -4.4, mats['J'], 'node005_panel_J')
     quad(-25.0, -12.0, 28.0, 38.0, -55.0, mats['L'], 'node007_far_unlit_added')  # in front of G, over the wall
-    g.place('hypr3d_spawn', translation=[0.0, 0.0, 0.0])
+    g.place('hyprwalk_spawn', translation=[0.0, 0.0, 0.0])
 
     ims = [g.image('map_' + k, d) for k, d in zip(('irradiance', 'directional', 'shadows'), lm.images())]
-    g.js['extensions'] = {'HYPR3D_lighting': {
+    g.js['extensions'] = {'HYPRWALK_lighting': {
         'sets': [{'name': 'map', 'lightmaps': {k: {'image': i} for k, i in zip(('irradiance', 'directional', 'shadows'), ims)}}],
         'sun': {'color': [0.0, 0.0, 0.0], 'direction': [0.3, 0.8, 0.5]},
         'fog': {'start': 20.0, 'end': 40.0, 'exponent': 1.0, 'maxOpacity': 1.0, 'lodBias': 0.0},
         'exposure': {'min': 1.0, 'max': 1.0, 'speedUp': 1.0, 'speedDown': 1.0},
         'tonemap': {'shoulderStrength': 0.0, 'linearStrength': 0.0009, 'linearAngle': 0.0009, 'toeStrength': 1.0, 'toeNum': 1.0,
                     'toeDenom': 1.0, 'whitePoint': 1.648926, 'exposureBias': 0.0}}}
-    g.js['extensionsUsed'] = ['HYPR3D_lighting', 'HYPR3D_materials_source2', 'KHR_materials_unlit']
+    g.js['extensionsUsed'] = ['HYPRWALK_lighting', 'HYPRWALK_materials_source2', 'KHR_materials_unlit']
     g.write(path)
 
 

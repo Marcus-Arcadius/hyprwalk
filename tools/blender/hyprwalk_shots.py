@@ -1,4 +1,4 @@
-"""h3d_shots: Workbench renders of the attack from cameras round her and the plugin's third person camera:
+"""hyprwalk_shots: Workbench renders of the attack from cameras round her and the plugin's third person camera:
 render(folder, views, frames)"""
 import math
 import os

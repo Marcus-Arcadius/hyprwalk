@@ -1,11 +1,11 @@
-# mat_unit.py: tools/unity2hypr3d.py's material reader on hand-made UnlitWF, lilToon, Poiyomi and MToon materials: alpha
+# mat_unit.py: tools/unity2hyprwalk.py's material reader on hand-made UnlitWF, lilToon, Poiyomi and MToon materials: alpha
 # sources, faces drawn, emission, stencils and render queues, outlines, back faces, light clamp, toon shading and
 # matcaps; then a GLB exported and read back (masks and inverted alpha baked into the base texture's alpha, the
 # material extras and their textures).
 #   blender -b --factory-startup --python-exit-code 1 -P mat_unit.py
 import sys, os, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
-import unity2hypr3d as u
+import unity2hyprwalk as u
 
 FAILS = []
 
@@ -418,28 +418,28 @@ check('inverted: 1 - the colour\'s alpha times the texture\'s (to 8 bits)',
 check('... the colour\'s alpha taken in', mats_js['inverted']['pbrMetallicRoughness'].get('baseColorFactor', [1] * 4)[3],
       1.0)
 ex = mats_js['outlined'].get('extras', {})
-check('extras: queue, outline, back, light, toon (flat)', sorted(ex), ['hypr3d_back', 'hypr3d_light', 'hypr3d_outline',
-                                                                      'hypr3d_queue', 'hypr3d_toon'])
-lm = texels(ex['hypr3d_outline']['mask']['index'])
+check('extras: queue, outline, back, light, toon (flat)', sorted(ex), ['hyprwalk_back', 'hyprwalk_light', 'hyprwalk_outline',
+                                                                      'hyprwalk_queue', 'hyprwalk_toon'])
+lm = texels(ex['hyprwalk_outline']['mask']['index'])
 check('the outline mask added to the GLB, as it is (its lower rows set)', (
     lm.shape[:2], round(float(lm[0, 0, 0]), 2), round(float(lm[3, 0, 0]), 2)), ((4, 4), 0.0, 1.0))
 check('the outline\'s colour texture: the main one\'s, a third of the way', (
-    ex['hypr3d_outline']['texture']['index'] == mats_js['outlined']['pbrMetallicRoughness']['baseColorTexture']['index'],
-    ex['hypr3d_outline']['texture'].get('blend'), ex['hypr3d_outline']['texture'].get('transform')), (True, 0.3, None))
+    ex['hyprwalk_outline']['texture']['index'] == mats_js['outlined']['pbrMetallicRoughness']['baseColorTexture']['index'],
+    ex['hyprwalk_outline']['texture'].get('blend'), ex['hyprwalk_outline']['texture'].get('transform')), (True, 0.3, None))
 check('the back texture: the main one\'s, its tiling', (
-    ex['hypr3d_back']['texture']['index'] == mats_js['outlined']['pbrMetallicRoughness']['baseColorTexture']['index'],
-    ex['hypr3d_back']['texture'].get('transform'), ex['hypr3d_back']['color']),
+    ex['hyprwalk_back']['texture']['index'] == mats_js['outlined']['pbrMetallicRoughness']['baseColorTexture']['index'],
+    ex['hyprwalk_back']['texture'].get('transform'), ex['hyprwalk_back']['color']),
       (True, {'offset': [0, 0.0], 'scale': [2, 1]}, [1.0, 0.0, 0.0, 1.0]))
 tn = mats_js['toon'].get('extras', {})
 check('lilToon\'s toon extras: its shadow colour texture the base\'s (the same file), its matcap added',
-      (sorted(tn), tn['hypr3d_toon'].get('texture', {}).get('index') ==
-       mats_js['toon']['pbrMetallicRoughness']['baseColorTexture']['index'], tn['hypr3d_toon']['base'],
-       tn['hypr3d_matcap']['mode'], texels(tn['hypr3d_matcap']['index']).shape[:2]),
-      (['hypr3d_matcap', 'hypr3d_toon'], True, False, 'add', (4, 4)))
+      (sorted(tn), tn['hyprwalk_toon'].get('texture', {}).get('index') ==
+       mats_js['toon']['pbrMetallicRoughness']['baseColorTexture']['index'], tn['hyprwalk_toon']['base'],
+       tn['hyprwalk_matcap']['mode'], texels(tn['hyprwalk_matcap']['index']).shape[:2]),
+      (['hyprwalk_matcap', 'hyprwalk_toon'], True, False, 'add', (4, 4)))
 check('the others: UnlitWF\'s light clamp and flat light only', sorted((n, tuple(x.get('extras', {}))) for n, x in mats_js.items()
                                                                        if n not in ('outlined', 'toon')),
-      [('inverted', ('hypr3d_light', 'hypr3d_toon')), ('red mask', ('hypr3d_light', 'hypr3d_toon')),
-       ('small alpha mask', ('hypr3d_light', 'hypr3d_toon'))])
+      [('inverted', ('hyprwalk_light', 'hyprwalk_toon')), ('red mask', ('hyprwalk_light', 'hyprwalk_toon')),
+       ('small alpha mask', ('hyprwalk_light', 'hyprwalk_toon'))])
 
 print('all passed' if not FAILS else '%d FAILED: %s' % (len(FAILS), ', '.join(FAILS)))
 sys.exit(1 if FAILS else 0)

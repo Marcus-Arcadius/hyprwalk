@@ -37,7 +37,7 @@
 #define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
 #endif
 
-namespace h3d {
+namespace hyprwalk {
 
     namespace {
         // backdrop fog density relative to the map's: it's kilometres away and would be all fog otherwise
@@ -82,7 +82,7 @@ namespace h3d {
         std::string withCommon(const char* body, bool sky, bool lit = false, bool dual = false) {
             std::string s = "#version 300 es\n";
             if (dual)
-                s += "#extension GL_EXT_blend_func_extended : require\n#define H3D_DUAL 1\n";
+                s += "#extension GL_EXT_blend_func_extended : require\n#define HYPRWALK_DUAL 1\n";
             s += "precision highp float;\nprecision highp int;\n";
             s += shaders::NOISE_GLSL;
             if (sky || lit)
@@ -343,7 +343,7 @@ namespace h3d {
         // lightmap mips stop early: a chart shrunk much further bleeds into its neighbours
         constexpr int LIGHTMAP_LEVELS = 4;
 
-        // HYPR3D_lighting textures; returns the bytes used
+        // HYPRWALK_lighting textures; returns the bytes used
         size_t uploadLighting(const SMapModel& model, auto& gl) {
             const auto& L = model.lighting;
             size_t      bytes = 0;

@@ -1,11 +1,11 @@
 # litmap.py OUTDIR: LitCourt.glb, a made-up map with everything tools/cs2map.py writes for a game's own lighting, and
 # LitCourtRuntimeSun.glb, the same with a sun lacking a baked shadow channel (cs2map's Dynamic or Stationary sun: realtime
-# shadow map only). A 20 m court with 5 m walls, open to the sky: HYPR3D_lighting with two lighting sets (lightmaps,
+# shadow map only). A 20 m court with 5 m walls, open to the sky: HYPRWALK_lighting with two lighting sets (lightmaps,
 # probe volumes of different priority), fog, exposure range and tone curve; _LIGHTMAP_UV on world meshes ("node000_..."
-# as Source 2 Viewer names them) while probes light the props; HYPR3D_materials_source2 and HYPR3D_materials_blend
-# (the floor's red COLOR_0 must not show); a hypr3d_backdrop 340-430 m out, past the far plane (200 m), shown only if
+# as Source 2 Viewer names them) while probes light the props; HYPRWALK_materials_source2 and HYPRWALK_materials_blend
+# (the floor's red COLOR_0 must not show); a hyprwalk_backdrop 340-430 m out, past the far plane (200 m), shown only if
 # its own depth range works; BC1/BC3/BC5 textures, EXT_mesh_gpu_instancing, a trigger brush the loader drops, and
-# hypr3d_spawn and hypr3d_desktop (north wall, 13 m ahead).
+# hyprwalk_spawn and hyprwalk_desktop (north wall, 13 m ahead).
 # Correct render from the spawn (shot --size 1280x800 --map LitCourt.glb --spawn --autoexp 1), as frame fractions
 # x0 y0 x1 y1 and sRGB on NVIDIA: exposure 0.35 (the range's bottom); floor checker orange .15 .80 .40 .88 (188 155 117)
 # and teal .60 .80 .85 .88 (141 160 166); baked shadow band .10 .735 .42 .775 (171 122 72); moss .28 .635 .42 .67
@@ -449,7 +449,7 @@ class Map(GLB):
 
     def __init__(self):
         super().__init__()
-        self.js['asset']['generator'] = 'hypr3d tools/test/vm/litmap.py'
+        self.js['asset']['generator'] = 'hyprwalk tools/test/vm/litmap.py'
         self.js.update(images=[], textures=[], samplers=[
             {'magFilter': 9729, 'minFilter': 9987, 'wrapS': 10497, 'wrapT': 10497},
             {'magFilter': 9729, 'minFilter': 9987, 'wrapS': 33071, 'wrapT': 33071}])
@@ -519,7 +519,7 @@ class Map(GLB):
 
 
 def source2(**kw):
-    """HYPR3D_materials_source2, with what cs2map gives every material"""
+    """HYPRWALK_materials_source2, with what cs2map gives every material"""
     return dict({'normalYDown': True}, **kw)
 
 
@@ -560,50 +560,50 @@ def litcourt(path, baked_shadow=True):
     # ------------------------------------------------ materials, as cs2map leaves them
     floor = g.mat({'name': 'materials/litcourt/floor_tiles', 'normalTexture': dict(tex['floor_normal']),
                    'pbrMetallicRoughness': {'baseColorTexture': tex['floor_base'], 'metallicFactor': 0.0, 'roughnessFactor': 0.7},
-                   'extensions': {'HYPR3D_materials_blend': {'texture': tex['moss'], 'maskTexture': tex['moss_mask'],
+                   'extensions': {'HYPRWALK_materials_blend': {'texture': tex['moss'], 'maskTexture': tex['moss_mask'],
                                                              'normalTexture': tex['moss_normal'], 'factor': [0.9, 1.0, 0.8, 1.0],
                                                              'uvScale': [2.0, 2.0]},
-                                  'HYPR3D_materials_source2': source2(specular=[False, True], vertexColor='none')}})
+                                  'HYPRWALK_materials_source2': source2(specular=[False, True], vertexColor='none')}})
     wall = g.mat({'name': 'materials/litcourt/sandstone_wall',
                   'pbrMetallicRoughness': {'baseColorTexture': tex['wall_base'], 'metallicFactor': 0.0, 'roughnessFactor': 0.9},
-                  'extensions': {'HYPR3D_materials_source2': source2(
+                  'extensions': {'HYPRWALK_materials_source2': source2(
                       specular=[False, False], vertexColor='srgb',
                       detail={'texture': tex['wall_detail'], 'mode': 'mod2x', 'blend': 1.0, 'tint': [1.0, 0.85, 0.7],
                               'transform': [0.5, 0.0, 0.0, 0.5, 0.0, 0.0]})}})
     decal = g.mat({'name': 'materials/litcourt/decal_ring', 'alphaMode': 'BLEND',
                    'pbrMetallicRoughness': {'baseColorTexture': tex['decal'], 'metallicFactor': 0.0},
                    'extensions': {'KHR_materials_unlit': {},
-                                  'HYPR3D_materials_source2': source2(specular=[False, False], blendMode='mod2x')}})
+                                  'HYPRWALK_materials_source2': source2(specular=[False, False], blendMode='mod2x')}})
     crate = g.mat({'name': 'materials/litcourt/crate_painted',
                    'pbrMetallicRoughness': {'baseColorTexture': tex['crate_base'], 'metallicFactor': 0.0, 'roughnessFactor': 0.85},
-                   'extensions': {'HYPR3D_materials_source2': source2(
+                   'extensions': {'HYPRWALK_materials_source2': source2(
                        specular=[True, True], vertexColor='paint',
                        detail={'texture': tex['crate_detail'], 'maskTexture': tex['crate_mask'], 'mode': 'overlay', 'blend': 1.0,
                                'blendToFull': 0.1, 'transform': [2.0, 0.0, 0.0, 2.0, 0.0, 0.0], 'maskUV': 1})}})
     concrete = g.mat({'name': 'materials/litcourt/concrete',
                       'pbrMetallicRoughness': {'baseColorTexture': tex['concrete'], 'metallicFactor': 0.0, 'roughnessFactor': 0.55},
-                      'extensions': {'HYPR3D_materials_source2': source2(specular=[True, True])}})
+                      'extensions': {'HYPRWALK_materials_source2': source2(specular=[True, True])}})
     sign = g.mat({'name': 'materials/litcourt/sign_selfillum', 'emissiveTexture': tex['sign_glow'], 'emissiveFactor': [0.1, 1.0, 0.9],
                   'pbrMetallicRoughness': {'baseColorTexture': tex['sign_base'], 'metallicFactor': 0.0, 'roughnessFactor': 0.8},
                   'extensions': {'KHR_materials_emissive_strength': {'emissiveStrength': 3.0},
-                                 'HYPR3D_materials_source2': source2(specular=[False, False], vertexColor='none',
+                                 'HYPRWALK_materials_source2': source2(specular=[False, False], vertexColor='none',
                                                                      selfIllumAlbedo=0.25)}})
     glass = g.mat({'name': 'materials/litcourt/glass_green', 'alphaMode': 'BLEND',
                    'pbrMetallicRoughness': {'baseColorFactor': [srgb_to_linear(0.45), srgb_to_linear(0.9), srgb_to_linear(0.7), 0.2],
                                             'metallicFactor': 0.0, 'roughnessFactor': 0.05},
-                   'extensions': {'HYPR3D_materials_source2': source2(specular=[True, True], glass=True)}})
+                   'extensions': {'HYPRWALK_materials_source2': source2(specular=[True, True], glass=True)}})
     rays = g.mat({'name': 'materials/litcourt/light_rays', 'alphaMode': 'BLEND',
                   'pbrMetallicRoughness': {'baseColorFactor': [1.0, 0.75, 0.45, 0.7], 'metallicFactor': 0.0},
-                  'extensions': {'KHR_materials_unlit': {}, 'HYPR3D_materials_source2': source2(specular=[True, True], effect={
+                  'extensions': {'KHR_materials_unlit': {}, 'HYPRWALK_materials_source2': source2(specular=[True, True], effect={
                       'masks': [{'texture': tex['rays'], 'scale': [1.0, 1.0], 'pan': [0.02, 0.0]}], 'colorBoost': 1.6, 'opacity': 0.8,
                       'additive': True, 'fog': True, 'fade': [0.05, 1.0, 0.0, 1.0], 'fresnel': [0.001, 1.0, 0.0, 1.0]})}})
     trigger = g.mat({'name': 'materials/tools/toolstrigger', 'pbrMetallicRoughness': {'baseColorFactor': [1.0, 1.0, 1.0, 1.0]}})
     hills = g.mat({'name': 'materials/litcourt/skybox_hills',
                    'pbrMetallicRoughness': {'baseColorTexture': tex['hills'], 'metallicFactor': 0.0, 'roughnessFactor': 1.0},
-                   'extensions': {'HYPR3D_materials_source2': source2(specular=[False, False], vertexColor='none')}})
+                   'extensions': {'HYPRWALK_materials_source2': source2(specular=[False, False], vertexColor='none')}})
     tower = g.mat({'name': 'materials/litcourt/skybox_tower',
                    'pbrMetallicRoughness': {'baseColorTexture': tex['wall_base'], 'metallicFactor': 0.0, 'roughnessFactor': 0.9},
-                   'extensions': {'HYPR3D_materials_source2': source2(specular=[True, True])}})
+                   'extensions': {'HYPRWALK_materials_source2': source2(specular=[True, True])}})
     skydome = g.mat({'name': 'skydome', 'pbrMetallicRoughness': {'baseColorTexture': tex['sky'], 'metallicFactor': 0.0},
                      'extensions': {'KHR_materials_unlit': {}}})
 
@@ -679,7 +679,7 @@ def litcourt(path, baked_shadow=True):
 
     # ------------------------------------------------ the backdrop: a 3D skybox's scenery, in its own units
     sc = BACKDROP_SCALE
-    bd = g.place('hypr3d_backdrop', matrix=[sc, 0, 0, 0, 0, sc, 0, 0, 0, 0, sc, 0, 0, BACKDROP_Y, 0, 1])
+    bd = g.place('hyprwalk_backdrop', matrix=[sc, 0, 0, 0, 0, sc, 0, 0, 0, 0, sc, 0, 0, BACKDROP_Y, 0, 1])
     verts, tris, segs = [], [], 48
     for k in range(segs + 1):
         a = k / segs * 2 * math.pi
@@ -712,17 +712,17 @@ def litcourt(path, baked_shadow=True):
     g.place('skydome', mesh=g.add_mesh('skydome', [g.prim((verts, tris), skydome)]))
 
     # ------------------------------------------------ where to start and where the desktop hangs
-    g.place('hypr3d_spawn', translation=[0.0, 0.0, 3.0])             # facing -Z, the north wall
-    g.place('hypr3d_desktop', translation=[0.0, 2.1, -9.99])         # front faces +Z
+    g.place('hyprwalk_spawn', translation=[0.0, 0.0, 3.0])             # facing -Z, the north wall
+    g.place('hyprwalk_desktop', translation=[0.0, 2.1, -9.99])         # front faces +Z
 
-    # ------------------------------------------------ HYPR3D_lighting
+    # ------------------------------------------------ HYPRWALK_lighting
     def lightmaps(ims):
         return {k: {'image': i} for k, i in zip(('irradiance', 'directional', 'shadows'), ims)}
 
     def probes(ims, size, volumes):
         return dict({'irradiance': {'image': ims[0]}, 'size': size, 'columns': 16, 'volumes': volumes},
                     **({'shadows': {'image': ims[1]}} if len(ims) > 1 else {}))
-    g.js['extensions'] = {'HYPR3D_lighting': {
+    g.js['extensions'] = {'HYPRWALK_lighting': {
         'sets': [{'name': 'map', 'lightmaps': lightmaps(lm0), 'probes': probes(pr0, [8, 6, 3], [outdoor, indoor])},
                  {'name': 'skybox', 'lightmaps': lightmaps(lb), 'probes': probes(pr1, [4, 4, 2], [far])}],
         'sun': {'color': [1.0, 0.9, 0.7], 'direction': list(SUN)},
@@ -732,7 +732,7 @@ def litcourt(path, baked_shadow=True):
         'exposure': {'min': 0.35, 'max': 0.7, 'speedUp': 2.0, 'speedDown': 1.5},
         'tonemap': {'shoulderStrength': 0.22, 'linearStrength': 0.3, 'linearAngle': 0.1, 'toeStrength': 0.2, 'toeNum': 0.01,
                     'toeDenom': 0.3, 'whitePoint': 8.0, 'exposureBias': 0.3}}}
-    g.js['extensionsUsed'] = ['HYPR3D_lighting', 'HYPR3D_materials_source2', 'HYPR3D_materials_blend', 'KHR_materials_unlit',
+    g.js['extensionsUsed'] = ['HYPRWALK_lighting', 'HYPRWALK_materials_source2', 'HYPRWALK_materials_blend', 'KHR_materials_unlit',
                               'KHR_materials_emissive_strength', 'EXT_mesh_gpu_instancing']
     g.write(path)
 

@@ -19,7 +19,7 @@
 
 namespace fs = std::filesystem;
 
-namespace h3d {
+namespace hyprwalk {
 
     namespace {
         std::string env(const char* name, const std::string& fallback = "") {
@@ -367,7 +367,7 @@ namespace h3d {
         // no fixed heights, so windows open as big as on your screen (a fixed one shrank tall windows)
         static const std::vector<SAppRule> BUILT_IN = {
             // games (Steam's, Proton's, gamescope's): further off
-            {"steam_app_.*|gamescope|.*\\.exe|steam_proton|chocolate-doom|supertux2|retroarch|.*minecraft.*|h3dgame.*", 2.0f, 0.f, 0.f},
+            {"steam_app_.*|gamescope|.*\\.exe|steam_proton|chocolate-doom|supertux2|retroarch|.*minecraft.*|hyprwalkgame.*", 2.0f, 0.f, 0.f},
             // chat and calls: to the left, closer
             {"discord|vesktop|webcord|equibop|signal|telegram.*|org\\.telegram\\..*|element|slack|zoom|teams.*", 1.3f, 0.f, -1.f},
             // videos
@@ -386,7 +386,7 @@ namespace h3d {
     // ------------------------------------------------------------------ spots
 
     std::string windowSpotsPath(const std::string& mapPath) {
-        const std::string dir = env("XDG_STATE_HOME", env("HOME", "/tmp") + "/.local/state") + "/hypr3d/windows";
+        const std::string dir = env("XDG_STATE_HOME", env("HOME", "/tmp") + "/.local/state") + "/hyprwalk/windows";
         if (mapPath.empty())
             return dir + "/courtyard.conf";
         uint32_t h = 2166136261u;
@@ -425,7 +425,7 @@ namespace h3d {
         std::ofstream f(file, std::ios::trunc);
         if (!f)
             return false;
-        f << std::format("# hypr3d: where windows were put, by class, for {}\n", mapPath.empty() ? "the courtyard" : mapPath);
+        f << std::format("# hyprwalk: where windows were put, by class, for {}\n", mapPath.empty() ? "the courtyard" : mapPath);
         std::vector<std::string> classes;
         for (const auto& [cls, s] : spots)
             classes.push_back(cls);

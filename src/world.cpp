@@ -7,7 +7,7 @@
 // The built-in courtyard: a small procedural desert yard (no copyrighted assets) made of axis-aligned boxes, which
 // keeps collision and the baked ambient occlusion trivial.
 
-namespace h3d {
+namespace hyprwalk {
 
     enum eFace : uint8_t {
         FACE_NX = 1 << 0,

@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# check.sh: hypr3d.so in the Hyprland you're running, on your own GPU and monitor (what tools/test/vm can't reach).
+# check.sh: hyprwalk.so in the Hyprland you're running, on your own GPU and monitor (what tools/test/vm can't reach).
 # It does what hyprctl can and asks you to do the rest. Each run gets its own OUTDIR/run-N (OUTDIR/latest).
 #
 #   tools/test/live/check.sh OUTDIR [--mic] [--avatar FILE] [--map FILE|--no-map] [--app CMD]... [--so FILE]
 #                            [--monitor NAME]
 #
-#   tools/test/live/check.sh ~/hypr3d-live                  # 3D, an avatar, the menu, a notification, a map
-#   tools/test/live/check.sh ~/hypr3d-live --mic            # and lip sync on your voice
-#   tools/test/live/check.sh ~/hypr3d-live --no-map --app discord --app "steam steam://rungameid/APPID"
+#   tools/test/live/check.sh ~/hyprwalk-live                  # 3D, an avatar, the menu, a notification, a map
+#   tools/test/live/check.sh ~/hyprwalk-live --mic            # and lip sync on your voice
+#   tools/test/live/check.sh ~/hyprwalk-live --no-map --app discord --app "steam steam://rungameid/APPID"
 #
 #   --mic          lip sync on your microphone: hold each sound a notification asks for (ah, ee, oo, eh, oh, sss,
 #                  silence) until it goes; results in lipsync.jsonl, PipeWire's view of the microphone in audio/
 #   --avatar FILE  the avatar to load (default: assets.py's ToonTest.glb, made in OUTDIR)
-#   --map FILE     a map to walk into (default: ~/.local/share/hypr3d/maps/de_mirage.glb, if there)
+#   --map FILE     a map to walk into (default: ~/.local/share/hyprwalk/maps/de_mirage.glb, if there)
 #   --no-map       no map
-#   --so FILE      the plugin to load (default: the repo's hypr3d.so from ./build.sh)
+#   --so FILE      the plugin to load (default: the repo's hyprwalk.so from ./build.sh)
 #   --monitor NAME 3D on that monitor, not the focused one: run it from a terminal on another monitor to keep the
 #                  terminal out of the desktop comparisons
 #   --app CMD      an app to launch from 3D (repeatable): a desktop id, name or command. Notifications take you
@@ -24,14 +24,14 @@
 #   CHECK_DO=CMD   runs CMD STEP WINDOW at each --app prompt (tools/test/vm does the steps with hyprctl)
 #
 # The desktop must look the same after 3D and after unloading, leaving out the terminal and what changes within a
-# second. Output: frames/ (diff-A-B.png: red changed, blue left out), status/, hypr3d.log, results.txt.
+# second. Output: frames/ (diff-A-B.png: red changed, blue left out), status/, hyprwalk.log, results.txt.
 #
 # Don't touch the mouse or keyboard while it runs; Esc leaves 3D, then Ctrl+C stops it. It always cleans up (3D and
 # lip sync off, plugin unloaded).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 UTIL=(python3 "$REPO/tools/test/live/util.py")
-SO="$REPO/hypr3d.so" AVATAR="" MAP="" NOMAP=0 MIC=0 OUT="" APPS=() MONITOR=""
+SO="$REPO/hyprwalk.so" AVATAR="" MAP="" NOMAP=0 MIC=0 OUT="" APPS=() MONITOR=""
 while (($#)); do
     case "$1" in
         --mic) MIC=1; shift ;;
@@ -53,8 +53,8 @@ die() { echo "check.sh: $*" >&2; exit 1; }
 for c in hyprctl grim python3; do command -v "$c" > /dev/null || die "no $c"; done
 [[ -f "$SO" ]] || die "no $SO: build it with ./build.sh"
 hyprctl version > /dev/null 2>&1 || die "hyprctl doesn't answer"
-hyprctl plugin list 2>/dev/null | grep -q hypr3d && die "hypr3d is loaded already: unload it first (hyprctl plugin unload PATH)"
-[[ -z "$MAP" && $NOMAP -eq 0 && -f "$HOME/.local/share/hypr3d/maps/de_mirage.glb" ]] && MAP="$HOME/.local/share/hypr3d/maps/de_mirage.glb"
+hyprctl plugin list 2>/dev/null | grep -q hyprwalk && die "hyprwalk is loaded already: unload it first (hyprctl plugin unload PATH)"
+[[ -z "$MAP" && $NOMAP -eq 0 && -f "$HOME/.local/share/hyprwalk/maps/de_mirage.glb" ]] && MAP="$HOME/.local/share/hyprwalk/maps/de_mirage.glb"
 ((NOMAP)) && MAP=""
 # each run gets a new run-N folder
 mkdir -p "$BASE" || die "can't make $BASE"
@@ -78,7 +78,7 @@ check() { # WHAT STATUS [SEEN]; status 0 = passed
     if (($2 == 0)); then PASS=$((PASS + 1)); log "ok    $1${3:+  [$3]}"; else FAIL=$((FAIL + 1)); log "FAIL  $1${3:+  [$3]}"; fi
 }
 note() { log "      $1${2:+  [$2]}"; }
-ctl() { hyprctl hypr3d "$@" 2>&1; }
+ctl() { hyprctl hyprwalk "$@" 2>&1; }
 js() { "${UTIL[@]}" json "$1"; }                               # value at a dotted path in the JSON on stdin
 is() { python3 -c "import sys; sys.exit(0 if ($1) else 1)"; } # numeric test, as a Python expression
 wait_for() { # SECONDS CMD...: retry CMD until it succeeds
@@ -140,7 +140,7 @@ differs() { "${UTIL[@]}" diff "$OUT/raw/$1.ppm" "$OUT/raw/$2.ppm" "$OUT/frames/d
 calm() { hyprctl dismissnotify > /dev/null 2>&1; sleep 1.2; } # no notifications in the next frame
 say() {                                                       # what to do, also over the 3D view
     echo ">>> $1"
-    hyprctl notify 1 "${2:-2500}" "rgb(33ccff)" "hypr3d live check: $1" > /dev/null 2>&1
+    hyprctl notify 1 "${2:-2500}" "rgb(33ccff)" "hyprwalk live check: $1" > /dev/null 2>&1
 }
 
 cleanup() {
@@ -149,12 +149,12 @@ cleanup() {
         ctl avatar lipsync off > /dev/null
         ctl off now > /dev/null
         sleep 0.5
-        ctl log > "$OUT/hypr3d.log" # the plugin's own log; Hyprland's needs debug logs
+        ctl log > "$OUT/hyprwalk.log" # the plugin's own log; Hyprland's needs debug logs
         local r
         r="$(hyprctl plugin unload "$SO" 2>&1)"
         if [[ "$r" == ok ]]; then note "unloaded the plugin"; else FAIL=$((FAIL + 1)); log "FAIL  unloading the plugin  [$r]"; fi
     fi
-    [[ -f "$HYPRLOG" ]] && grep -a "\[hypr3d\]" "$HYPRLOG" > "$OUT/hyprland-log.txt" && [[ ! -s "$OUT/hyprland-log.txt" ]] && rm -f "$OUT/hyprland-log.txt"
+    [[ -f "$HYPRLOG" ]] && grep -a "\[hyprwalk\]" "$HYPRLOG" > "$OUT/hyprland-log.txt" && [[ ! -s "$OUT/hyprland-log.txt" ]] && rm -f "$OUT/hyprland-log.txt"
     rm -rf "$OUT/raw"
     log "$PASS passed, $FAIL failed, in $(($(date +%s) - START)) s; frames in $OUT/frames"
 }
@@ -186,7 +186,7 @@ is "$left > 0.5" && note "most of the monitor was left out (the terminal this ru
 # --- 3D
 r="$(ctl on)"
 wait_for 5 mode_is active
-check "hyprctl hypr3d on: in 3D" $? "$r"
+check "hyprctl hyprwalk on: in 3D" $? "$r"
 sleep 2
 s="$(ctl status | tee "$OUT/status/3d.json")"
 fps="$(js fps <<< "$s")"
@@ -233,7 +233,7 @@ ctl avatar emote stop > /dev/null
 
 # --- a notification over the 3D view
 calm
-hyprctl notify 1 6000 "rgb(ff8800)" "hypr3d live check: a notification over the 3D view" > /dev/null
+hyprctl notify 1 6000 "rgb(ff8800)" "hyprwalk live check: a notification over the 3D view" > /dev/null
 sleep 1
 shot notification
 o="$("${UTIL[@]}" count "$OUT/raw/notification.ppm" orange 0.5 0 1 0.25)"
@@ -269,7 +269,7 @@ fi
 if [[ "$kind" == window ]]; then
     r="$(ctl grab)"
     [[ "$r" == holding && "$(ctl status | js holding)" == true ]]
-    check "hyprctl hypr3d grab (G): the window under the crosshair, picked up" $? "$r"
+    check "hyprctl hyprwalk grab (G): the window under the crosshair, picked up" $? "$r"
     ctl hold 1.6 0.8 > /dev/null
     ctl turn 30 5 > /dev/null
     sleep 1
@@ -311,11 +311,11 @@ for app in "${APPS[@]}"; do
     before="$(hyprctl -j clients | python3 -c 'import json, sys; print(" ".join(c["address"] for c in json.load(sys.stdin)))')"
     r="$(ctl launch "$app")"
     newwin() {
-        # address and class of the app's new window: the one hypr3d placed as launched from 3D, else the first new one;
+        # address and class of the app's new window: the one hyprwalk placed as launched from 3D, else the first new one;
         # not Steam's own windows, which open first when Steam wasn't running
         hyprctl -j clients | python3 -c 'import json, subprocess, sys
 old, steam = set(sys.argv[1].split()), "steam://rungameid/" in sys.argv[2]
-placed = {p["address"] for p in json.loads(subprocess.run(["hyprctl", "hypr3d", "windows"], capture_output=True, text=True).stdout or "{}").get("placed", [])}
+placed = {p["address"] for p in json.loads(subprocess.run(["hyprctl", "hyprwalk", "windows"], capture_output=True, text=True).stdout or "{}").get("placed", [])}
 new = [c for c in json.load(sys.stdin) if c["address"] not in old and c["mapped"] and not (steam and c["class"].lower() == "steam")]
 new.sort(key=lambda c: c["address"] not in placed)
 print(*(new[0]["address"], new[0]["class"]) if new else "")' "$before" "$app"
@@ -437,7 +437,7 @@ try:
 except (OSError, ValueError):
     dump = []
 props = {o['id']: (o.get('info') or {}).get('props') or {} for o in dump if o.get('type', '').endswith(':Node')}
-ours = [i for i, p in props.items() if p.get('node.name') == 'hypr3d-lipsync']
+ours = [i for i, p in props.items() if p.get('node.name') == 'hyprwalk-lipsync']
 links = [o['info'] for o in dump if o.get('type', '').endswith(':Link') and ours and (o.get('info') or {}).get('input-node-id') == ours[0]]
 src = ls.get('source') or {}
 print(f"lip sync's badge|{ls.get('text')} ({ls.get('problem')})")
@@ -543,16 +543,16 @@ fi
 ctl view first > /dev/null
 r="$(ctl off)"
 wait_for 5 mode_is off
-check "hyprctl hypr3d off: out of 3D" $? "$r"
+check "hyprctl hyprwalk off: out of 3D" $? "$r"
 calm
 desktop_shot desktop-after-3d
 read -r d left <<< "$(differs desktop-loaded desktop-after-3d)"
 is "$d < 0.005"
 check "the desktop looks as it did before 3D" $? "$d of the pixels differ, $left left out: see frames/diff-*"
-ctl log > "$OUT/hypr3d.log"
+ctl log > "$OUT/hyprwalk.log"
 r="$(hyprctl plugin unload "$SO" 2>&1)"
 [[ "$r" == ok ]] && LOADED=0
-[[ "$r" == ok ]] && ! hyprctl plugin list | grep -q hypr3d
+[[ "$r" == ok ]] && ! hyprctl plugin list | grep -q hyprwalk
 check "hyprctl plugin unload" $? "$r"
 calm
 desktop_shot desktop-unloaded

@@ -1,16 +1,16 @@
-"""h3d_scene: builds the attack's Blender scene from scratch: Hatsune Miku NT in a scene of her own, rigged (h3d_rig),
-the hook keyed (h3d_hook), hands in fists. In Blender: import h3d_scene; h3d_scene.build() (or build(avatar_path))"""
+"""hyprwalk_scene: builds the attack's Blender scene from scratch: Hatsune Miku NT in a scene of her own, rigged (hyprwalk_rig),
+the hook keyed (hyprwalk_hook), hands in fists. In Blender: import hyprwalk_scene; hyprwalk_scene.build() (or build(avatar_path))"""
 import math
 import os
 
 import bpy
 from mathutils import Euler
 
-import h3d_rig
-import h3d_hook
+import hyprwalk_rig
+import hyprwalk_hook
 
-AVATAR = os.path.expanduser("~/.local/share/hypr3d/avatars/Miku/Miku.glb")
-SCENE = "hypr3d attack"
+AVATAR = os.path.expanduser("~/.local/share/hyprwalk/avatars/Miku/Miku.glb")
+SCENE = "hyprwalk attack"
 
 
 def build(avatar=AVATAR):
@@ -22,8 +22,8 @@ def build(avatar=AVATAR):
     # show the attack's bones in front, minus the importer's spheres; hide the hundreds of others (hair, skirt, fingers)
     for pb in arm.pose.bones:
         pb.custom_shape = None
-    keyed = {h3d_rig.BONES[k] for k in h3d_rig.BONES}
-    shown = arm.data.collections.get("hypr3d attack") or arm.data.collections.new("hypr3d attack")
+    keyed = {hyprwalk_rig.BONES[k] for k in hyprwalk_rig.BONES}
+    shown = arm.data.collections.get("hyprwalk attack") or arm.data.collections.new("hyprwalk attack")
     rest = arm.data.collections.get("the rest") or arm.data.collections.new("the rest")
     for b in arm.data.bones:
         for c in list(b.collections):
@@ -54,8 +54,8 @@ def build(avatar=AVATAR):
                 stack += list(n.inputs)
         if pick:
             m.node_tree.nodes.active = pick
-    h3d_hook.build()
-    h3d_rig.fist()
+    hyprwalk_hook.build()
+    hyprwalk_rig.fist()
     sc.frame_set(0)
     # the view: her front right, the whole of her
     for area in bpy.context.screen.areas:

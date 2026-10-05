@@ -1,10 +1,10 @@
-# vrcf_unit.py: the VRCFury emulation of tools/unity2hypr3d.py on small hand-made cases: its serialized format (both
+# vrcf_unit.py: the VRCFury emulation of tools/unity2hyprwalk.py on small hand-made cases: its serialized format (both
 # of Unity's [SerializeReference] layouts), the upgrades of old features, Armature Link on small hierarchies, and
 # toggles with the resting state they give the avatar
 #   blender -b --factory-startup --python-exit-code 1 -P vrcf_unit.py
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
-import unity2hypr3d as u
+import unity2hyprwalk as u
 from mathutils import Matrix, Vector, Quaternion
 
 FAILS = []
@@ -505,7 +505,7 @@ vf = vrcf(sc, [{'@class': 'Blinking', 'state': {'actions': [bs('Wink')]}},
                {'@class': 'Visemes', 'state_aa': {'actions': [bs('Blep')]}, 'state_O': {'actions': [bs('Grr', 60)]},
                 'state_PP': {'actions': [bs('Smile')]}}])
 check('the blink', vf.blink, {(b1, 'Wink'): 1.0})
-check('the visemes hypr3d has (aa..ou), at their weights', vf.visemes, {'aa': {(b1, 'Blep'): 1.0}, 'oh': {(b1, 'Grr'): 0.6}})
+check('the visemes hyprwalk has (aa..ou), at their weights', vf.visemes, {'aa': {(b1, 'Blep'): 1.0}, 'oh': {(b1, 'Grr'): 0.6}})
 check('... and the consonants (PP..RR) apart', vf.consonants, {'pp': {(b1, 'Smile'): 1.0}})
 
 print('== material actions: a slot\'s material, a property\'s value; Set an FX Float; exclusive tags of several groups')
@@ -535,7 +535,7 @@ check('an old save names the object: its renderer\'s slot', vf.apply({p['Old']: 
       ('c' * 32, 2100000))
 check('a colour property, channel by channel', sorted((k[2], v) for k, v in vf.apply({p['Tint']: 1.0}, {}).items()),
       [('_Color.a', 1.0), ('_Color.b', 0.5), ('_Color.g', 0.5), ('_Color.r', 1.0)])
-check('a property hypr3d does not carry: said', any('_Glossiness' in w for w in u.WARNINGS[before:]), True)
+check('a property hyprwalk does not carry: said', any('_Glossiness' in w for w in u.WARNINGS[before:]), True)
 check('an FX float while it is on, for the animators to read', (vf.drive({p['Glow']: 1.0}).get('Glow'),
                                                                  vf.drive({p['Glow']: 0.0}).get('Glow')), (0.7, None))
 check('a toggle of two tags is in both groups', [(c['name'], c.get('group'), c.get('groups')) for _, c in vf.menu[-3:]],

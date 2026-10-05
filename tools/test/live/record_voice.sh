@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # record_voice.sh [DIR]: records your voice for tuning lip sync: the vowels it knows held (ah, ee, oo, eh, oh: Japanese
 # a, i, u, e, o), then "sss", then silence, 4 s each, from the default microphone (pw-record, 32-bit float mono WAVs at
-# 48 kHz) into DIR (default ~/h3d-live/voice). Nothing is sent anywhere. tools/test/harness/lipsync_check.sh --real DIR
+# 48 kHz) into DIR (default ~/hyprwalk-live/voice). Nothing is sent anywhere. tools/test/harness/lipsync_check.sh --real DIR
 # or the harness's --audio FILE --lipsync-trace then goes through them offscreen.
 set -uo pipefail
-DIR="${1:-$HOME/h3d-live/voice}"
+DIR="${1:-$HOME/hyprwalk-live/voice}"
 command -v pw-record > /dev/null || { echo "no pw-record (PipeWire's tools)" >&2; exit 1; }
 mkdir -p "$DIR" || exit 1
 {

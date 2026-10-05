@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""blend2vrma: a humanoid's Blender animation as a VRM animation (.vrma) for hypr3d: an emote, or its attacks.
+"""blend2vrma: a humanoid's Blender animation as a VRM animation (.vrma) for hyprwalk: an emote, or its attacks.
 
 In Blender (Python console, Text Editor, Blender's MCP, or in the background):
     blender -b FILE.blend --python tools/blend2vrma.py -- OUT.vrma [--armature NAME] [--humanoid SETTINGS.json]
             [--frames START END] [--bones all|upper] [--fingers] [--name NAME]
-    import blend2vrma; blend2vrma.export("OUT.vrma", armature="Armature", humanoid="Miku.hypr3d.json")
+    import blend2vrma; blend2vrma.export("OUT.vrma", armature="Armature", humanoid="Miku.hyprwalk.json")
 
   --armature NAME           default: the scene's first armature
-  --humanoid SETTINGS.json  bones from a hypr3d settings file (default: guessed from VRM/Unity/.L.R/Mixamo names)
+  --humanoid SETTINGS.json  bones from a hyprwalk settings file (default: guessed from VRM/Unity/.L.R/Mixamo names)
   --frames START END        default: the scene's range
   --bones upper             no hips or legs (an attack, played over the walking)
   --fingers                 keep the fingers (else the avatar's own gestures make the hands)
   --name NAME               clip name (default: the action's)
 
 Frames are evaluated with constraints and IK at the scene's frame rate. Bone turns from the armature's T pose (as
-hypr3d works it out) go on a straightened T pose of its own proportions, so the clip plays the same on any humanoid.
+hyprwalk works it out) go on a straightened T pose of its own proportions, so the clip plays the same on any humanoid.
 Scene markers go in the extras as seconds from START: {"markers": {"hit": 0.2, ...}}; attacks read ready, hit, next.
 """
 import json
@@ -30,7 +30,7 @@ try:
 except ImportError:  # only inside Blender
     bpy = None
 
-# VRM 1.0 bone names in hypr3d's order (avatar.hpp's eHumanBone)
+# VRM 1.0 bone names in hyprwalk's order (avatar.hpp's eHumanBone)
 BONES = ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head',
          'leftUpperLeg', 'leftLowerLeg', 'leftFoot', 'rightUpperLeg', 'rightLowerLeg', 'rightFoot',
          'leftShoulder', 'leftUpperArm', 'leftLowerArm', 'leftHand', 'rightShoulder', 'rightUpperArm', 'rightLowerArm',
@@ -119,7 +119,7 @@ def arc(a, b):
 
 
 def tpose_of(rest, has, facing):
-    """per bone, the model-space turn from rest to a T pose, as hypr3d's rigOf(): arms out sideways, legs down, hands
+    """per bone, the model-space turn from rest to a T pose, as hyprwalk's rigOf(): arms out sideways, legs down, hands
     toward the middle finger (else another); bones below a limb bone turn with it, the rest not at all"""
     tp = {b: Quaternion() for b in has}
     own = set()
@@ -214,7 +214,7 @@ def export(path, armature=None, humanoid=None, frames=None, bones='all', fingers
     height = rest['hips'].y - feet if rest['hips'].y - feet > 0.1 * legs else max(legs, 1e-4)
 
     keep = [b for b in BONES + FINGERS if b in has and b not in FACE and (fingers or b not in FINGERS) and (bones == 'all' or b in UPPER)]
-    # T pose nodes: the whole humanoid (players recognize it by its legs and arms), the eyes (hypr3d places attack hands
+    # T pose nodes: the whole humanoid (players recognize it by its legs and arms), the eyes (hyprwalk places attack hands
     # in the first person view by them) and kept fingers; bones not kept get no curves
     nodes_b = {b for b in has if (b not in FACE or b.endswith('Eye')) and (fingers or b not in FINGERS)}
     order = [b for b in BONES + FINGERS if b in nodes_b]
@@ -235,7 +235,7 @@ def export(path, armature=None, humanoid=None, frames=None, bones='all', fingers
         for b in nodes_b:
             m = W @ ev.pose.bones[rig[b]].matrix
             world[b] = (C @ m.to_translation(), (Cq @ m.to_quaternion() @ Cq.inverted()).normalized())
-        # each bone's turn from the T pose, avatar facing +Z (hypr3d's canonical())
+        # each bone's turn from the T pose, avatar facing +Z (hyprwalk's canonical())
         t = {b: (Rc @ world[b][1] @ rest_q[b].inverted() @ tp[b].inverted() @ facing).normalized() for b in nodes_b}
         for b in keep:
             p = parent_of(b, nodes_b)
@@ -291,7 +291,7 @@ def export(path, armature=None, humanoid=None, frames=None, bones='all', fingers
     if marks:
         anim['extras'] = {'markers': marks}
     ext = {'specVersion': '1.0', 'humanoid': {'humanBones': {b: {'node': node_of[b]} for b in order}}}
-    js = {'asset': {'version': '2.0', 'generator': 'hypr3d blend2vrma'}, 'scene': 0,
+    js = {'asset': {'version': '2.0', 'generator': 'hyprwalk blend2vrma'}, 'scene': 0,
           'scenes': [{'nodes': [node_of[b] for b in order if parent_of(b, nodes_b) is None]}],
           'nodes': nodes, 'animations': [anim], 'accessors': accessors, 'bufferViews': views,
           'buffers': [{'byteLength': len(buf)}], 'extensionsUsed': ['VRMC_vrm_animation'],
@@ -309,7 +309,7 @@ def main(argv):
     ap = argparse.ArgumentParser(prog='blend2vrma', description=__doc__.split('\n\n')[0])
     ap.add_argument('out')
     ap.add_argument('--armature')
-    ap.add_argument('--humanoid', help="a hypr3d settings file (its \"humanoid\")")
+    ap.add_argument('--humanoid', help="a hyprwalk settings file (its \"humanoid\")")
     ap.add_argument('--frames', nargs=2, type=int)
     ap.add_argument('--bones', choices=('all', 'upper'), default='all')
     ap.add_argument('--fingers', action='store_true')

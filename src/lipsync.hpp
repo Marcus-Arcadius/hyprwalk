@@ -7,7 +7,7 @@
 #include <optional>
 #include <vector>
 
-namespace h3d {
+namespace hyprwalk {
 
     // VRChat visemes: the vowels as the avatar's mouth presets (EX_AA .. EX_OH), then the consonants that show, where
     // the avatar has them: pp (m, b, p), ff (f, v), ss (s, z, ts), ch (sh, ch, j)

@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <format>
 
-namespace h3d {
+namespace hyprwalk {
 
     std::string jsonEscape(const std::string& s) {
         std::string out;
@@ -145,7 +145,7 @@ namespace h3d {
         if (rest.find('/') == std::string::npos && !isEmoteFile(rest)) {
             const int e = m_anim.findEmote(rest);
             if (e < 0)
-                return std::format("error: {} has no emote \"{}\" (hyprctl hypr3d avatar emote lists them)", a.name, rest);
+                return std::format("error: {} has no emote \"{}\" (hyprctl hyprwalk avatar emote lists them)", a.name, rest);
             m_anim.playEmote(e, loop);
             return all[e]->name;
         }
@@ -213,7 +213,7 @@ namespace h3d {
         }
         const int e = a.findExpression(name);
         if (e < 0)
-            return std::format("error: {} has no expression \"{}\" (hyprctl hypr3d avatar expression lists them)", a.name, name);
+            return std::format("error: {} has no expression \"{}\" (hyprctl hyprwalk avatar expression lists them)", a.name, name);
         expression       = name;
         expressionWeight = weight;
         m_anim.setExpression(e, weight);
@@ -231,7 +231,7 @@ namespace h3d {
         }
         const std::vector<int> parts = a.findParts(name);
         if (parts.empty())
-            return std::format("error: {} has no toggle or part \"{}\" (hyprctl hypr3d avatar parts lists them)", a.name, name);
+            return std::format("error: {} has no toggle or part \"{}\" (hyprctl hyprwalk avatar parts lists them)", a.name, name);
         if (state == 2)
             state = !m_anim.partsShown()[parts[0]];
         for (const int p : parts)
@@ -351,7 +351,7 @@ namespace h3d {
                     return std::format("{}: {:+.0f}% {:+.0f}%", a.sliders[s].name, m_anim.slider(s) * 100, m_anim.sliderY(s) * 100);
                 return std::format("{}: {:.0f}%", a.sliders[s].name, m_anim.slider(s) * 100);
             }
-            return std::format("error: {} has no slider \"{}\" (hyprctl hypr3d avatar parts lists them; a 2D one takes x and y)", a.name, joined());
+            return std::format("error: {} has no slider \"{}\" (hyprctl hyprwalk avatar parts lists them; a 2D one takes x and y)", a.name, joined());
         }
 
         if (args[1] == "toggle") {
@@ -367,7 +367,7 @@ namespace h3d {
                     }
             const std::string name = joined();
             if (name.empty())
-                return "error: toggle what (hyprctl hypr3d avatar parts lists them)";
+                return "error: toggle what (hyprctl hyprwalk avatar parts lists them)";
             return changeOutfit(name, state);
         }
 
@@ -388,10 +388,10 @@ namespace h3d {
         }
         const std::string name = joined();
         if (name.empty())
-            return "error: which shape key (hyprctl hypr3d avatar expression lists them)";
+            return "error: which shape key (hyprctl hyprwalk avatar expression lists them)";
         const std::vector<int> morphs = a.findMorphs(name);
         if (morphs.empty())
-            return std::format("error: {} has no shape key \"{}\" (hyprctl hypr3d avatar expression lists them)", a.name, name);
+            return std::format("error: {} has no shape key \"{}\" (hyprctl hyprwalk avatar expression lists them)", a.name, name);
         if (set) {
             for (const int m : morphs)
                 m_anim.setShape(m, w);
@@ -578,7 +578,7 @@ namespace h3d {
         if (verb != "back" && verb != "pick" && verb != "move" && verb != "scroll")
             return "error: menu [open [page]|close|toggle|back|pick [n]|move dx dy|scroll n]";
         if (!menu.open())
-            return "error: the menu isn't open (hyprctl hypr3d menu open)";
+            return "error: the menu isn't open (hyprctl hyprwalk menu open)";
         if (verb == "back") {
             menu.back();
             return where();

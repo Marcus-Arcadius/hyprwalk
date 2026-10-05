@@ -15,7 +15,7 @@
 #include <cairo.h>
 #include <pango/pangocairo.h>
 
-namespace h3d {
+namespace hyprwalk {
 
     namespace {
         constexpr float HALF_TURN = std::numbers::pi_v<float>, TAU = 2 * HALF_TURN; // not PI: Hyprland defines a PI macro

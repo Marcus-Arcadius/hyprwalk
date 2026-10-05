@@ -1,4 +1,4 @@
-"""h3d_rig: the Blender rig the attacks are made with: IK controls on a humanoid imported from a glTF (Hatsune Miku NT's
+"""hyprwalk_rig: the Blender rig the attacks are made with: IK controls on a humanoid imported from a glTF (Hatsune Miku NT's
 GLB; BONES names her bones), and key poses in her own terms. See README.md here.
 
 Her right is -X, ahead -Y, up +Z (an imported glTF facing +Z). A pose is a dict; what it leaves out is at rest:

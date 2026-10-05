@@ -78,7 +78,7 @@ def scene(lift, extra=()):
              'wall decal': node(doc, quad(doc, wall_quad(3 - lift, 0.4), (-1, 0, 0), paint), name='n0_overlay2'),
              'sign': node(doc, quad(doc, [(3 - WRONG, 2.5, 1), (3 - WRONG, 2.9, 1), (3 - WRONG, 2.9, 1.4), (3 - WRONG, 2.5, 1.4)],
                                     (-1, 0, 0), sign), name='n0_sign')}
-    big = node(doc, None, name='hypr3d_backdrop', matrix=[16, 0, 0, 0, 0, 16, 0, 0, 0, 0, 16, 0, 200, -8, 0, 1])
+    big = node(doc, None, name='hyprwalk_backdrop', matrix=[16, 0, 0, 0, 0, 16, 0, 0, 0, 0, 16, 0, 200, -8, 0, 1])
     node(doc, quad(doc, floor_quad(0, 2), (0, 1, 0), stone), parent=big, name='node000_ground')
     parts['16x decal'] = node(doc, quad(doc, floor_quad(lift, 0.3), (0, 1, 0), paint), parent=big, name='node000_overlay')
     for i, l in enumerate(extra):

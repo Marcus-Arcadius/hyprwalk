@@ -1275,7 +1275,7 @@ def accessory_assets():
     """accessories set up with Modular Avatar's other components: Material Setter and Swap, Replace Object, Blendshape
     Sync, Merge Animator and Merge Motion puppets, Menu Install Target, Mesh Cutter, Scale Adjuster, Floor Adjuster,
     Global Collider and Platform Filter. The beret's Visible Head Accessory and Scale Adjuster (nothing is weighted
-    to it) and the root's Mesh Settings do nothing in hypr3d."""
+    to it) and the root's Mesh Settings do nothing in hyprwalk."""
     g.clear_scene()
     rig = g.Rig('Armature')
     skeleton(rig, own=False)

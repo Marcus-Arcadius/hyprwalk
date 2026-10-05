@@ -2,7 +2,7 @@
 
 // All GLSL, for GLSL ES 3.00 (guaranteed by Hyprland's EGL context); the external-texture variant needs OES.
 
-namespace h3d::shaders {
+namespace hyprwalk::shaders {
 
     // ---------------------------------------------------------------- capture
     // copies client surface textures into a panel texture, row 0 = top
@@ -511,7 +511,7 @@ uniform vec4 uEffectFade;       // distance, falloff, min, max
 uniform vec4 uEffectFresnel;    // exponent, falloff, min, max
 uniform float uTime;
 uniform float uCutoff;
-// avatars (unity2hypr3d material extras, MToon outlines)
+// avatars (unity2hyprwalk material extras, MToon outlines)
 uniform int uOutline;       // 0 surface, else outline
 uniform vec4 uOutlineColor; // linear
 uniform vec3 uOutlineMix;   // x: base color share, y: times base, z: shaded
@@ -535,7 +535,7 @@ uniform mat4 uSunViewProj;  // as in the vertex shader
 uniform float uNormalOffset;
 uniform float uAgain;       // > 0: stencil-hidden redraw opacity (MaskOut_Blend)
 uniform int uMode;      // 0 lit, 1 unlit, 2 sky
-// the game's own lighting (HYPR3D_lighting)
+// the game's own lighting (HYPRWALK_lighting)
 uniform int uBaked;
 uniform sampler2D uIrradianceTex;  // RGB9E5
 uniform sampler2D uDirectionalTex; // xy direction (tangent space), z directionality, a specular AO
@@ -555,7 +555,7 @@ uniform vec4 uFogB;                // height: offset, scale, exponent; lod bias
 uniform vec2 uFogSpace;            // 3D skybox units: distance scale, height offset
 uniform vec4 uCurveA;              // tone curve: shoulder, linear strength, linear angle, toe strength
 uniform vec4 uCurveB;              // toe numerator, toe denominator, white point, 1 / curve(white point)
-#ifdef H3D_DUAL
+#ifdef HYPRWALK_DUAL
 // dual-source blending (EXT_blend_func_extended): fragKeep = background kept per channel
 layout(location = 0, index = 0) out vec4 fragColor;
 layout(location = 0, index = 1) out vec4 fragKeep;
@@ -962,7 +962,7 @@ void shade() {
                 vec3 unlit = srgbEncode(gameCurve(gameFog(own, vPos, fogged) * uExposure));
                 vec3 lit = srgbEncode(gameCurve(gameFog(own + glint * specAO, vPos, fogged) * uExposure));
                 vec3 g = clamp((lit - unlit) / max(1.0 - unlit, 1e-4), 0.0, 1.0);
-#ifdef H3D_DUAL
+#ifdef HYPRWALK_DUAL
                 fragColor = vec4(g + (1.0 - g) * pane, cover);
                 fragKeep = vec4((1.0 - g) * (1.0 - cover), 1.0 - cover);
 #else
@@ -978,7 +978,7 @@ void shade() {
         bool toon = uToon != 0 && uOutline == 0, cap = uMatcap != 0 && uOutline == 0;
         vec3 here = vec3(0.0), full = vec3(0.0);
         if (toon || cap) {
-            // as above with hypr3d's own light: sun, sky, panels, bounce
+            // as above with hyprwalk's own light: sun, sky, panels, bounce
             float sunVis = toon ? toonShadow() : sunShadow(vSun), ndl = max(dot(N, uSunDir), 0.0);
             vec3 around = ambientLight(N) * local * mix(0.45, 1.0, vAO.y) + panelLights(vPos, N) * local + SUN_COLOR * (vAO.z * 0.8 * occ);
             vec3 alb = toon ? toonAlbedo(base.rgb, uv, N, sunVis) : base.rgb;

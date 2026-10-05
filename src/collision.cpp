@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <numeric>
 
-namespace h3d {
+namespace hyprwalk {
 
     namespace {
         // separating axis test between a triangle and a box (center c, half size h)

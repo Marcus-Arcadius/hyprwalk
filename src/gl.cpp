@@ -12,7 +12,7 @@
 #define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
 #endif
 
-namespace h3d::gl {
+namespace hyprwalk::gl {
 
     static GLuint compile(const char* name, GLenum type, const std::string& src) {
         GLuint      s   = glCreateShader(type);

@@ -49,7 +49,7 @@ for name, (start, way, middles, side, down) in CHAINS.items():
                                       'radius': 0.02})
     settings['springs'].append({'name': name, 'bones': [name + '.1'], 'stiffness': 0.1, 'drag': 0.4, 'gravity': 1.0,
                                 'gravityDir': list(down), 'radius': [0.04, 0.05], 'colliders': [name] if middles else []})
-json.dump(settings, open(D + '/discs.hypr3d.json', 'w'), indent=1)
+json.dump(settings, open(D + '/discs.hyprwalk.json', 'w'), indent=1)
 json.dump({name: c[3] for name, c in CHAINS.items()}, open(D + '/discs.design.json', 'w'))
 EOF
 "$SHOT" --size 64x64 --avatar "$DIR/discs.gltf" --springdump "$DIR/discs.dump" --frames 180 > "$DIR/discs.log" 2>&1 ||

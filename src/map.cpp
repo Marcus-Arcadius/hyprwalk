@@ -22,7 +22,7 @@
 // Map loading (glTF 2.0), flattened into world space with one draw call per material. The collision BVH built from the
 // same triangles also bakes AO and finds a spawn point and desktop wall when the map doesn't mark them.
 
-namespace h3d {
+namespace hyprwalk {
 
     namespace {
         using gltf::check;
@@ -43,6 +43,14 @@ namespace h3d {
             if (const auto dot = b.find('.'); dot != std::string::npos)
                 b.resize(dot);
             return b;
+        }
+
+        // a node's name in lower case; maps exported before the rename have hypr3d_* markers
+        std::string markerName(const char* name) {
+            std::string n = lower(name ? name : "");
+            if (n.starts_with("hypr3d_"))
+                n.replace(0, 7, "hyprwalk_");
+            return n;
         }
 
         // per-surface rules by name: converted game maps keep their tool textures (clips, triggers, sky shell)
@@ -118,7 +126,7 @@ namespace h3d {
             // anchors found in the scene
             std::optional<V3>                         spawnNode, desktopNode;
             V3                                        spawnForward{0, 0, -1}, desktopNormal{0, 0, 1};
-            bool                                      spawnNamed = false; // hypr3d_spawn rather than a game's player start
+            bool                                      spawnNamed = false; // hyprwalk_spawn rather than a game's player start
             std::optional<V3>                         sunNode;            // KHR_lights_punctual sun, direction towards it
 
             void materials() {
@@ -163,10 +171,10 @@ namespace h3d {
                                 aCol = at.data;
                             break;
                         case cgltf_attribute_type_custom:
-                            // how much of the material's second layer shows (HYPR3D_materials_blend)
+                            // how much of the material's second layer shows (HYPRWALK_materials_blend)
                             if (at.name && !std::strcmp(at.name, "_BLEND"))
                                 aBlend = at.data;
-                            // lightmap uvs (HYPR3D_lighting)
+                            // lightmap uvs (HYPRWALK_lighting)
                             if (at.name && !std::strcmp(at.name, "_LIGHTMAP_UV"))
                                 aLight = at.data;
                             break;
@@ -395,16 +403,16 @@ namespace h3d {
                     backdropTris += tris.size() / 3;
             }
 
-            // backdrop: under a hypr3d_backdrop node
+            // backdrop: under a hyprwalk_backdrop node
             void node(const cgltf_node* nd, bool backdrop, const M4& xf) {
                 const std::string name = nd->name ? nd->name : "";
-                const std::string ln   = lower(name);
+                const std::string ln   = markerName(nd->name);
 
-                if (ln.starts_with("hypr3d_spawn")) {
+                if (ln.starts_with("hyprwalk_spawn")) {
                     spawnNode    = xf.point({0, 0, 0});
                     spawnForward = xf.dir({0, 0, -1});
                     spawnNamed   = true;
-                } else if (ln.starts_with("hypr3d_desktop")) {
+                } else if (ln.starts_with("hyprwalk_desktop")) {
                     desktopNode   = xf.point({0, 0, 0});
                     desktopNormal = xf.dir({0, 0, 1});
                 } else if (!spawnNamed && !spawnNode && ln.starts_with("info_player_"))
@@ -740,7 +748,7 @@ namespace h3d {
             return world.model && world.model->lighting.present ? &world.model->lighting : nullptr;
         }
 
-        // max exposure hypr3d's own lighting gives a dark place
+        // max exposure hyprwalk's own lighting gives a dark place
         constexpr float OWN_MAX_EXPOSURE = 1.6f;
     }
 
@@ -788,7 +796,7 @@ namespace h3d {
     float exposureFor(const SWorld& world, const float* samples, const V3& view) {
         const SMapLighting* L = bakedLighting(world);
         if (!L) {
-            // hypr3d's own lighting: average all directions, as eyes adapt to a place
+            // hyprwalk's own lighting: average all directions, as eyes adapt to a place
             float sum = 0;
             for (int i = 0; i < EXPOSURE_SAMPLES; ++i)
                 sum += samples[i];
@@ -860,7 +868,7 @@ namespace h3d {
 
         SBuild b{req, cancel, data, model, log};
         b.materials();
-        // HYPR3D_lighting (cs2map) comes before the geometry, which needs it for lightmap uvs and probe coordinates
+        // HYPRWALK_lighting (cs2map) comes before the geometry, which needs it for lightmap uvs and probe coordinates
         const bool lit = gltf::readLighting(data, abs.parent_path().string(), model.lighting, cancel, log);
         // skyImage: file image index -> model image index (model images are only the materials')
         auto& L    = model.lighting;
@@ -897,7 +905,7 @@ namespace h3d {
             M4 local;
             std::memcpy(local.m, lm, sizeof(lm));
             const M4 xf = parent * local;
-            if (nd->name && lower(nd->name).starts_with("hypr3d_backdrop")) {
+            if (markerName(nd->name).starts_with("hyprwalk_backdrop")) {
                 backdrop                = true;
                 model.backdropTransform = xf;
             }
@@ -908,7 +916,7 @@ namespace h3d {
         if (b.skippedDraco)
             log.push_back(std::format("skipped {} draco compressed meshes (not supported)", b.skippedDraco));
         if (b.backdropTris)
-            log.push_back(std::format("backdrop (hypr3d_backdrop): {} triangles", b.backdropTris));
+            log.push_back(std::format("backdrop (hyprwalk_backdrop): {} triangles", b.backdropTris));
         if (model.vertices.empty() && b.colTris.empty()) {
             res.error = std::format("{} has no triangles", req.path);
             return res;
@@ -924,7 +932,7 @@ namespace h3d {
         if (scale <= 0.f) {
             scale = extent > 600.f ? 0.0254f : 1.f;
             if (scale != 1.f)
-                log.push_back(std::format("the map is {:.0f} units across, taking them as inches (scale {}); set plugin:hypr3d:map_scale to override", extent, scale));
+                log.push_back(std::format("the map is {:.0f} units across, taking them as inches (scale {}); set plugin:hyprwalk:map_scale to override", extent, scale));
         }
         if (scale != 1.f) {
             for (auto& v : model.vertices)
@@ -1093,7 +1101,7 @@ namespace h3d {
                 d.normal           = -fwd;
                 d.height           = req.desktopHeight;
                 desktop            = d;
-                log.push_back("no free wall for the desktop found, it floats in front of the start; aim at a wall and run `hyprctl hypr3d desktop here`");
+                log.push_back("no free wall for the desktop found, it floats in front of the start; aim at a wall and run `hyprctl hyprwalk desktop here`");
             }
         }
         if (!yawKnown) {
@@ -1127,7 +1135,7 @@ namespace h3d {
             h ^= c;
             h *= 16777619u;
         }
-        return std::format("{}/hypr3d/maps/{}-{:08x}.conf", dir, std::filesystem::path(mapPath).stem().string(), h);
+        return std::format("{}/hyprwalk/maps/{}-{:08x}.conf", dir, std::filesystem::path(mapPath).stem().string(), h);
     }
 
     bool saveMapState(const std::string& mapPath, const SWorld& world, float scale) {
@@ -1138,7 +1146,7 @@ namespace h3d {
         if (!f)
             return false;
         const auto& d = world.desktop;
-        f << std::format("# hypr3d anchors for {}\n", mapPath);
+        f << std::format("# hyprwalk anchors for {}\n", mapPath);
         f << std::format("scale {}\n", scale);
         f << std::format("spawn {} {} {} {}\n", world.spawn.x, world.spawn.y, world.spawn.z, world.spawnYaw);
         f << std::format("desktop {} {} {} {} {} {} {}\n", d.center.x, d.center.y, d.center.z, d.normal.x, d.normal.y, d.normal.z, d.height);

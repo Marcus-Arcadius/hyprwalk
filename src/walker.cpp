@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace h3d {
+namespace hyprwalk {
 
     void SWalker::moveAxis(int axis, float d, bool& blocked, float height, bool fly) {
         blocked = false;

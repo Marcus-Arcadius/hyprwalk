@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cs2mat_check.sh: CS2 material details as tools/cs2map.py writes them (HYPR3D_materials_source2's tintMask, decal,
+# cs2mat_check.sh: CS2 material details as tools/cs2map.py writes them (HYPRWALK_materials_source2's tintMask, decal,
 # texture2, blendMode "add" and fog false), drawn by the harness on cs2mats.py's panels: tint masks, decals on the
 # second uv set, unlit and additive blends, vertex paint, mod2x and fog (cs2mats.py has the layout).
 #

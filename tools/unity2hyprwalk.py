@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""unity2hypr3d: turn a VRChat avatar into a GLB plus the settings file hypr3d reads, without Unity.
+"""unity2hyprwalk: turn a VRChat avatar into a GLB plus the settings file hyprwalk reads, without Unity.
 
-    blender -b --factory-startup -P tools/unity2hypr3d.py -- INPUT... [options]
-    python3 tools/unity2hypr3d.py INPUT... [options]     (runs itself again inside Blender)
+    blender -b --factory-startup -P tools/unity2hyprwalk.py -- INPUT... [options]
+    python3 tools/unity2hyprwalk.py INPUT... [options]     (runs itself again inside Blender)
 
 INPUT is a .unitypackage, a .zip, a Unity project (or its Assets folder), or a .prefab/.unity
 file inside a project. Several inputs are merged, e.g. an avatar package and its outfit package.
 
 options:
   -o OUT.glb         where to write (default: <avatar name>.glb here); the settings go next to
-                     it as OUT.hypr3d.json
+                     it as OUT.hyprwalk.json
   --avatar NAME      which avatar when the input holds several (see --list)
   --list             list the avatars found and stop (does not need Blender)
   --max-texture N    shrink textures bigger than N pixels (default 2048)
@@ -42,13 +42,13 @@ WARNINGS = []
 
 
 def log(*a):
-    print('unity2hypr3d:', *a, flush=True)
+    print('unity2hyprwalk:', *a, flush=True)
 
 
 def warn(msg):
     if msg not in WARNINGS:
         WARNINGS.append(msg)
-        print('unity2hypr3d: warning:', msg, flush=True)
+        print('unity2hyprwalk: warning:', msg, flush=True)
 
 
 class Fail(Exception):
@@ -2957,7 +2957,7 @@ def humanoid_map(db, root, gos, quiet=False):
 
 
 class Analysis:
-    """the avatar's descriptor, FX controller and menu, read into what hypr3d has"""
+    """the avatar's descriptor, FX controller and menu, read into what hyprwalk has"""
 
     def __init__(self, db, av):
         self.db, self.av = db, av
@@ -3406,7 +3406,7 @@ class Analysis:
         if not exprs:
             return None, []
         if neg:
-            warn('some gesture faces turn shape keys down, which hypr3d does not do; only what they turn up is kept')
+            warn('some gesture faces turn shape keys down, which hyprwalk does not do; only what they turn up is kept')
         shape_names = {norm_name(n) for r in av.renderers if r.cls == 137 for n in av.shape_names(r)}
         used, presets, out = set(), set(), []
         name_of = {}
@@ -3516,7 +3516,7 @@ class Analysis:
         return out
 
     def consonants(self):
-        """consonant visemes: {'pp': {(renderer, shape key): weight}, ...}; hypr3d's lip sync uses pp, ff, ss, ch"""
+        """consonant visemes: {'pp': {(renderer, shape key): weight}, ...}; hyprwalk's lip sync uses pp, ff, ss, ch"""
         if self.vrcf is not None and self.vrcf.consonants:  # VRCFury's Visemes, in place of the descriptor's
             return dict(self.vrcf.consonants)
         d, av = self.av.desc, self.av
@@ -3634,7 +3634,7 @@ TEX_KEYS = ('_MainTex', '_BaseMap', '_BaseColorMap', '_MainTexture', '_BaseTextu
 COLOR_KEYS = ('_Color', '_BaseColor', '_MainColor', '_TintColor', '_Tint')
 BLENDER_IMAGES = {'.png', '.jpg', '.jpeg', '.tga', '.bmp', '.tif', '.tiff', '.exr', '.hdr', '.psd',
                   '.dds', '.webp'}
-# animatable material properties hypr3d carries: colour, emission colour, texture tiling and offset, cutoff
+# animatable material properties hyprwalk carries: colour, emission colour, texture tiling and offset, cutoff
 MP_NAMES = frozenset(['%s.%s' % (c, ch) for c in COLOR_KEYS + ('_EmissionColor',) for ch in 'rgba'] +
                      ['%s_ST.%s' % (t, ch) for t in TEX_KEYS + ('_EmissionMap',) for ch in 'xyzw'] + ['_Cutoff'])
 
@@ -3704,7 +3704,7 @@ LILTOON_OUTLINE = {
 }
 UNITY_QUEUES = {'background': 1000, 'geometry': 2000, 'alphatest': 2450, 'geometrylast': 2500, 'transparent': 3000,
                 'overlay': 4000}
-MODE_QUEUE = {'OPAQUE': 2000, 'MASK': 2450, 'BLEND': 3000}  # hypr3d's default queue per alpha mode
+MODE_QUEUE = {'OPAQUE': 2000, 'MASK': 2450, 'BLEND': 3000}  # hyprwalk's default queue per alpha mode
 STENCIL_COMPS = ('always', 'never', 'less', 'equal', 'lequal', 'greater', 'notequal', 'gequal', 'always')  # by value
 STENCIL_OPS = ('keep', 'zero', 'replace', 'incrsat', 'decrsat', 'invert', 'incrwrap', 'decrwrap')
 STENCIL_WORDS = {'lessequal': 'lequal', 'greaterequal': 'gequal', 'disabled': 'always', 'incr': 'incrsat',
@@ -3728,7 +3728,7 @@ class MatInfo:
         self.emit_tex = None
         self.emit_xf = ((1.0, 1.0), (0.0, 0.0))
         self.invert = None  # alpha = 1 - source alpha * this (_AL_InvMaskVal)
-        # glTF extras for hypr3d (patch_materials); queue only when it differs from the alpha mode's
+        # glTF extras for hyprwalk (patch_materials); queue only when it differs from the alpha mode's
         self.queue = -1
         self.stencil = None  # {ref, read, write, comp, pass, fail, zfail[, again]}
         self.outline = None  # from outline(); widths in m, colours linear
@@ -4178,7 +4178,7 @@ class Materials:
             # UnlitWF's light has no N·L in it (calcLightColorVertex), so without its toon shade it is flat
             shade = flat
             if '_TS_ENABLE' in kw or not kw and fl.get('_TS_Enable', 0.0) > 0.5:
-                # colour times 1st / base, _TS_Power of the way; calcShadowPower weakens it to about 3/4 under hypr3d's
+                # colour times 1st / base, _TS_Power of the way; calcShadowPower weakens it to about 3/4 under hyprwalk's
                 # sun and sky, unless _TS_FixContrast
                 fix = '_TS_FIXC_ENABLE' in kw or fl.get('_TS_FixContrast', 0.0) > 0.5
                 p = clamp(fl.get('_TS_Power', 1.0), 0.0, 2.0) * (1.0 if fix else 0.75)
@@ -5270,7 +5270,7 @@ class ModularAvatar:
 
 # ---------------------------------------------------------------- VRCFury
 #
-# VRCFury's build-time features as far as hypr3d shows them, applied after Modular Avatar. Each component holds one
+# VRCFury's build-time features as far as hyprwalk shows them, applied after Modular Avatar. Each component holds one
 # feature as a [SerializeReference] ("content", or the older "config.features" list) in its "references" block. Written
 # from VRCFury's format and behaviour; contains none of its code.
 
@@ -5279,7 +5279,7 @@ VRCF_DONE_ORDER = ('ArmatureLink', 'Toggle', 'FullController', 'BlendShapeLink',
                    'DeleteDuringUpload', 'GestureDriver', 'SenkyGestureDriver', 'Blinking', 'Visemes', 'Puppet',
                    'MoveMenuItem', 'ReorderMenuItem')
 VRCF_DONE = set(VRCF_DONE_ORDER)
-# features with no visible effect in hypr3d: skipped silently
+# features with no visible effect in hyprwalk: skipped silently
 VRCF_QUIET = {
     # how VRChat builds, draws and syncs the avatar
     'AnchorOverrideFix', 'AnchorOverrideFix2', 'BoundingBoxFix', 'BoundingBoxFix2', 'BlendshapeOptimizer',
@@ -5287,7 +5287,7 @@ VRCF_QUIET = {
     'UnlimitedParameters', 'DescriptorDebug', 'Gizmo', 'SetIcon', 'OverrideMenuSettings', 'MmdCompatibility',
     # VRChat's first person view and eye tracking
     'CrossEyeFix', 'CrossEyeFix2', 'ShowInFirstPerson', 'HeadChopHead',
-    # scale menu (hypr3d: avatar_height), toes, talking
+    # scale menu (hyprwalk: avatar_height), toes, talking
     'AvatarScale', 'AvatarScale2', 'Toes', 'Talking',
     # menu PIN lock (toggles act unlocked)
     'SecurityLock', 'SecurityRestricted',
@@ -5300,11 +5300,11 @@ VRCF_QUIET = {
 SENKY = ((7, 'Happy', ('eyesHappy', 'mouthHappy')), (6, 'Sad', ('eyesSad', 'mouthSad', 'earsBack')),
          (5, 'Angry', ('eyesAngry', 'mouthAngry', 'earsBack')), (4, 'Tongue', ('mouthBlep',)))
 # why the rest are not converted, where that is not obvious
-VRCF_WHY = {'SPS': 'hypr3d has no contacts or haptics', 'TPSIntegration': 'hypr3d has no contacts or haptics',
-            'TPSIntegration2': 'hypr3d has no contacts or haptics', 'OGBIntegration': 'hypr3d has no contacts or haptics',
-            'OGBIntegration2': 'hypr3d has no contacts or haptics', 'ZawooIntegration': 'hypr3d has no contacts',
-            'RemoveHandGestures': 'hypr3d curls the fingers for gestures itself',
-            'RemoveHandGestures2': 'hypr3d curls the fingers for gestures itself',
+VRCF_WHY = {'SPS': 'hyprwalk has no contacts or haptics', 'TPSIntegration': 'hyprwalk has no contacts or haptics',
+            'TPSIntegration2': 'hyprwalk has no contacts or haptics', 'OGBIntegration': 'hyprwalk has no contacts or haptics',
+            'OGBIntegration2': 'hyprwalk has no contacts or haptics', 'ZawooIntegration': 'hyprwalk has no contacts',
+            'RemoveHandGestures': 'hyprwalk curls the fingers for gestures itself',
+            'RemoveHandGestures2': 'hyprwalk curls the fingers for gestures itself',
             'ConstraintRetarget': 'constraints are not converted'}
 # VRChat's own animator parameters, which a Full Controller never renames
 VRC_PARAMS = set(('IsLocal Viseme Voice GestureLeft GestureRight GestureLeftWeight GestureRightWeight AngularY VelocityX '
@@ -5725,7 +5725,7 @@ class VRCFury:
         self.faces()
         self.move_menus()
         if any(f['@class'] == 'RemoveBlinking' for c, f in self.feats) and self.blink is None:
-            warn('VRCFury: Remove Blinking: hypr3d blinks with the shape keys it finds anyway')
+            warn('VRCFury: Remove Blinking: hyprwalk blinks with the shape keys it finds anyway')
         for k, n in sorted(others.items()):
             why = VRCF_WHY.get(k)
             warn('%d VRCFury %s feature(s): not converted%s' % (n, re.sub(r'(?<=[a-z0-9])(?=[A-Z])', ' ', k),
@@ -5826,7 +5826,7 @@ class VRCFury:
         return out
 
     def material_properties(self, a, count=True):
-        """a Material Property action's values, of the properties hypr3d carries"""
+        """a Material Property action's values, of the properties hyprwalk carries"""
         av = self.av
         name = _str(a.get('propertyName')).strip()
         if not name or '.' in name:
@@ -5852,7 +5852,7 @@ class VRCFury:
         for n, v in vals.items():
             if n not in MP_NAMES:
                 if count:
-                    self.miss('material propert%s hypr3d does not carry (%s)' % ('y' if len(vals) == 1 else 'ies', name))
+                    self.miss('material propert%s hyprwalk does not carry (%s)' % ('y' if len(vals) == 1 else 'ies', name))
                 break
             for r in rs:
                 out[('mp', r, n)] = v
@@ -6316,7 +6316,7 @@ class VRCFury:
                     continue
                 if inum(e.get('type'), 5) != 5:
                     # non-FX layers: Action clips are emotes (action_clips), Gesture ones hand poses
-                    # (Analysis.hand_poses); hypr3d does the rest
+                    # (Analysis.hand_poses); hyprwalk does the rest
                     continue
                 if self.db.get(p[0]) is None:
                     warn('%s: the controller its Full Controller merges is not in the input' % go_name(c.go))
@@ -7694,7 +7694,7 @@ def write_sound(name, sound, fn):
         warn('emote "%s": its sound %s cannot be read (%s), so it is left out' % (name, sound[0], e))
         return None
     if not (head.startswith(b'OggS') and b'\x01vorbis' in head):
-        warn('emote "%s": its sound %s is not Ogg Vorbis, all hypr3d plays, so it is left out' % (name, sound[0]))
+        warn('emote "%s": its sound %s is not Ogg Vorbis, all hyprwalk plays, so it is left out' % (name, sound[0]))
         return None
     shutil.copyfile(sound[1], fn)
     return os.path.basename(fn)
@@ -7799,7 +7799,7 @@ def write_vrma(path, axes, names, clip, shapes, speed=1.0):
                                                             for b, i in sorted(axes.human.items())}}}
     if expressions:
         ext['expressions'] = expressions
-    js = {'asset': {'version': '2.0', 'generator': 'unity2hypr3d'}, 'scene': 0, 'scenes': [{'nodes': roots}],
+    js = {'asset': {'version': '2.0', 'generator': 'unity2hyprwalk'}, 'scene': 0, 'scenes': [{'nodes': roots}],
           'nodes': nodes, 'animations': [{'name': clip.name, 'channels': channels, 'samplers': samplers}],
           'accessors': accessors, 'bufferViews': views, 'buffers': [{'byteLength': len(buf)}],
           'extensionsUsed': ['VRMC_vrm_animation'], 'extensions': {'VRMC_vrm_animation': ext}}
@@ -8717,7 +8717,7 @@ def png_bytes(im):
 
 
 def material_extras(js, binc, b):
-    """writes material extras hypr3d_queue, _stencil, _outline, _back, _light, _toon, _matcap and their PNGs"""
+    """writes material extras hyprwalk_queue, _stencil, _outline, _back, _light, _toon, _matcap and their PNGs"""
     out = bytearray(binc)
     made = {}  # image file -> texture index
     stems = {}  # unique exporter image name -> image index
@@ -8775,9 +8775,9 @@ def material_extras(js, binc, b):
             continue
         ex = {}
         if mi.queue >= 0 and mi.queue != MODE_QUEUE[mi.mode]:
-            ex['hypr3d_queue'] = mi.queue
+            ex['hyprwalk_queue'] = mi.queue
         if mi.stencil:
-            ex['hypr3d_stencil'] = mi.stencil
+            ex['hyprwalk_stencil'] = mi.stencil
         if mi.outline:
             o = {k: v for k, v in mi.outline.items() if v is not None and k not in ('mask', 'tex')}
             mk = mi.outline.get('mask')
@@ -8799,7 +8799,7 @@ def material_extras(js, binc, b):
                         o['texture']['transform'] = x
                     if blend is not None:
                         o['texture']['blend'] = blend
-            ex['hypr3d_outline'] = o
+            ex['hyprwalk_outline'] = o
         if mi.back:
             bk = {'color': list(mi.back['color'])}
             f = mi.back['tex']
@@ -8813,9 +8813,9 @@ def material_extras(js, binc, b):
                 x = xform(mi.back['xf'])
                 if x:
                     bk['texture']['transform'] = x
-            ex['hypr3d_back'] = bk
+            ex['hyprwalk_back'] = bk
         if mi.light:
-            ex['hypr3d_light'] = {'min': mi.light[0], 'max': mi.light[1], 'chroma': mi.light[2]}
+            ex['hyprwalk_light'] = {'min': mi.light[0], 'max': mi.light[1], 'chroma': mi.light[2]}
         if mi.toon:
             tn = {k: v for k, v in mi.toon.items() if k != 'tex'}
             f = mi.toon.get('tex')
@@ -8823,11 +8823,11 @@ def material_extras(js, binc, b):
                 texture(f) if f else None
             if t is not None:
                 tn['texture'] = {'index': t}
-            ex['hypr3d_toon'] = tn
+            ex['hyprwalk_toon'] = tn
         if mi.matcap:
             t = texture(mi.matcap['tex'], 512)
             if t is not None:
-                ex['hypr3d_matcap'] = dict({k: v for k, v in mi.matcap.items() if k != 'tex'}, index=t)
+                ex['hyprwalk_matcap'] = dict({k: v for k, v in mi.matcap.items() if k != 'tex'}, index=t)
         if ex:
             m.setdefault('extras', {}).update(ex)
             said.append('%s (%s)' % (m.get('name'), ', '.join(k[7:] for k in ex)))
@@ -8883,7 +8883,7 @@ def texture_wrap(db, guid):
 
 def cut_meshes(js, binc, b, an):
     """MA Mesh Cutter / Shape Changer deletes (ReactiveObjectPass): always-on cuts are removed, switchable ones become
-    "hypr3d_part" primitives the settings hide while cut (MA's NaNimation); returns (bin, [(renderer, {cuts}, part)])"""
+    "hyprwalk_part" primitives the settings hide while cut (MA's NaNimation); returns (bin, [(renderer, {cuts}, part)])"""
     cutters = an.mat.cutters if an.mat is not None else {}
     states = [an.cuts0] + [t['cuts'] for t in an.kept] + [k['cuts'] for s in an.sliders for k in s['keys']]
     ever = frozenset().union(*states)
@@ -9096,7 +9096,7 @@ def cut_meshes(js, binc, b, an):
                     codes_used[cd] = nm
                     pieces.append((r, frozenset(ks), nm))
                 x = subset(prim, tris[sel])
-                x.setdefault('extras', {})['hypr3d_part'] = codes_used[cd]
+                x.setdefault('extras', {})['hyprwalk_part'] = codes_used[cd]
                 prims.append(x)
         if not prims:  # all cut: a degenerate triangle keeps it a mesh
             prims.append(subset(mesh['primitives'][0], np.zeros((1, 3), np.int64)))
@@ -9144,7 +9144,7 @@ def _v(v, n=5):
 
 
 class Settings:
-    """<avatar>.hypr3d.json: what the GLB cannot say"""
+    """<avatar>.hyprwalk.json: what the GLB cannot say"""
 
     def __init__(self, build, an, js, human, kept, base, ma):
         self.b, self.an, self.av, self.ma = build, an, build.av, ma
@@ -9697,7 +9697,7 @@ class Settings:
             if imm > 0.9:
                 y['immobile'] = _r(imm, 3)
             if 'pull' in d and imm > 0:
-                # VRChat's All Motion: damps the parent's walk and dance motion too (hypr3d's "immobile": travel only)
+                # VRChat's All Motion: damps the parent's walk and dance motion too (hyprwalk's "immobile": travel only)
                 y['parentImmobile'] = _r(imm, 3)
             y['colliders'] = list(dict.fromkeys(cl))
             want |= set(y['colliders'])
@@ -9925,7 +9925,7 @@ def convert(db, found, opts, outfits=(), emotes=()):
     binc = material_extras(js, binc, b)
     binc, an.pieces = cut_meshes(js, binc, b, an)
     binc = ma.apply(js, binc)
-    info = {'tool': 'unity2hypr3d', 'input': [os.path.basename(p.rstrip('/')) for p in opts.inputs],
+    info = {'tool': 'unity2hyprwalk', 'input': [os.path.basename(p.rstrip('/')) for p in opts.inputs],
             'prefab': found.asset.path, 'avatar': av.name, 'date': time.strftime('%Y-%m-%d %H:%M:%S')}
     st = Settings(b, an, js, human, kept, base, ma).build(info)
     emotes = write_emotes(db, av, human, ma, acts, out) if acts else []
@@ -9939,7 +9939,7 @@ def convert(db, found, opts, outfits=(), emotes=()):
         info['skipped'] = ['%s: %s' % x for x in an.skipped]
     info['warnings'] = list(WARNINGS)
     write_glb(out, js, binc)
-    sp = os.path.splitext(out)[0] + '.hypr3d.json'
+    sp = os.path.splitext(out)[0] + '.hyprwalk.json'
     with open(sp + '.part', 'w', encoding='utf-8') as f:
         json.dump(st, f, indent=1, ensure_ascii=False)
         f.write('\n')
@@ -9959,13 +9959,13 @@ def convert(db, found, opts, outfits=(), emotes=()):
 def run_blender(argv):
     exe = os.environ.get('BLENDER') or shutil.which('blender')
     if not exe:
-        print('unity2hypr3d: error: this needs Blender 4.2 or newer: put blender on PATH or set BLENDER', file=sys.stderr)
+        print('unity2hyprwalk: error: this needs Blender 4.2 or newer: put blender on PATH or set BLENDER', file=sys.stderr)
         return 2
     cmd = [exe, '-b', '--factory-startup', '--python-exit-code', '1', '-P', os.path.abspath(__file__), '--'] + argv
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace')
     tail = []
     for line in p.stdout:
-        if line.startswith('unity2hypr3d:'):
+        if line.startswith('unity2hyprwalk:'):
             sys.stdout.write(line)
             sys.stdout.flush()
         else:
@@ -9979,7 +9979,7 @@ def run_blender(argv):
 def main():
     argv = sys.argv[sys.argv.index('--') + 1:] if bpy is not None and '--' in sys.argv else (
         [] if bpy is not None else sys.argv[1:])
-    ap = argparse.ArgumentParser(prog='unity2hypr3d', description=__doc__.split('\n\n')[0],
+    ap = argparse.ArgumentParser(prog='unity2hyprwalk', description=__doc__.split('\n\n')[0],
                                  epilog=__doc__.split('\n\n', 1)[1], formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('inputs', nargs='+', metavar='INPUT')
     ap.add_argument('-o', '--output', metavar='OUT.glb')
@@ -9993,7 +9993,7 @@ def main():
     opts = ap.parse_args(argv)
     if bpy is None and not opts.list:
         return run_blender(argv)
-    work = os.path.abspath(opts.keep) if opts.keep else tempfile.mkdtemp(prefix='unity2hypr3d-')
+    work = os.path.abspath(opts.keep) if opts.keep else tempfile.mkdtemp(prefix='unity2hyprwalk-')
     os.makedirs(work, exist_ok=True)
     try:
         db = DB(work)
@@ -10021,7 +10021,7 @@ def main():
         emotes = [e for x in opts.emote for e in find_emotes(db, x)]
         return convert(db, found, opts, outfits, emotes)
     except Fail as e:
-        print('unity2hypr3d: error: %s' % e, flush=True)
+        print('unity2hyprwalk: error: %s' % e, flush=True)
         return 1
     finally:
         if not opts.keep:

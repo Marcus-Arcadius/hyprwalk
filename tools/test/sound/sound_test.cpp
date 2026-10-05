@@ -17,7 +17,7 @@
 #include <string>
 #include <thread>
 
-using namespace h3d;
+using namespace hyprwalk;
 
 namespace {
     using Clock = std::chrono::steady_clock;

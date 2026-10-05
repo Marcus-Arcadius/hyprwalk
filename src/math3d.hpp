@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace h3d {
+namespace hyprwalk {
 
     struct V3 {
         float x = 0, y = 0, z = 0;

@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace h3d {
+namespace hyprwalk {
 
     // a picture for an item instead of its emoji (an app's icon)
     struct SPicture {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds hypr3d.so against the exact Hyprland you are running: a plugin needs that build's own headers and compiler. On
+# Builds hyprwalk.so against the exact Hyprland you are running: a plugin needs that build's own headers and compiler. On
 # NixOS it takes the `dev` output of the derivation that built the running binary and runs make in that derivation's
 # build shell; elsewhere, the headers pkg-config finds (the distribution's Hyprland development package, or hyprpm's
 # from hyprpm update) and the system's compiler.
@@ -100,5 +100,5 @@ else
     build_system "$@"
 fi
 if [[ $# -eq 0 ]]; then
-    echo ":: built $(pwd)/hypr3d.so"
+    echo ":: built $(pwd)/hyprwalk.so"
 fi

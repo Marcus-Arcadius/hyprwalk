@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace h3d {
+namespace hyprwalk {
 
     enum eMaterial : uint8_t {
         MAT_SAND = 0,  // floor tiles

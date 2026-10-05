@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace h3d {
+namespace hyprwalk {
 
     // what the microphone is doing, to tell a muted or unlinked one from a quiet one
     struct SMicStatus {
@@ -33,7 +33,7 @@ namespace h3d {
         std::vector<std::pair<std::string, std::string>> sources;
     };
 
-    // The microphone via PipeWire for lip sync (the "hypr3d lip sync" stream): mono float samples wait for the main
+    // The microphone via PipeWire for lip sync (the "hyprwalk lip sync" stream): mono float samples wait for the main
     // thread in a quarter-second ring, and nothing is recorded or sent. Also watches the graph for its link and mute
     // state. Built without PipeWire, start() says so.
     class CMicrophone {

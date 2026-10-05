@@ -5,7 +5,7 @@
 #include <complex>
 #include <numbers>
 
-namespace h3d {
+namespace hyprwalk {
 
     namespace {
         constexpr float PI = std::numbers::pi_v<float>;

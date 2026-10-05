@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cs2map: export a Counter-Strike 2 map from your own install to a GLB hypr3d can walk around in.
+"""cs2map: export a Counter-Strike 2 map from your own install to a GLB hyprwalk can walk around in.
 
     python3 tools/cs2map.py MAP [options]
 
@@ -9,12 +9,12 @@ baked lighting (the sky and the HDR lightmaps need Blender). If Source 2 Viewer 
 cs2map gets the latest release, else builds the current source (needs git, and the .NET 10 SDK or nix).
 
 options:
-  -o OUT.glb            where to write (default ~/.local/share/hypr3d/maps/MAP.glb)
+  -o OUT.glb            where to write (default ~/.local/share/hyprwalk/maps/MAP.glb)
   --game DIR            the CS2 folder (".../Counter-Strike Global Offensive"), default: found through Steam
   --vrf PATH            Source2Viewer-CLI to use (default: $SOURCE2VIEWER_CLI, then PATH, then the newest in
-                        ~/.cache/hypr3d/source2viewer/*/, else the latest release, downloaded there)
-  --no-lighting         leave CS2's lighting out (hypr3d then lights the map itself)
-  --spawn WHERE         where hypr3d starts you: t or ct (a team's spawn, default t), or X,Y,Z,YAW in the map's
+                        ~/.cache/hyprwalk/source2viewer/*/, else the latest release, downloaded there)
+  --no-lighting         leave CS2's lighting out (hyprwalk then lights the map itself)
+  --spawn WHERE         where hyprwalk starts you: t or ct (a team's spawn, default t), or X,Y,Z,YAW in the map's
                         units and degrees (as Hammer and getpos show them)
   --desktop X,Y,Z,YAW   the middle of the desktop, on a wall, and the way it faces, likewise
   --no-skybox           leave the 3D skybox out
@@ -28,15 +28,15 @@ Maps are Valve's: this only reads your copy of the game, for your own use.
 import sys, os, re, io, json, math, struct, shutil, subprocess, tempfile, argparse, glob, zipfile, time, bisect
 import urllib.request
 
-EXT = 'HYPR3D_materials_blend'
-EXT_S2 = 'HYPR3D_materials_source2'
-EXT_LIGHT = 'HYPR3D_lighting'
+EXT = 'HYPRWALK_materials_blend'
+EXT_S2 = 'HYPRWALK_materials_source2'
+EXT_LIGHT = 'HYPRWALK_lighting'
 INCH = 0.0254
 REPO = 'https://github.com/ValveResourceFormat/ValveResourceFormat'
 RELEASES = 'https://api.github.com/repos/ValveResourceFormat/ValveResourceFormat/releases/latest'
 # what Source 2 Viewer logs when the game's shaders are newer than it knows
 VCS_ERROR = 'Only VCS file versions'
-# lightmaps hypr3d reads (CS2 lightmap format 8.2): irradiance, its dominant direction, baked shadows
+# lightmaps hyprwalk reads (CS2 lightmap format 8.2): irradiance, its dominant direction, baked shadows
 LIGHTMAPS = ('irradiance', 'directional_irradiance', 'direct_light_shadows')
 # glTF component type -> struct letter; accessor type -> component count
 COMPONENT = {5120: 'b', 5121: 'B', 5122: 'h', 5123: 'H', 5125: 'I', 5126: 'f'}
@@ -123,7 +123,7 @@ def column_major(m):
     return [float(m[r][c]) for c in range(4) for r in range(4)]
 
 
-# uv transforms as HYPR3D's extensions have them: mat2 columns, then the offset
+# uv transforms as HYPRWALK's extensions have them: mat2 columns, then the offset
 IDENTITY_XF = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
 
 
@@ -281,7 +281,7 @@ class VRF:
 
 
 def cache_dir():
-    return os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'hypr3d', 'source2viewer')
+    return os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'hyprwalk', 'source2viewer')
 
 
 def find_vrf(arg):
@@ -845,7 +845,7 @@ class Doc:
 
 
 def texture_refs(m):
-    """a material's {"index": n} texture references, including the HYPR3D extensions'"""
+    """a material's {"index": n} texture references, including the HYPRWALK extensions'"""
     for key in ('normalTexture', 'occlusionTexture', 'emissiveTexture'):
         if key in m:
             yield m[key]
@@ -869,7 +869,7 @@ def texture_refs(m):
 
 
 def image_refs(obj):
-    """the {"image": n} references in a JSON tree (HYPR3D_lighting's)"""
+    """the {"image": n} references in a JSON tree (HYPRWALK_lighting's)"""
     if isinstance(obj, dict):
         if isinstance(obj.get('image'), int):
             yield obj
@@ -900,7 +900,7 @@ class Export:
         if not os.path.isfile(self.vpk):
             raise Fail(f'no map {self.name} in {os.path.join(self.game, "csgo", "maps")} (see --list)')
         self.out = os.path.abspath(os.path.expanduser(args.output or os.path.join(
-            os.environ.get('XDG_DATA_HOME') or os.path.expanduser('~/.local/share'), 'hypr3d', 'maps', self.name + '.glb')))
+            os.environ.get('XDG_DATA_HOME') or os.path.expanduser('~/.local/share'), 'hyprwalk', 'maps', self.name + '.glb')))
         self.vrf = find_vrf(args.vrf)
         self.stuck = False  # no Source 2 Viewer can read the game's shaders
         self.skybox = None  # 3D skybox if any: vpk, path, ents, placement
@@ -1000,7 +1000,7 @@ class Export:
         self.fix_decals(doc)
         tables = [(None,) + self.map_tints(self.vpk, 'map')]
         if self.skybox:
-            backdrop = next(r for r in doc.roots if doc.j['nodes'][r].get('name') == 'hypr3d_backdrop')
+            backdrop = next(r for r in doc.roots if doc.j['nodes'][r].get('name') == 'hyprwalk_backdrop')
             tables.insert(0, (backdrop,) + self.map_tints(self.skybox['vpk'], 'skybox'))
         changed, unsure = self.fix_tints(doc, tables)
         if changed:
@@ -1016,7 +1016,7 @@ class Export:
 
         for m in doc.list('materials'):
             m.pop('extras', None)
-        doc.j['asset']['generator'] = f'{doc.j["asset"].get("generator", "Source 2 Viewer")}, cs2map (hypr3d)'
+        doc.j['asset']['generator'] = f'{doc.j["asset"].get("generator", "Source 2 Viewer")}, cs2map (hyprwalk)'
         doc.j['asset']['copyright'] = 'Valve Corporation; exported from a local copy of Counter-Strike 2 for personal use'
         for ext in (EXT, EXT_S2):
             if any(ext in m.get('extensions', {}) for m in doc.list('materials')):
@@ -1030,8 +1030,8 @@ class Export:
         size = os.path.getsize(self.out)
         log(f'wrote {self.out}: {len(out["meshes"])} meshes, {len(out["materials"])} materials, {len(out["images"])} textures, '
             f'{size / 1e6:.0f} MB, in {time.time() - t0:.0f} s')
-        log(f'load it with: hyprctl hypr3d map {self.out}')
-        log(f'or keep it: plugin:hypr3d:map = {self.out}')
+        log(f'load it with: hyprctl hyprwalk map {self.out}')
+        log(f'or keep it: plugin:hyprwalk:map = {self.out}')
 
     # ------------------------------------------------ entities that start disabled
 
@@ -1085,7 +1085,7 @@ class Export:
         o = to_gltf(vec(ref, 'origin'))
         # the sky_camera's spot in the skybox lands on the skybox_reference origin, s times bigger
         t = [o[k] - c[k] * s for k in range(3)]
-        doc.merge(sky, 'hypr3d_backdrop', [s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, t[0], t[1], t[2], 1])
+        doc.merge(sky, 'hyprwalk_backdrop', [s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, t[0], t[1], t[2], 1])
         self.skybox = {'vpk': vpk, 'path': os.path.splitext(target)[0], 'ents': sents, 'scale': s, 'offset': t}
         log(f'3D skybox: {len(sky.j.get("meshes", []))} meshes at {s:g}x')
 
@@ -1271,7 +1271,7 @@ class Export:
 
     @staticmethod
     def detail_params(shader, v):
-        """HYPR3D_materials_source2's "detail" for a material (vmat texture paths in "texture" and "mask"), or None"""
+        """HYPRWALK_materials_source2's "detail" for a material (vmat texture paths in "texture" and "mask"), or None"""
         ip, fp, vp, tp = v.get('IntParams', {}), v.get('FloatParams', {}), v.get('VectorParams', {}), v.get('TextureParams', {})
 
         def vec2(key, default):
@@ -1331,7 +1331,7 @@ class Export:
 
     @staticmethod
     def base_transform(m, xf):
-        """sets uv_transform xf as the base color's KHR_texture_transform (hypr3d uses it for the other textures too)"""
+        """sets uv_transform xf as the base color's KHR_texture_transform (hyprwalk uses it for the other textures too)"""
         base = m.get('pbrMetallicRoughness', {}).get('baseColorTexture')
         if xf == IDENTITY_XF or base is None:
             return
@@ -1357,7 +1357,7 @@ class Export:
 
     @staticmethod
     def effect_params(v, texture):
-        """csgo_effects for HYPR3D_materials_source2's "effect": 3 scrolling masks, distance and fresnel fades"""
+        """csgo_effects for HYPRWALK_materials_source2's "effect": 3 scrolling masks, distance and fresnel fades"""
         ip, fp, vp, tp = v.get('IntParams', {}), v.get('FloatParams', {}), v.get('VectorParams', {}), v.get('TextureParams', {})
 
         def vec2(key, default):
@@ -1455,7 +1455,7 @@ class Export:
         ints = [vmat(m).get('IntParams', {}) for m in mats]
         foliage = {i for i, s in enumerate(shader) if s.startswith('csgo_foliage')}
 
-        # nothing is dropped: hypr3d draws even csgo_effects' clouds and glows (scrolling masks, no soft ground edge)
+        # nothing is dropped: hyprwalk draws even csgo_effects' clouds and glows (scrolling masks, no soft ground edge)
         drop, odd = set(), set()
         for i, s in enumerate(shader):
             m = mats[i]
@@ -1477,7 +1477,7 @@ class Export:
             if s.startswith('csgo_black_unlit'):
                 m.setdefault('pbrMetallicRoughness', {})['baseColorFactor'] = [0.0, 0.0, 0.0, 1.0]
         if odd:
-            warn(f'{len(odd)} materials multiply what is behind them, which hypr3d does not do, so they are opaque: '
+            warn(f'{len(odd)} materials multiply what is behind them, which hyprwalk does not do, so they are opaque: '
                  f'{", ".join(sorted(odd)[:4])}')
         if any('KHR_materials_unlit' in m.get('extensions', {}) for m in mats):
             used = doc.j.setdefault('extensionsUsed', [])
@@ -1698,14 +1698,14 @@ class Export:
                     blends += 1
         log(f'{count} blended materials on {blends} meshes, foliage colours fixed on {dropped} meshes')
 
-    # DynamicParams: per-frame expressions, only in the decompiled .vmat; hypr3d does a constant g_vTexCoordScale/Offset
-    # (KHR_texture_transform) and an offset moving with time (HYPR3D_materials_source2's "scroll")
+    # DynamicParams: per-frame expressions, only in the decompiled .vmat; hyprwalk does a constant g_vTexCoordScale/Offset
+    # (KHR_texture_transform) and an offset moving with time (HYPRWALK_materials_source2's "scroll")
     DYN_CONST = re.compile(r'^return\s+(?:float2\(\s*([-+.\deE]+)\s*,\s*([-+.\deE]+)\s*\)|([-+.\deE]+))\s*;$')
     DYN_SCROLL = re.compile(r'^return\s+(?:frac\(\s*)?float2\(\s*([-+.\deE]+)\s*,\s*([-+.\deE]+)\s*\)\s*\*\s*time\(\)\s*\)?\s*;$')
 
     @classmethod
     def dynamic_value(cls, expr):
-        """('const', (x, y)) or ('scroll', (x, y)) for the expressions hypr3d does, else None"""
+        """('const', (x, y)) or ('scroll', (x, y)) for the expressions hyprwalk does, else None"""
         e = ' '.join(expr.split())
         try:
             m = cls.DYN_SCROLL.match(e)
@@ -1746,7 +1746,7 @@ class Export:
             if not s.startswith(('csgo_lightmappedgeneric', 'csgo_effects')):
                 scale, offset = vec2(vp.get('g_vTexCoordScale'), [1.0, 1.0]), vec2(vp.get('g_vTexCoordOffset'), [0.0, 0.0])
                 if (scale or offset) and float(fp.get('g_flTexCoordRotation', 0)):
-                    warn(f"{m.get('name')}'s texture is turned, which hypr3d doesn't do")
+                    warn(f"{m.get('name')}'s texture is turned, which hyprwalk doesn't do")
                 else:
                     xf = dict(([('scale', scale)] if scale else []) + ([('offset', offset)] if offset else []))
             for key, expr in params.items():
@@ -1772,7 +1772,7 @@ class Export:
         if done:
             log(f'{done} materials with moving or rescaled textures')
         if left:
-            warn(f"{len(left)} of the materials' dynamic parameters aren't done by hypr3d, e.g. {sorted(left)[0]}")
+            warn(f"{len(left)} of the materials' dynamic parameters aren't done by hyprwalk, e.g. {sorted(left)[0]}")
 
     # ------------------------------------------------ CS2's lighting
 
@@ -1786,7 +1786,7 @@ class Export:
         if not all(p in have for p in lightmaps.values()):
             other = sorted(os.path.basename(p) for p in have)
             if other:
-                warn(f'{path} has lightmaps hypr3d can\'t read yet ({", ".join(other[:4])}), so hypr3d lights it itself')
+                warn(f'{path} has lightmaps hyprwalk can\'t read yet ({", ".join(other[:4])}), so hyprwalk lights it itself')
             return None
         volumes = [e for e in ents if e.get('classname') in self.PROBE_VOLUMES and 'light_probe_atlas_x' in e
                    and not truthy(e.get('startdisabled', 'false'))]
@@ -1805,7 +1805,7 @@ class Export:
 
         files = {n: image(p) for n, p in lightmaps.items()}
         if not all(files.values()):
-            warn(f'the lightmaps of {path} did not decompile, so hypr3d lights it itself')
+            warn(f'the lightmaps of {path} did not decompile, so hyprwalk lights it itself')
             return None
         probes = None
         if volumes and all(atlas.values()):
@@ -1818,7 +1818,7 @@ class Export:
 
     @staticmethod
     def probe_volume(e, to_map):
-        """HYPR3D_lighting's probe volume: world (glTF) -> 0..1 box matrix, world bounds, atlas placement in texels"""
+        """HYPRWALK_lighting's probe volume: world (glTF) -> 0..1 box matrix, world bounds, atlas placement in texels"""
         rot = source_rotation(vec(e, 'angles'))
         origin = vec(e, 'origin')
         lo, hi = vec(e, 'box_mins'), vec(e, 'box_maxs')
@@ -1845,7 +1845,7 @@ class Export:
     def add_lighting(self, doc, ents, sky):
         blender = shutil.which('blender')
         if not blender:
-            warn("no Blender to read the lightmaps with, so hypr3d lights the map itself")
+            warn("no Blender to read the lightmaps with, so hyprwalk lights the map itself")
             return
         log('exporting the lightmaps and light probes ...')
         sets = [('map', self.vpk, f'maps/{self.name}', ents, affine())]
@@ -1890,7 +1890,7 @@ class Export:
         r = subprocess.run([blender, '-b', '--factory-startup', '--python-exit-code', '1', '-P', script, '--', jobfile], capture_output=True, text=True)
         if r.returncode != 0:
             open(os.path.join(work, 'blender.log'), 'w').write(r.stdout + r.stderr)
-            warn(f"Blender couldn't convert the lightmaps, so hypr3d lights the map itself (see {os.path.join(work, 'blender.log')})")
+            warn(f"Blender couldn't convert the lightmaps, so hyprwalk lights the map itself (see {os.path.join(work, 'blender.log')})")
             return
         stats = json.load(open(os.path.join(work, 'stats.json')))
 
@@ -1916,7 +1916,7 @@ class Export:
             light['sets'].append(entry)
 
         # sun: linear colour times brightness, as CS2's shaders have it; black when CS2 doesn't use it at run time
-        # (without a sun hypr3d would add its own)
+        # (without a sun hyprwalk would add its own)
         sun = next((e for e in ents if e.get('classname') == 'light_environment' and truthy(e.get('enabled', 'true'))), None)
         sun = sun or next((e for e in ents if e.get('classname') == 'light_environment'), None)
         if sun:
@@ -1978,7 +1978,7 @@ class Export:
                      'm_flLinearAngle': 'linearAngle', 'm_flToeStrength': 'toeStrength', 'm_flToeNum': 'toeNum', 'm_flToeDenom': 'toeDenom',
                      'm_flWhitePoint': 'whitePoint'}
             light['tonemap'] = {v: float(params[k]) for k, v in names.items() if k in params}
-        # colour correction (a 32x32x32 table) isn't done by hypr3d: warn when it isn't neutral
+        # colour correction (a 32x32x32 table) isn't done by hyprwalk: warn when it isn't neutral
         raw = re.search(r'm_fileName\s*=\s*"([^"]+\.raw)"', text)
         lut = os.path.join(os.path.dirname(path), os.path.basename(raw.group(1))) if raw else None
         if lut and os.path.isfile(lut):
@@ -1987,7 +1987,7 @@ class Export:
                 off = max(abs(data[((b * 32 + g) * 32 + r) * 3 + c] - round((r, g, b)[c] * 255 / 31))
                           for b in range(32) for g in range(32) for r in range(32) for c in range(3))
                 if off > 12:
-                    warn(f"the map's colour grading ({os.path.basename(lut)}) isn't done by hypr3d (it shifts colours by up to {off}/255)")
+                    warn(f"the map's colour grading ({os.path.basename(lut)}) isn't done by hyprwalk (it shifts colours by up to {off}/255)")
 
     WORLD_NODE = re.compile(r'^(n|node)\d+_', re.I)
 
@@ -2041,14 +2041,14 @@ class Export:
     # ------------------------------------------------ the sky
 
     def add_sky(self, doc, ents):
-        """adds the sky dome; returns HYPR3D_lighting's "sky" (image, color), or None"""
+        """adds the sky dome; returns HYPRWALK_lighting's "sky" (image, color), or None"""
         sky = next((e for e in ents if e.get('classname') == 'env_sky' and not truthy(e.get('startdisabled', 'false'))), None)
         vm = resource(sky.get('skyname', '')) if sky else ''
         if not vm:
             return None
         blender = shutil.which('blender')
         if not blender:
-            warn("no Blender to read the sky's .exr with, hypr3d's own sky will show")
+            warn("no Blender to read the sky's .exr with, hyprwalk's own sky will show")
             return None
         got = self.vrf_files([vm + '_c'], os.path.join(self.work, 'sky'), 'sky')
         text = open(got[vm + '_c'], encoding='utf-8', errors='replace').read() if got else ''
@@ -2080,7 +2080,7 @@ class Export:
         return {'image': image, 'color': [srgb_to_linear(c) * k for c in tint]}
 
     def sky_dome(self, doc, png):
-        # far enough out that walking around doesn't move it; hypr3d draws it behind everything
+        # far enough out that walking around doesn't move it; hyprwalk draws it behind everything
         R, cols, rows = 2000.0, 48, 24
         pos, uv, idx = [], [], []
         for r in range(rows + 1):
@@ -2118,7 +2118,7 @@ class Export:
             cls = 'info_player_terrorist' if spawn == 't' else 'info_player_counterterrorist'
             cands = [e for e in ents if e.get('classname') == cls and truthy(e.get('enabled', 'true'))]
             if not cands:
-                warn(f'no {cls} in the map, hypr3d will pick a start')
+                warn(f'no {cls} in the map, hyprwalk will pick a start')
                 at = None
             else:
                 # highest priority, then nearest the middle of the team's spawns, facing its way
@@ -2129,14 +2129,14 @@ class Export:
         else:
             at = floats(spawn, 4, '--spawn')
         if at:
-            # hypr3d looks down the node's -z: a turn of (yaw - 180 degrees) about +y
-            doc.roots.append(doc.add('nodes', {'name': 'hypr3d_spawn', 'translation': to_gltf(at[:3]), 'rotation': yaw_quat(math.radians(at[3] - 180))}))
+            # hyprwalk looks down the node's -z: a turn of (yaw - 180 degrees) about +y
+            doc.roots.append(doc.add('nodes', {'name': 'hyprwalk_spawn', 'translation': to_gltf(at[:3]), 'rotation': yaw_quat(math.radians(at[3] - 180))}))
             log(f'start at {at[0]:.0f} {at[1]:.0f} {at[2]:.0f}, facing {at[3]:.0f} degrees')
         desk = self.args.desktop or preset.get('desktop')
         if desk:
             d = floats(desk, 4, '--desktop')
             # the desktop faces the node's +z
-            doc.roots.append(doc.add('nodes', {'name': 'hypr3d_desktop', 'translation': to_gltf(d[:3]), 'rotation': yaw_quat(math.radians(d[3]))}))
+            doc.roots.append(doc.add('nodes', {'name': 'hyprwalk_desktop', 'translation': to_gltf(d[:3]), 'rotation': yaw_quat(math.radians(d[3]))}))
             log(f'desktop at {d[0]:.0f} {d[1]:.0f} {d[2]:.0f}, facing {d[3]:.0f} degrees')
 
 
@@ -2162,7 +2162,7 @@ out.save()
 
 # lightmaps and probe atlases -> PNGs, inside Blender (it reads .exr and has numpy)
 LIGHTING_TOOL = r'''
-# Converts CS2's decompiled lightmaps and probe atlases into the PNGs hypr3d reads: HDR data as RGBE
+# Converts CS2's decompiled lightmaps and probe atlases into the PNGs hyprwalk reads: HDR data as RGBE
 # (8-bit mantissas, a shared exponent in alpha), single channels as greyscale, 3D atlases as their
 # slices laid out in a grid. Rows are written top first, the way the textures are addressed.
 import bpy, sys, json, zlib, struct, time

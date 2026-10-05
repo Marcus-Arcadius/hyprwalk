@@ -8,12 +8,12 @@
 #include <string>
 #include <vector>
 
-namespace h3d {
+namespace hyprwalk {
 
     // how a vertex of a map gets its light
     enum eMapLight : uint8_t {
         LIGHT_OWN = 0, // own: sky and bounce baked into SMapVertex::ao
-        LIGHT_MAP,     // HYPR3D_lighting lightmap; light = lightmap uv
+        LIGHT_MAP,     // HYPRWALK_lighting lightmap; light = lightmap uv
         LIGHT_PROBE,   // light probes; light = probe atlas texel
         LIGHT_FLAT,    // baked map, none for this: average light
     };
@@ -78,7 +78,7 @@ namespace h3d {
         DETAIL_OVERLAY, // Photoshop's overlay
     };
 
-    // Unity stencil test and write (unity2hypr3d's "hypr3d_stencil": UnlitWF, lilToon, Poiyomi masks)
+    // Unity stencil test and write (unity2hyprwalk's "hyprwalk_stencil": UnlitWF, lilToon, Poiyomi masks)
     enum eStencilComp : uint8_t { SC_NEVER, SC_LESS, SC_EQUAL, SC_LEQUAL, SC_GREATER, SC_NOTEQUAL, SC_GEQUAL, SC_ALWAYS };
     enum eStencilOp : uint8_t { SO_KEEP, SO_ZERO, SO_REPLACE, SO_INCR, SO_DECR, SO_INVERT, SO_INCR_WRAP, SO_DECR_WRAP };
     struct SStencil {
@@ -155,7 +155,7 @@ namespace h3d {
         bool        normalYDown = false; // green down the bitangent (Source), not up
         float       roughness = 1, metalness = 0;
         bool        ormFromOcclusion = false;
-        bool        specular[2] = {true, true}; // sun, environment (HYPR3D_materials_source2)
+        bool        specular[2] = {true, true}; // sun, environment (HYPRWALK_materials_source2)
         float       selfIllumAlbedo = 0;         // share of the base color in the emissive
         bool        glass = false;               // blended; reflections at full strength
         uint8_t     vertexColor = 0;             // COLOR_0: 0 linear, 1 sRGB, 2 none, 3 alpha tint, 4 tint
@@ -164,12 +164,12 @@ namespace h3d {
         bool        fog   = true;                // game fog applies (CS2's g_bFogEnabled)
         bool        doubleSided = false;         // without it CS2 effect cards show front only
         float       scroll[2]   = {0, 0};        // base color uv scroll per second (CS2)
-        // HYPR3D_materials_source2 tint mask (the base color's rgb tints by its r) and decal, on the vertex uv or uv1
+        // HYPRWALK_materials_source2 tint mask (the base color's rgb tints by its r) and decal, on the vertex uv or uv1
         int         tintMaskTex = -1, tintMaskUV = 0;
         int         decalTex = -1, decalUV = 0;
         uint8_t     decal = 0; // 0 none, 1 alpha mix, 2 multiply, 3 rgba times base
         float       decalXf[6] = {1, 0, 0, 1, 0, 0}; // decal 3's uv transform, from the vertex uv
-        // HYPR3D_materials_source2's detail texture, over the base color
+        // HYPRWALK_materials_source2's detail texture, over the base color
         eMapDetail  detail = DETAIL_NONE;
         int         detailTex = -1, detailMaskTex = -1;
         float       detailXf[6]   = {1, 0, 0, 1, 0, 0}; // from the vertex uv
@@ -177,7 +177,7 @@ namespace h3d {
         float       detailBlend = 1, detailBlendToFull = 0;
         int         detailMaskUV = 0;
         int         detailUV = 0; // 0 vertex uv, 1 uv1
-        // HYPR3D_materials_blend: a second base color painted over the first by vertex _BLEND weight (Source 2 layers)
+        // HYPRWALK_materials_blend: a second base color painted over the first by vertex _BLEND weight (Source 2 layers)
         int         layerTex = -1, layerMaskTex = -1; // mask: g = layer boundary, r = edge softness
         int         layerNormalTex = -1;              // its normal map, roughness in alpha
         float       layerColor[4] = {1, 1, 1, 1};
@@ -189,7 +189,7 @@ namespace h3d {
         // CS2's border tint: layer 1 tinted in a band along the layer edge
         float       borderTint[3] = {1, 1, 1};
         float       border[3]     = {0, 0.5f, 0};      // strength (0 = none), softness, weight offset
-        // csgo_effects (HYPR3D_materials_source2): unlit color times up to 3 scrolling masks; distance, angle fades
+        // csgo_effects (HYPRWALK_materials_source2): unlit color times up to 3 scrolling masks; distance, angle fades
         bool        effect = false;
         int         effectMaskTex[3] = {-1, -1, -1};
         float       effectMask[3][4] = {{1, 1, 0, 0}, {1, 1, 0, 0}, {1, 1, 0, 0}}; // uv scale, scroll per second
@@ -197,7 +197,7 @@ namespace h3d {
         float       effectFade[4]    = {1, 1, 0, 1};     // distance (m), falloff, min, max
         float       effectFresnel[4] = {0.001f, 1, 0, 1}; // exponent, falloff, min, max
         bool        effectFog = true;
-        // avatars (unity2hypr3d "hypr3d_*" extras, MToon outline and queue): Unity render queue, -1 = by alpha mode
+        // avatars (unity2hyprwalk "hyprwalk_*" extras, MToon outline and queue): Unity render queue, -1 = by alpha mode
         int         queue = -1;
         SStencil    stencil;
         SOutline    outline;
@@ -221,7 +221,7 @@ namespace h3d {
         }
     };
 
-    // a game's precomputed lighting (HYPR3D_lighting), for the map or its backdrop
+    // a game's precomputed lighting (HYPRWALK_lighting), for the map or its backdrop
     struct SMapLightSet {
         SHdrImage            irradiance;  // the lightmap: light arriving, linear
         SMapImage            directional; // xy: direction (tangent space), z: directionality, a: spec AO
@@ -268,7 +268,7 @@ namespace h3d {
         bool     render     = true;  // false: shadow only (tool textures like nodraw)
         bool     castShadow = true;
         bool     sky        = false; // skybox / dome: unlit, unfogged, drawn behind
-        bool     backdrop   = false; // hypr3d_backdrop: drawn first, own depth range
+        bool     backdrop   = false; // hyprwalk_backdrop: drawn first, own depth range
     };
 
     struct SMapModel {
@@ -282,7 +282,7 @@ namespace h3d {
         SAABB                   backdropBounds = SAABB::empty();
         size_t                  triangles = 0;
         SMapLighting            lighting; // the game's own, when the file has it
-        M4                      backdropTransform = M4::identity(); // hypr3d_backdrop space -> world
+        M4                      backdropTransform = M4::identity(); // hyprwalk_backdrop space -> world
 
         // call after the renderer's GPU upload; the lighting numbers stay. Swapped with empties: v = {} keeps the
         // capacity (initializer_list assignment)

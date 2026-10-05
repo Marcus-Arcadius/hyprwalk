@@ -7,7 +7,7 @@
 #include <functional>
 #include <optional>
 
-namespace h3d {
+namespace hyprwalk {
 
     // player collision box; steps up ledges up to STEP_HEIGHT (the test harness walks maps with it too)
     struct SWalker {

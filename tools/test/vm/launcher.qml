@@ -1,7 +1,7 @@
 // launcher.qml: a launcher as a shell opens on a keybind: a full-screen layer surface on the overlay layer, see-through
 // but for a box in the middle, that maps when shown and then takes the keyboard on demand (Quickshell's focusable
 // PanelWindow); a click outside the box or Esc closes it. And a smaller one with exclusive keyboard focus, as rofi,
-// fuzzel and wofi take. Typing and clicks go to /tmp/h3d-launcher.log, a line each.
+// fuzzel and wofi take. Typing and clicks go to /tmp/hyprwalk-launcher.log, a line each.
 //   quickshell -p launcher.qml
 //   quickshell ipc -p launcher.qml call launcher toggle     (or: exclusive)
 import QtQuick
@@ -16,7 +16,7 @@ ShellRoot {
 
     function say(line) {
         const p = Qt.createQmlObject('import Quickshell.Io; Process {}', root);
-        p.command = ["sh", "-c", "printf '%s\\n' \"$1\" >> /tmp/h3d-launcher.log", "sh", line];
+        p.command = ["sh", "-c", "printf '%s\\n' \"$1\" >> /tmp/hyprwalk-launcher.log", "sh", line];
         p.running = true;
     }
 
@@ -35,7 +35,7 @@ ShellRoot {
     PanelWindow {
         visible: root.shown
         focusable: root.shown
-        WlrLayershell.namespace: "h3d-launcher"
+        WlrLayershell.namespace: "hyprwalk-launcher"
         WlrLayershell.layer: WlrLayer.Overlay
         exclusionMode: ExclusionMode.Ignore
         color: "transparent"
@@ -103,7 +103,7 @@ ShellRoot {
 
     PanelWindow {
         visible: root.exclusiveShown
-        WlrLayershell.namespace: "h3d-exclusive"
+        WlrLayershell.namespace: "hyprwalk-exclusive"
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
         exclusionMode: ExclusionMode.Ignore

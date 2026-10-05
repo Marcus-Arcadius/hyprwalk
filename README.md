@@ -5,7 +5,7 @@ windows hang on a wall in a small courtyard (or in any glTF map, CS2 maps includ
 person, and the crosshair clicks, scrolls and types into whatever it points at. You can carry windows anywhere, tile
 them in a ring around you, pin one to your view, launch apps into the world and play games where they hang.
 
-Load an avatar (VRM, glTF, or a VRChat avatar converted with `tools/unity2hypr3d.py`) and you see the world through
+Load an avatar (VRM, glTF, or a VRChat avatar converted with `tools/unity2hyprwalk.py`) and you see the world through
 its eyes, with its hands in view. It works much like a VRChat avatar: faces, hand gestures, emotes and dances, a
 radial Action Menu, outfit toggles and sliders, hair and clothes that swing, toon outlines, and lip sync from your
 microphone.
@@ -18,10 +18,10 @@ microphone.
 
 ## Install
 
-A plugin has to be built against the exact Hyprland it runs in, so you build hypr3d yourself. It supports Hyprland
+A plugin has to be built against the exact Hyprland it runs in, so you build hyprwalk yourself. It supports Hyprland
 0.55 and 0.56 and needs GCC 15 or newer. `./build.sh` finds the running Hyprland and its headers, warns if their
 versions differ, and runs `make` (extra arguments go to `make`, e.g. `./build.sh clean`). The result is
-`hypr3d.so`.
+`hyprwalk.so`.
 
 PipeWire's development files are optional. Without them, lip sync has no microphone and emotes play without sound.
 
@@ -29,7 +29,7 @@ PipeWire's development files are optional. Without them, lip sync has no microph
 
 ```sh
 sudo pacman -S --needed base-devel git hyprland pango libpipewire
-git clone https://github.com/Marcus-Arcadius/hypr3d && cd hypr3d
+git clone https://github.com/Marcus-Arcadius/hyprwalk && cd hyprwalk
 ./build.sh
 ```
 
@@ -41,7 +41,7 @@ Fedora 44):
 ```sh
 sudo dnf copr enable sdegler/hyprland
 sudo dnf install gcc-c++ make pkgconf git hyprland-devel pango-devel pixman-devel pipewire-devel
-git clone https://github.com/Marcus-Arcadius/hypr3d && cd hypr3d
+git clone https://github.com/Marcus-Arcadius/hyprwalk && cd hyprwalk
 ./build.sh
 ```
 
@@ -49,7 +49,7 @@ git clone https://github.com/Marcus-Arcadius/hypr3d && cd hypr3d
 
 ```sh
 sudo zypper install gcc-c++ make pkgconf git hyprland-devel glslang-devel pango-devel libpixman-1-0-devel pipewire-devel
-git clone https://github.com/Marcus-Arcadius/hypr3d && cd hypr3d
+git clone https://github.com/Marcus-Arcadius/hyprwalk && cd hyprwalk
 ./build.sh
 ```
 
@@ -59,7 +59,7 @@ git clone https://github.com/Marcus-Arcadius/hypr3d && cd hypr3d
 
 ```sh
 sudo apt install build-essential pkgconf git hyprland-dev libpango1.0-dev libpixman-1-dev libpipewire-0.3-dev
-git clone https://github.com/Marcus-Arcadius/hypr3d && cd hypr3d
+git clone https://github.com/Marcus-Arcadius/hyprwalk && cd hyprwalk
 ./build.sh
 ```
 
@@ -83,8 +83,8 @@ without a development package, and with a Hyprland you built yourself. It needs 
 
 ```sh
 hyprpm update
-hyprpm add https://github.com/Marcus-Arcadius/hypr3d
-hyprpm enable hypr3d
+hyprpm add https://github.com/Marcus-Arcadius/hyprwalk
+hyprpm enable hyprwalk
 hyprpm reload
 ```
 
@@ -104,30 +104,30 @@ it won't load a plugin built for the new one.
 ## Load
 
 ```sh
-hyprctl plugin load "$PWD/hypr3d.so"      # needs an absolute path
-hyprctl plugin unload "$PWD/hypr3d.so"
+hyprctl plugin load "$PWD/hyprwalk.so"      # needs an absolute path
+hyprctl plugin unload "$PWD/hyprwalk.so"
 ```
 
 To load it from your config, with a Lua config:
 
 ```lua
-hl.plugin.load("/path/to/hypr3d/hypr3d.so")
-hl.config({ plugin = { hypr3d = {
+hl.plugin.load("/path/to/hyprwalk/hyprwalk.so")
+hl.config({ plugin = { hyprwalk = {
     avatar = "~/avatars/me.glb",
 } } })
-hl.bind("SUPER + grave", function() hl.plugin.hypr3d.toggle() end)
+hl.bind("SUPER + grave", function() hl.plugin.hyprwalk.toggle() end)
 ```
 
 or with `hyprland.conf`:
 
 ```ini
-plugin = /path/to/hypr3d/hypr3d.so
+plugin = /path/to/hyprwalk/hyprwalk.so
 plugin {
-    hypr3d {
+    hyprwalk {
         avatar = ~/avatars/me.glb
     }
 }
-bind = SUPER, grave, hypr3d:toggle
+bind = SUPER, grave, hyprwalk:toggle
 ```
 
 The plugin's config values exist only once it's loaded; Hyprland reloads the config after loading a plugin. A
@@ -135,7 +135,7 @@ plugin runs inside the compositor, so if it crashes, your session goes down with
 
 ## Controls
 
-Enter and leave 3D with the `hypr3d:toggle` dispatcher, `hyprctl hypr3d toggle` or `hl.plugin.hypr3d.toggle()`.
+Enter and leave 3D with the `hyprwalk:toggle` dispatcher, `hyprctl hyprwalk toggle` or `hl.plugin.hyprwalk.toggle()`.
 Keys held with Super or Ctrl+Alt still go to Hyprland. They act on the window under the crosshair: Super+Q closes
 the window you look at, or nothing when you look at no window.
 
@@ -180,22 +180,22 @@ camera to fill the view with it (`play_view = fill` swaps the two). In the tilin
 
 A window that goes fullscreen in 3D (a video, a game) is played automatically. Play mode ends with Super+Esc, when
 you leave 3D, when the screen locks or the window closes, or when another window or a launcher takes the keyboard.
-In that last case the game's keys are held back, so stray keys don't trigger hypr3d actions: P plays the game again,
+In that last case the game's keys are held back, so stray keys don't trigger hyprwalk actions: P plays the game again,
 and Super+Esc walks. Controllers are read by the game itself (SDL), and only while it has the keyboard focus.
 
 ### Windows in the world
 
-- Apps launched from 3D (Q, or `hyprctl hypr3d launch`) open in front of you, as big as on your screen.
+- Apps launched from 3D (Q, or `hyprctl hyprwalk launch`) open in front of you, as big as on your screen.
   `app_rules` sets where by window class:
   `CLASS: DISTANCE [HEIGHT|auto] [left|right|SIDE]`, e.g.
   `steam_app_.*: 2.4 1.6, discord: 1.2 auto left` (metres from your eye, the height or `auto`, and a side). Built-in
   rules put games and video players 2 m away, chat apps 1.3 m away and to the left, and anything else 1.5 m away.
-- Where you put a window is remembered per class and map in `$XDG_STATE_HOME/hypr3d/windows/`; X forgets it.
+- Where you put a window is remembered per class and map in `$XDG_STATE_HOME/hyprwalk/windows/`; X forgets it.
 - Other windows that open on the 3D monitor (a terminal, the portal's picker) open in front of you too. Dialogs
   follow their window.
 - The Windows page (B) lists every window: focus, bring here, to the wall, pin/unpin, bigger/smaller (its real
   size), play, close.
-- Tiling mode (T) is hypr3d's own layout: Hyprland's tiling doesn't change.
+- Tiling mode (T) is hyprwalk's own layout: Hyprland's tiling doesn't change.
 - X11 apps work through XWayland, with their menus and tooltips drawn as popups. Drag and drop works, and so do
   input method popups (fcitx5).
 
@@ -203,21 +203,21 @@ and Super+Esc walks. Controllers are read by the game itself (SDL), and only whi
 
 3D goes on the focused monitor, or the one `monitor` names. The others stay your normal desktop. Super+Esc, a
 keybind that moves the focus to another monitor, or moving the mouse across hands the mouse and keyboard over; the
-3D view keeps running. Coming back works the same way. For your own keybinds there's `hyprctl hypr3d away`, the
-`hypr3d:away` dispatcher and `hl.plugin.hypr3d.away()`.
+3D view keeps running. Coming back works the same way. For your own keybinds there's `hyprctl hyprwalk away`, the
+`hyprwalk:away` dispatcher and `hl.plugin.hyprwalk.away()`.
 
 ### Lip sync
 
-Off until you turn it on: `lipsync = true`, `hyprctl hypr3d avatar lipsync on`, or the Action Menu's options.
+Off until you turn it on: `lipsync = true`, `hyprctl hyprwalk avatar lipsync on`, or the Action Menu's options.
 While you're in 3D with an avatar it listens to your default microphone (or `lipsync_source`) through PipeWire, and a
 red badge shows it's listening. Nothing is recorded or sent. It shows five vowels (a, i, u, e, o) and the consonants
 pp, ff, ss and ch where the avatar has those visemes. The gain is automatic (`lipsync_gain` sets a fixed one), and
-the badge tells you when the microphone is muted, silent or missing. `hyprctl hypr3d avatar lipsync` reports the
+the badge tells you when the microphone is muted, silent or missing. `hyprctl hyprwalk avatar lipsync` reports the
 details.
 
 ## Config
 
-All values are `plugin:hypr3d:…`. Paths may start with `~/`. A config reload applies changes at once; a value
+All values are `plugin:hyprwalk:…`. Paths may start with `~/`. A config reload applies changes at once; a value
 changed at run time (`hyprctl keyword`) takes effect within a second.
 
 | Value | Default | |
@@ -248,7 +248,7 @@ changed at run time (`hyprctl keyword`) takes effect within a second.
 
 ## hyprctl
 
-`hyprctl hypr3d` with no arguments prints the state as JSON.
+`hyprctl hyprwalk` with no arguments prints the state as JSON.
 
 | Command | |
 |---|---|
@@ -273,26 +273,26 @@ changed at run time (`hyprctl keyword`) takes effect within a second.
 | `avatar emote [NAME\|NUMBER\|FILE\|FOLDER [once\|loop]\|stop]`, `avatar attack [left\|right]` | emotes and punches |
 | `menu [open [PAGE]\|close\|toggle\|back\|pick [N]\|move DX DY\|scroll N]` | the Action Menu |
 
-Dispatchers: `hypr3d:toggle`, `hypr3d:menu [PAGE]`, `hypr3d:play [here|fill|on|off|toggle]`, `hypr3d:away` and
-`hypr3d:tile [here|follow]`. Lua functions: `hl.plugin.hypr3d.toggle()`, `enter()`, `exit()`, `type()`,
+Dispatchers: `hyprwalk:toggle`, `hyprwalk:menu [PAGE]`, `hyprwalk:play [here|fill|on|off|toggle]`, `hyprwalk:away` and
+`hyprwalk:tile [here|follow]`. Lua functions: `hl.plugin.hyprwalk.toggle()`, `enter()`, `exit()`, `type()`,
 `play([VIEW])`, `away()`, `tile(["here"|"follow"])` and `menu([PAGE])`.
 
 ## Avatars
 
-`plugin:hypr3d:avatar`, `hyprctl hypr3d avatar FILE` or the Action Menu's Avatars page (it lists
-`~/.local/share/hypr3d/avatars/`) loads:
+`plugin:hyprwalk:avatar`, `hyprctl hyprwalk avatar FILE` or the Action Menu's Avatars page (it lists
+`~/.local/share/hyprwalk/avatars/`) loads:
 
 - **VRM 0.x and 1.0**: the humanoid, expressions, look-at, spring bones (with `VRMC_springBone_extended_collider`
   and `VRMC_springBone_limit`), node constraints, and MToon's shading, matcaps and outlines.
 - **A plain glTF/GLB**: humanoid bones are guessed from their names (Mixamo, VRoid, Blender and the like),
   expressions from shape key names (VRoid, VRChat, MMD, ARKit) and spring bones from bone names (hair, skirt,
   tail…). Clips named idle, walk, run, jump or fall are used for those.
-- **What `tools/unity2hypr3d.py` writes**: a GLB and a settings file.
+- **What `tools/unity2hyprwalk.py` writes**: a GLB and a settings file.
 
 The avatar blinks, looks where you look, walks, runs, jumps, crouches and flies. Without clips of its own, a humanoid
 walks procedurally: its feet stay planted, stride and cadence follow human gait data, and it handles stairs, slopes
 and turns. Its upper body follows built-in walk and run clips (`assets/*.vrma`, made with
-`tools/blender/h3d_walk.py`). Spring bones step at 60 Hz and are interpolated between steps, so they stay smooth on
+`tools/blender/hyprwalk_walk.py`). Spring bones step at 60 Hz and are interpolated between steps, so they stay smooth on
 fast monitors. Materials are drawn in Unity's render queue order, with its stencil test, toon outlines (inverted
 hull), and MToon-style toon shading and matcaps.
 
@@ -309,7 +309,7 @@ Blender (`assets/attack.vrma`, `assets/attack-first-person.vrma`); a settings fi
 
 ### The settings file
 
-`AVATAR.hypr3d.json` next to the avatar adds to what the model says, or overrides it. The converter writes one, and
+`AVATAR.hyprwalk.json` next to the avatar adds to what the model says, or overrides it. The converter writes one, and
 you can write one by hand. Every key is optional:
 
 | Key | |
@@ -331,27 +331,29 @@ you can write one by hand. Every key is optional:
 | `colliders` | spheres and capsules `{"name", "node", "offset", "tail", "radius", "inside"}`, planes (`"normal"`) and discs (`"disc": {"normal", "radius"}`) |
 | `immobile` | 0..1, default 0.9: how much of the air the avatar carries along as it moves |
 
-The converter also writes glTF extras that hypr3d reads: `hypr3d_part` on primitives, and `hypr3d_queue`,
-`hypr3d_stencil`, `hypr3d_outline`, `hypr3d_back`, `hypr3d_light`, `hypr3d_toon` and `hypr3d_matcap` on materials.
+The converter also writes glTF extras that hyprwalk reads: `hyprwalk_part` on primitives, and `hyprwalk_queue`,
+`hyprwalk_stencil`, `hyprwalk_outline`, `hyprwalk_back`, `hyprwalk_light`, `hyprwalk_toon` and `hyprwalk_matcap` on
+materials. Avatars converted when hyprwalk was called hypr3d (`hypr3d_*` extras, `AVATAR.hypr3d.json`) still load.
 
 ## Maps
 
-`plugin:hypr3d:map`, `hyprctl hypr3d map FILE` or the Action Menu's Maps page (it lists `~/.local/share/hypr3d/maps/`)
-loads a glTF/GLB. A node named `hypr3d_spawn` marks the start (facing −Z), `hypr3d_desktop` where the desktop hangs
-(facing +Z), and nodes under `hypr3d_backdrop` are scenery without collision. Without them hypr3d uses a game's
-`info_player_*` start and finds a flat wall itself. A directional light becomes the sun. `spawn here` and
-`desktop here` are saved in `$XDG_STATE_HOME/hypr3d/maps/`.
+`plugin:hyprwalk:map`, `hyprctl hyprwalk map FILE` or the Action Menu's Maps page (it lists
+`~/.local/share/hyprwalk/maps/`) loads a glTF/GLB. A node named `hyprwalk_spawn` marks the start (facing −Z),
+`hyprwalk_desktop` where the desktop hangs (facing +Z), and nodes under `hyprwalk_backdrop` are scenery without
+collision. Without them hyprwalk uses a game's `info_player_*` start and finds a flat wall itself. A directional light
+becomes the sun. `spawn here` and `desktop here` are saved in `$XDG_STATE_HOME/hyprwalk/maps/`. Maps exported when
+hyprwalk was called hypr3d (`hypr3d_*` nodes, `HYPR3D_*` extensions) still load.
 
 ## Tools
 
 The converters need [Blender](https://www.blender.org) (5.2 was used) and re-run themselves inside it.
 
-**`tools/unity2hypr3d.py`** converts a VRChat avatar into a GLB and a settings file, without Unity:
+**`tools/unity2hyprwalk.py`** converts a VRChat avatar into a GLB and a settings file, without Unity:
 
 ```sh
-python3 tools/unity2hypr3d.py Avatar.unitypackage [Outfit.unitypackage…] -o ~/avatars/me.glb
-python3 tools/unity2hypr3d.py Avatar.zip --outfit "Some Dress" --emote Dance.zip -o me.glb
-python3 tools/unity2hypr3d.py ~/UnityProjects/MyAvatar --list
+python3 tools/unity2hyprwalk.py Avatar.unitypackage [Outfit.unitypackage…] -o ~/avatars/me.glb
+python3 tools/unity2hyprwalk.py Avatar.zip --outfit "Some Dress" --emote Dance.zip -o me.glb
+python3 tools/unity2hyprwalk.py ~/UnityProjects/MyAvatar --list
 ```
 
 It reads `.unitypackage` files, Booth `.zip`s and Unity projects. It carries over the humanoid map, visemes, blink
@@ -368,7 +370,7 @@ one if your CS2 needs it):
 
 ```sh
 python3 tools/cs2map.py --list
-python3 tools/cs2map.py de_mirage        # → ~/.local/share/hypr3d/maps/de_mirage.glb
+python3 tools/cs2map.py de_mirage        # → ~/.local/share/hyprwalk/maps/de_mirage.glb
 ```
 
 It keeps the 3D skybox, CS2's baked lighting (lightmaps, light probes, the sun, fog, exposure and tone curve) and the
@@ -380,7 +382,7 @@ humanoid: an emote, an attack or a walk cycle. `tools/blender/` has the scripts 
 made with (see its README).
 
 ```sh
-blender -b FILE.blend --python tools/blend2vrma.py -- OUT.vrma --humanoid AVATAR.hypr3d.json [--frames A B] [--bones upper]
+blender -b FILE.blend --python tools/blend2vrma.py -- OUT.vrma --humanoid AVATAR.hyprwalk.json [--frames A B] [--bones upper]
 ```
 
 ## Tests
@@ -390,7 +392,8 @@ Everything is in `tools/test`. Each script's header (or `--help`) explains it.
 - `harness/`: `shot`, an offscreen renderer that drives the plugin's own renderer, animator and Action Menu
   (`tools/test/harness/build.sh` builds `build/test/shot`; `grep 'a == "--' tools/test/harness/shot.cpp` lists
   its options). The checks built on it: `ctl_check.sh`, `toon_check.sh`, `fp_check.sh`, `attack_check.sh`,
-  `spring_check.sh`, `disc_check.sh`, `cs2mat_check.sh` and `lipsync_check.sh`.
+  `spring_check.sh`, `disc_check.sh`, `cs2mat_check.sh`, `lipsync_check.sh` and `legacy_check.sh` (files from when
+  hyprwalk was hypr3d).
 - `vm/run.sh OUTDIR [--only ITEMS] [--gpu virgl]`: the plugin in a real Hyprland in NixOS VMs (needs Nix). About
   950 checks in about an hour, driven by real input devices, with PipeWire, XWayland and real apps (Chromium,
   Firefox, Electron, OBS, fcitx5, Chocolate Doom, SuperTux).
@@ -408,7 +411,7 @@ Scripts that use numpy run under Blender's Python, e.g.
 - Only keys held with Super or Ctrl+Alt reach Hyprland in 3D, so Alt+Tab doesn't, and a game never gets Super
   combinations.
 - Direct scanout is off while 3D is up, on every monitor. A fullscreen game is composited into the 3D view, with up to
-  a frame of latency; `hyprctl hypr3d status` shows `fps`, `updateMs` and `renderMs`.
+  a frame of latency; `hyprctl hyprwalk status` shows `fps`, `updateMs` and `renderMs`.
 - With Hyprland 0.56, windows and layers that close vanish in 3D without fading out.
 - A dragged item's icon isn't drawn in 3D (the cursor shows "grabbing" instead).
 - Changing a window's real size makes a tiled window floating. Window placement is remembered per class, so an app
@@ -424,14 +427,14 @@ Scripts that use numpy run under Blender's Python, e.g.
 - The converter handles the Modular Avatar and VRCFury features avatars use most, not all of them. PhysBone curves
   and Gravity Falloff aren't carried over, and toon shading uses only the first shade step. It was tested on
   synthetic packages and free Booth items, not on paid avatars.
-- Hyprland 0.55.x crashes when it quits with windows open, with or without hypr3d (fixed for dwindle in 0.56.0). A
-  patch is in `extras/hyprland-exit-crash`. hypr3d works around aquamarine's headless-output bug (fixed in 0.12.1).
+- Hyprland 0.55.x crashes when it quits with windows open, with or without hyprwalk (fixed for dwindle in 0.56.0). A
+  patch is in `extras/hyprland-exit-crash`. hyprwalk works around aquamarine's headless-output bug (fixed in 0.12.1).
 
 ## Credits
 
 - [cgltf](https://github.com/jkuhlmann/cgltf) (MIT) and [stb_image, stb_dxt and stb_vorbis](https://github.com/nothings/stb)
   (public domain or MIT), vendored in `src/third_party/`.
-- The bone-name table in `tools/unity2hypr3d.py` is from [Modular Avatar](https://github.com/bdunderscore/modular-avatar)
+- The bone-name table in `tools/unity2hyprwalk.py` is from [Modular Avatar](https://github.com/bdunderscore/modular-avatar)
   (MIT, © 2022 bd_), which took it from HhotateA's AvatarModifyTools (MIT, © 2021 @HhotateA_xR) and Azukimochi's
   BoneRenamer (MIT, © 2023 Azukimochi). The rest of the converter's Modular Avatar support reimplements MA's
   behaviour in Python, written from reading MA's source.

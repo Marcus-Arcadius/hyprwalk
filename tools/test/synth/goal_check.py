@@ -6,7 +6,7 @@
 #   blender -b --factory-startup --python-exit-code 1 -P goal_check.py -- AVATAR_INPUT CLIP.anim... [--frames N]
 import sys, os, math, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))  # tools/
-import unity2hypr3d as u
+import unity2hyprwalk as u
 from mathutils import Vector
 
 argv = sys.argv[sys.argv.index('--') + 1:]

@@ -33,7 +33,7 @@ def main(steps):
                           (ABS_MT_POSITION_Y, H, RES), (ABS_MT_TRACKING_ID, 65535, 0)):
         fcntl.ioctl(fd, UI_SET_ABSBIT, code)
         fcntl.ioctl(fd, UI_ABS_SETUP, struct.pack('HHiiiiii', code, 0, 0, 0, hi, 0, 0, res))
-    fcntl.ioctl(fd, UI_DEV_SETUP, struct.pack('HHHH80sI', BUS_USB, 0x1d6b, 0x0105, 1, b'hypr3d test touchpad', 0))
+    fcntl.ioctl(fd, UI_DEV_SETUP, struct.pack('HHHH80sI', BUS_USB, 0x1d6b, 0x0105, 1, b'hyprwalk test touchpad', 0))
     fcntl.ioctl(fd, UI_DEV_CREATE)
 
     def emit(*events):

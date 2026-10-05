@@ -6,14 +6,14 @@
 #include <filesystem>
 #include <mutex>
 
-#ifdef H3D_PIPEWIRE
+#ifdef HYPRWALK_PIPEWIRE
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
 #endif
 
-namespace h3d {
+namespace hyprwalk {
 
-#ifdef H3D_PIPEWIRE
+#ifdef HYPRWALK_PIPEWIRE
     namespace {
         using Clock = std::chrono::steady_clock;
 
@@ -199,7 +199,7 @@ namespace h3d {
             m->streamState           = "connecting";
             m->streamError.clear();
         }
-        m->loop = pw_thread_loop_new("hypr3d-emote-sound", nullptr);
+        m->loop = pw_thread_loop_new("hyprwalk-emote-sound", nullptr);
         if (!m->loop || pw_thread_loop_start(m->loop) != 0) {
             error = "couldn't start a PipeWire thread";
             stopNow();
@@ -212,10 +212,10 @@ namespace h3d {
         if (ok) {
             pw_core_add_listener(m->core, &m->coreHook, &SImpl::coreEvents(), m.get());
             // (the mixer shows the emote's name)
-            pw_properties* props = pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Playback", PW_KEY_MEDIA_ROLE, "Game", PW_KEY_APP_NAME, "hypr3d",
-                                                     PW_KEY_NODE_NAME, "hypr3d-emote-sound", PW_KEY_NODE_DESCRIPTION, "hypr3d emote sound", PW_KEY_MEDIA_NAME,
+            pw_properties* props = pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Playback", PW_KEY_MEDIA_ROLE, "Game", PW_KEY_APP_NAME, "hyprwalk",
+                                                     PW_KEY_NODE_NAME, "hyprwalk-emote-sound", PW_KEY_NODE_DESCRIPTION, "hyprwalk emote sound", PW_KEY_MEDIA_NAME,
                                                      name.empty() ? "emote" : name.c_str(), nullptr);
-            m->stream = pw_stream_new(m->core, "hypr3d emote sound", props);
+            m->stream = pw_stream_new(m->core, "hyprwalk emote sound", props);
             ok        = m->stream != nullptr;
         }
         if (ok) {
@@ -355,7 +355,7 @@ namespace h3d {
     }
 
     bool CSpeaker::play(std::shared_ptr<const SSound>, bool, float, const std::string&, std::string& error, double) {
-        error = "hypr3d was built without PipeWire (build.sh finds the one that runs)";
+        error = "hyprwalk was built without PipeWire (build.sh finds the one that runs)";
         return false;
     }
 

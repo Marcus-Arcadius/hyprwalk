@@ -18,7 +18,7 @@
 #include <string_view>
 #include <tuple>
 
-namespace h3d::gltf {
+namespace hyprwalk::gltf {
 
     namespace {
         constexpr int MAX_TEXTURE = 2048;
@@ -213,6 +213,12 @@ namespace h3d::gltf {
             }
         };
 
+        // our extensions; files made before the rename call them HYPR3D_*
+        bool extensionIs(const char* have, std::string_view want) {
+            const std::string_view h = have;
+            return h == want || (want.starts_with("HYPRWALK_") && h.starts_with("HYPR3D_") && h.substr(7) == want.substr(9));
+        }
+
         struct SMaterialReader {
             cgltf_data* data;
             SMaterials& out;
@@ -281,7 +287,7 @@ namespace h3d::gltf {
             static std::optional<SJson> extension(const cgltf_material& cm, const char* name) {
                 for (size_t e = 0; e < cm.extensions_count; ++e) {
                     const auto& ext = cm.extensions[e];
-                    if (ext.name && ext.data && std::strcmp(ext.name, name) == 0) {
+                    if (ext.name && ext.data && extensionIs(ext.name, name)) {
                         auto j = SJson::parse(ext.data);
                         if (j && j->type == SJson::OBJECT)
                             return j;
@@ -290,9 +296,9 @@ namespace h3d::gltf {
                 return std::nullopt;
             }
 
-            // HYPR3D_materials_blend (tools/cs2map.py): Source 2's masked second layer
+            // HYPRWALK_materials_blend (tools/cs2map.py): Source 2's masked second layer
             void layer(const cgltf_material& cm, SMapMaterial& m) {
-                const auto j = extension(cm, "HYPR3D_materials_blend");
+                const auto j = extension(cm, "HYPRWALK_materials_blend");
                 if (!j)
                     return;
                 m.layerTex = textureRef(j->get("texture"), true);
@@ -322,9 +328,9 @@ namespace h3d::gltf {
                 }
             }
 
-            // HYPR3D_materials_source2 (tools/cs2map.py): Source 2 shader features glTF lacks ("scroll": uv per second)
+            // HYPRWALK_materials_source2 (tools/cs2map.py): Source 2 shader features glTF lacks ("scroll": uv per second)
             void source2(const cgltf_material& cm, SMapMaterial& m) {
-                const auto j = extension(cm, "HYPR3D_materials_source2");
+                const auto j = extension(cm, "HYPRWALK_materials_source2");
                 if (!j)
                     return;
                 if (const SJson* v = j->get("normalYDown"); v && v->type == SJson::BOOL)
@@ -417,7 +423,7 @@ namespace h3d::gltf {
                 return SO_KEEP;
             }
 
-            // unity2hypr3d's material extras: what Unity's toon shaders do that glTF has no place for
+            // unity2hyprwalk's material extras: what Unity's toon shaders do that glTF has no place for
             void toon(const SJson* t, SMapMaterial& m) {
                 auto& tn = m.toon;
                 tn.on    = true;
@@ -442,14 +448,17 @@ namespace h3d::gltf {
                 tn.matcapLit  = std::clamp(fileFloat(mc->number("lit", 1), 1), 0.f, 1.f);
             }
 
-            void hypr3d(const cgltf_material& cm, SMapMaterial& m) {
+            void hyprwalk(const cgltf_material& cm, SMapMaterial& m) {
                 if (!cm.extras.data)
                     return;
-                const auto j = SJson::parse(cm.extras.data);
+                auto j = SJson::parse(cm.extras.data);
                 if (!j || j->type != SJson::OBJECT)
                     return;
-                m.queue = fileInt(j->number("hypr3d_queue", -1), -1);
-                if (const SJson* s = j->get("hypr3d_stencil"); s && s->type == SJson::OBJECT) {
+                for (auto& [k, v] : j->members) // converted before the rename
+                    if (k.starts_with("hypr3d_"))
+                        k.replace(0, 7, "hyprwalk_");
+                m.queue = fileInt(j->number("hyprwalk_queue", -1), -1);
+                if (const SJson* s = j->get("hyprwalk_stencil"); s && s->type == SJson::OBJECT) {
                     auto& st = m.stencil;
                     st.on    = true;
                     st.ref   = (uint8_t)fileInt(s->number("ref", 0), 0, 0, 255);
@@ -464,7 +473,7 @@ namespace h3d::gltf {
                         st.again     = std::clamp((float)a->number("alpha", 1), 0.f, 1.f);
                     }
                 }
-                if (const SJson* o = j->get("hypr3d_outline"); o && o->type == SJson::OBJECT) {
+                if (const SJson* o = j->get("hyprwalk_outline"); o && o->type == SJson::OBJECT) {
                     auto& ol = m.outline;
                     ol.width = std::max(0.f, (float)o->number("width", 0));
                     if (const SJson* sp = o->get("space"); sp && sp->type == SJson::STRING)
@@ -501,7 +510,7 @@ namespace h3d::gltf {
                         }
                     }
                 }
-                if (const SJson* b = j->get("hypr3d_back"); b && b->type == SJson::OBJECT) {
+                if (const SJson* b = j->get("hyprwalk_back"); b && b->type == SJson::OBJECT) {
                     b->numbers("color", m.backColor, 4);
                     m.back = 1;
                     if (const SJson* t = b->get("texture"); t && t->type == SJson::OBJECT) {
@@ -519,11 +528,11 @@ namespace h3d::gltf {
                         }
                     }
                 }
-                if (const SJson* t = j->get("hypr3d_toon"); t && t->type == SJson::OBJECT)
+                if (const SJson* t = j->get("hyprwalk_toon"); t && t->type == SJson::OBJECT)
                     toon(t, m);
-                if (const SJson* t = j->get("hypr3d_matcap"); t && t->type == SJson::OBJECT)
+                if (const SJson* t = j->get("hyprwalk_matcap"); t && t->type == SJson::OBJECT)
                     matcap(t, m);
-                if (const SJson* l = j->get("hypr3d_light"); l && l->type == SJson::OBJECT) {
+                if (const SJson* l = j->get("hyprwalk_light"); l && l->type == SJson::OBJECT) {
                     m.lightClamp[0] = std::clamp((float)l->number("min", 0), 0.f, 1.f);
                     m.lightClamp[1] = std::clamp((float)l->number("max", 1), 0.001f, 1.f);
                     m.lightClamp[2] = std::clamp((float)l->number("chroma", 1), 0.f, 1.f);
@@ -707,7 +716,7 @@ namespace h3d::gltf {
                     layer(cm, m);
                     source2(cm, m);
                     mtoon(cm, m);
-                    hypr3d(cm, m);
+                    hyprwalk(cm, m);
                 }
                 vrm0();
             }
@@ -1023,7 +1032,7 @@ namespace h3d::gltf {
         if (bad > 5)
             log.push_back(std::format("... and {} more textures that didn't load", bad - 5));
     }
-    // ------------------------------------------------------------ HYPR3D_lighting
+    // ------------------------------------------------------------ HYPRWALK_lighting
 
     namespace {
         // RGB9E5: three 9 bit mantissas sharing a 5 bit exponent (EXT_texture_shared_exponent)
@@ -1108,7 +1117,7 @@ namespace h3d::gltf {
         std::optional<SJson> j;
         for (size_t i = 0; i < data->data_extensions_count; ++i) {
             const auto& e = data->data_extensions[i];
-            if (e.name && e.data && std::strcmp(e.name, "HYPR3D_lighting") == 0)
+            if (e.name && e.data && extensionIs(e.name, "HYPRWALK_lighting"))
                 j = SJson::parse(e.data);
         }
         if (!j || j->type != SJson::OBJECT)

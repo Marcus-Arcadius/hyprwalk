@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# regress.sh: convert the test avatars with the working copy's tools/unity2hypr3d.py and another version (HEAD's by
+# regress.sh: convert the test avatars with the working copy's tools/unity2hyprwalk.py and another version (HEAD's by
 # default), and compare check.py's report, the settings (less the date) and the GLB bytes.
 #
 #   tools/test/regress.sh [--base REV|FILE] [--robot PATH] [--items DIR] [--proj DIR] [--booth DIR]
@@ -7,8 +7,8 @@
 #
 #   --base REV|FILE  the converter to compare against: a git revision (default HEAD) or a file
 #   --robot PATH     also the VRChat SDK's Samples/Dynamics/Robot Avatar/"Avatar Dynamics Robot Avatar PC.unity" (or
-#                    HYPR3D_ROBOT), from com.vrchat.avatars-*.zip at https://github.com/vrchat/packages/releases
-#   --items DIR      also free Booth items downloaded into DIR (or HYPR3D_ITEMS): 止丸式初音ミクNT
+#                    HYPRWALK_ROBOT), from com.vrchat.avatars-*.zip at https://github.com/vrchat/packages/releases
+#   --items DIR      also free Booth items downloaded into DIR (or HYPRWALK_ITEMS): 止丸式初音ミクNT
 #                    (booth.pm/items/3226395) alone and with VRSuya's dances (Doodle Dance: booth.pm/items/6249275,
 #                    Loli Kami Requiem: booth.pm/items/5157852, ...) and pHMToothlessDance.zip's clips; a missing one
 #                    leaves out its cases
@@ -26,7 +26,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 SYN="$REPO/tools/test/synth"
 BLENDER=(blender -b --factory-startup --python-exit-code 1)
-BASE=HEAD ROBOT="${HYPR3D_ROBOT:-}" ITEMS="${HYPR3D_ITEMS:-}" PROJ="" BOOTH="" OUT="" KEEP=0 SHOTS=0 ONLY=()
+BASE=HEAD ROBOT="${HYPRWALK_ROBOT:-}" ITEMS="${HYPRWALK_ITEMS:-}" PROJ="" BOOTH="" OUT="" KEEP=0 SHOTS=0 ONLY=()
 while (($#)); do
     case "$1" in
         --base) BASE="$2"; shift 2 ;;
@@ -45,18 +45,18 @@ done
 die() { echo "regress.sh: $*" >&2; exit 1; }
 
 if [[ -n "$OUT" ]]; then mkdir -p "$OUT" && W="$(cd "$OUT" && pwd)" || die "can't make $OUT"
-else W="$(mktemp -d "${TMPDIR:-/tmp}/hypr3d-regress.XXXXXX")"; fi
+else W="$(mktemp -d "${TMPDIR:-/tmp}/hyprwalk-regress.XXXXXX")"; fi
 mkdir -p "$W/base" "$W/new"
 
 # the two converters
 if [[ -f "$BASE" ]]; then
-    cp "$BASE" "$W/base/unity2hypr3d.py"
+    cp "$BASE" "$W/base/unity2hyprwalk.py"
 else
-    git -C "$REPO" show "$BASE:tools/unity2hypr3d.py" > "$W/base/unity2hypr3d.py" 2> "$W/base/git.log" ||
-        die "no tools/unity2hypr3d.py at $BASE: $(cat "$W/base/git.log")"
+    git -C "$REPO" show "$BASE:tools/unity2hyprwalk.py" > "$W/base/unity2hyprwalk.py" 2> "$W/base/git.log" ||
+        die "no tools/unity2hyprwalk.py at $BASE: $(cat "$W/base/git.log")"
 fi
-cp "$REPO/tools/unity2hypr3d.py" "$W/new/unity2hypr3d.py"
-if cmp -s "$W/base/unity2hypr3d.py" "$W/new/unity2hypr3d.py"; then
+cp "$REPO/tools/unity2hyprwalk.py" "$W/new/unity2hyprwalk.py"
+if cmp -s "$W/base/unity2hyprwalk.py" "$W/new/unity2hyprwalk.py"; then
     echo "note: the converter is the same as $BASE's"
 fi
 
@@ -151,7 +151,7 @@ for c in "${CASES[@]}"; do
         throttle
         (
             cd "$W/$side" &&
-                python3 "$W/$side/unity2hypr3d.py" "${f[@]:2}" -o "$W/$side/${f[0]}.glb" > "$W/$side/${f[0]}.log" 2>&1
+                python3 "$W/$side/unity2hyprwalk.py" "${f[@]:2}" -o "$W/$side/${f[0]}.glb" > "$W/$side/${f[0]}.log" 2>&1
             echo $? > "$W/$side/${f[0]}.status"
         ) &
     done
@@ -196,7 +196,7 @@ for n in "${NAMES[@]}"; do
     fi
     what=()
     diff -q "$W/base/$n.check.txt" "$W/new/$n.check.txt" > /dev/null || what+=("check.py report")
-    python3 - "$W/base/$n.hypr3d.json" "$W/new/$n.hypr3d.json" << 'PY' || what+=("settings")
+    python3 - "$W/base/$n.hyprwalk.json" "$W/new/$n.hyprwalk.json" << 'PY' || what+=("settings")
 import json, sys
 a, b = (json.load(open(f)) for f in sys.argv[1:3])
 for d in (a, b):
@@ -219,7 +219,7 @@ PY
     [[ "$kind" == strict ]] && BAD=1
     printf '%-14s %-6s DIFFERS: %s\n' "$n" "$kind" "$(IFS=,; echo "${what[*]}" | sed 's/,/, /g')"
     diff "$W/base/$n.check.txt" "$W/new/$n.check.txt" | head -n 12 | sed 's/^/    /'
-    python3 - "$W/base/$n.hypr3d.json" "$W/new/$n.hypr3d.json" << 'PY'
+    python3 - "$W/base/$n.hyprwalk.json" "$W/new/$n.hyprwalk.json" << 'PY'
 import json, sys
 a, b = (json.load(open(f)) for f in sys.argv[1:3])
 for d in (a, b):

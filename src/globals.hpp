@@ -10,7 +10,7 @@
 
 inline HANDLE PHANDLE = nullptr;
 
-namespace h3d {
+namespace hyprwalk {
     void        log(const std::string& s);
     void        notify(const std::string& s, bool error = false);
     std::string logLines(size_t n); // the last n lines logged (and notified), oldest first

@@ -21,7 +21,7 @@ spk = collections.OrderedDict()
 for m in M:
     spk.setdefault(m['speaker_slug'], m)
 w('# Japanese vowel recordings: sources and licences\n')
-w(f'{len(M)} recordings of the five Japanese vowels by {len(spk)} speakers, gathered on 2026-09-25/26 for testing the hypr3d lip sync. '
+w(f'{len(M)} recordings of the five Japanese vowels by {len(spk)} speakers, gathered on 2026-09-25/26 for testing the hyprwalk lip sync. '
   'Every file came from Wikimedia Commons (Lingua Libre or individual contributors) or from the Tofugu/WaniKani pronunciation repository on GitHub, '
   'and every one is public domain, CC0, CC BY or CC BY-SA. The licence of each was read from the Commons API (extmetadata) or from the repository\'s LICENSE file, '
   'and each download was checked against the SHA-1 that Commons or GitHub gives for it.\n')
@@ -68,7 +68,7 @@ for m in M:
 w('\n## How the files were made\n')
 w('- `raw/`: the originals as downloaded (Ogg Vorbis from Commons and GitHub, 16-bit PCM WAV from Lingua Libre). `raw/unused/` holds originals that were looked at and left out (below).')
 w('- `wav/`: each original converted with ffmpeg to mono (channels averaged), 16-bit PCM, 48000 Hz, nothing else changed (level, silence and all). '
-  'The hypr3d harness (`--audio`) reads 16/24/32-bit PCM or 32-bit float WAV at any rate and mixes channels; the lip sync decimates to about 12 kHz.')
+  'The hyprwalk harness (`--audio`) reads 16/24/32-bit PCM or 32-bit float WAV at any rate and mixes channels; the lip sync decimates to about 12 kHz.')
 w('- `in/`: the vowel only, looped to at least 5 s. The vowel was found from the frame level (25 ms frames, 5 ms hop), periodicity and the share of energy below 1 kHz: '
   'for isolated recordings every voiced stretch within 25 dB of the loudest frame (Hakatanoshio117117 reads each kana three times, so those loops join three takes), '
   'trimmed by 10 ms at both ends; for words the chosen vowel nuclei (split at level dips of 8 dB or more, each spanning the frames within 12 dB of its peak), '

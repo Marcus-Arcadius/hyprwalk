@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # polite downloader: dl.sh LISTFILE OUTDIR ; saves with the decoded original file name; honours 429 Retry-After
-UA='hypr3d-lipsync-vowel-survey/0.1 (one-off research script for a lip sync test set) curl'
+UA='hyprwalk-lipsync-vowel-survey/0.1 (one-off research script for a lip sync test set) curl'
 out=$2; mkdir -p "$out"
 while read -r url; do
   [ -z "$url" ] && continue

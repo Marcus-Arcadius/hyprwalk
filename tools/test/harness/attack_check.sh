@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# attack_check.sh: the avatar's attacks (left click on nothing, hyprctl hypr3d avatar attack; the harness's --attack)
+# attack_check.sh: the avatar's attacks (left click on nothing, hyprctl hyprwalk avatar attack; the harness's --attack)
 # with the built-in hook clips (assets/attack.vrma, attack-first-person.vrma; see tools/blender/README.md), from the
 # harness's status lines and two frames from behind.
 #
@@ -260,7 +260,7 @@ check('an emote stops', len(e) == 2 and 'emote' in e[0] and 'emote' not in e[1],
 t = '\n'.join(lines('thing'))
 check('not a humanoid: nothing to swing (the harness\'s, hyprctl\'s an error)', 'attack next: none' in t and t.count('no arms to swing') == 2, re.findall(r'attack.*', t))
 g = '\n'.join(lines('args'))
-check('hyprctl hypr3d avatar attack: left or right, else an error saying so', 'error: avatar attack [left|right]' in g and '"last": "left"' in g, re.findall(r'ctl avatar attack.*', g))
+check('hyprctl hyprwalk avatar attack: left or right, else an error saying so', 'error: avatar attack [left|right]' in g and '"last": "left"' in g, re.findall(r'ctl avatar attack.*', g))
 print(f'{fails} failed' if fails else 'all passed')
 sys.exit(1 if fails else 0)
 EOF

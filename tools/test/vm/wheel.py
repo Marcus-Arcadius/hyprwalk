@@ -23,7 +23,7 @@ def main(steps):
         fcntl.ioctl(fd, UI_SET_KEYBIT, key)
     for rel in (REL_X, REL_Y, REL_WHEEL, REL_WHEEL_HI_RES, REL_HWHEEL, REL_HWHEEL_HI_RES):
         fcntl.ioctl(fd, UI_SET_RELBIT, rel)
-    fcntl.ioctl(fd, UI_DEV_SETUP, struct.pack('HHHH80sI', BUS_USB, 0x1d6b, 0x0104, 1, b'hypr3d test wheel', 0))
+    fcntl.ioctl(fd, UI_DEV_SETUP, struct.pack('HHHH80sI', BUS_USB, 0x1d6b, 0x0104, 1, b'hyprwalk test wheel', 0))
     fcntl.ioctl(fd, UI_DEV_CREATE)
 
     def emit(kind, code, value):
