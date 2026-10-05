@@ -1,4 +1,4 @@
-# hypr3d
+# hyprwalk
 
 A [Hyprland](https://hyprland.org) plugin that turns your desktop into a place you walk around in. In 3D mode your
 windows hang on a wall in a small courtyard (or in any glTF map, CS2 maps included). You walk up to them in first
