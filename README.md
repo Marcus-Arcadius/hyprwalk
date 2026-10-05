@@ -60,8 +60,8 @@ cd hyprwalk
 ./build.sh
 ```
 
-This makes `hyprwalk.so`. The repository is private, so git needs your GitHub login (e.g. `gh auth setup-git`). On
-NixOS with Hyprland not running, name its binary: `HYPR_BIN=/nix/store/…/bin/Hyprland ./build.sh`.
+This makes `hyprwalk.so`. On NixOS with Hyprland not running, name its binary:
+`HYPR_BIN=/nix/store/…/bin/Hyprland ./build.sh`.
 
 After updating Hyprland, log out and back in, then run `./build.sh` again.
 

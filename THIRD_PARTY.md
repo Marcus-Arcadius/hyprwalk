@@ -128,7 +128,8 @@ consonants by where a fricative's noise lies (band energies) and a murmur's loud
 vowels' formant values are between the usual measurements of Japanese vowels and Tokyo speakers' means in Yazawa and
 Kondo (2019), from Kakeru Yazawa's "Japanese Vowel Length Acoustic Data" (Zenodo record 15227304, CC BY 4.0,
 https://creativecommons.org/licenses/by/4.0/): the geometric means of its 8 men's and 8 women's F1 and F2, computed
-from it and adjusted; none of the data is in this repo. It borrows nothing from uLipSync
+from it and adjusted. The plugin contains none of the data itself; a copy is in `extras/speech/ref/`
+(`JPLongShortVowels.csv`, credited in `extras/speech/LICENSES.md`). It borrows nothing from uLipSync
 (https://github.com/hecomi/uLipSync, MIT), which matches MFCCs against recorded voice profiles instead.
 
 ## The VM test (tools/test/vm)
