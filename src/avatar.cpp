@@ -2769,7 +2769,7 @@ namespace hyprwalk {
                 return false;
             }
 
-            // AVATAR.hyprwalk.json beside the model (see the README), or AVATAR.hypr3d.json from before the rename
+            // AVATAR.hyprwalk.json beside the model (see docs/avatars-and-maps.md), or AVATAR.hypr3d.json from before the rename
             void readSettings(const std::filesystem::path& file) {
                 std::error_code ec;
                 for (const char* ext : {".hyprwalk.json", ".hypr3d.json"})
@@ -2818,7 +2818,7 @@ namespace hyprwalk {
             std::vector<int> mine;
             std::set<int>    ownBlink;
 
-            // settings "expressions" (README); existing ones keep what isn't given
+            // settings "expressions" (docs/avatars-and-maps.md); existing ones keep what isn't given
             void settingsExpressions() {
                 const auto* list = jarr(settings.get("expressions"));
                 if (!list)
@@ -2901,7 +2901,7 @@ namespace hyprwalk {
                 }
             }
 
-            // settings "hidden", "fixed", "toggles", "sliders" (README)
+            // settings "hidden", "fixed", "toggles", "sliders" (docs/avatars-and-maps.md)
             void outfit() {
                 std::vector<int> hidden;
                 partsOf(settings.get("hidden"), hidden);
@@ -3120,7 +3120,7 @@ namespace hyprwalk {
                     g[GESTURE_GUN]       = wink >= 0 ? wink : P[EX_HAPPY];
                     g[GESTURE_THUMBS_UP] = P[EX_HAPPY];
                 }
-                // or settings "gestures" (README)
+                // or settings "gestures" (docs/avatars-and-maps.md)
                 if (const SJson* gs = settings.get("gestures"); gs && gs->type == SJson::J_OBJ)
                     if (const SJson* combos = gs->get("combos"); combos && combos->type == SJson::J_OBJ)
                         for (const auto& [pair, face] : combos->obj) {
@@ -3476,7 +3476,7 @@ namespace hyprwalk {
                 return out;
             }
 
-            // settings "colliders" and "springs" (README); springs naming none use the file's, else the body's
+            // settings "colliders" and "springs" (docs/avatars-and-maps.md); springs naming none use the file's, else the body's
             void settingsSprings(const std::vector<SJson>& list) {
                 std::map<std::string, std::vector<int>> named;
                 std::vector<int>                        all;
